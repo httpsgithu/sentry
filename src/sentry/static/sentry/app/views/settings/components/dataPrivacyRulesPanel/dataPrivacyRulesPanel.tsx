@@ -128,7 +128,7 @@ class DataPrivacyRulesPanel extends React.Component<Props, State> {
           id: prevState.rules.length + 1,
           type: RULE_TYPE.CREDITCARD,
           method: METHOD_TYPE.MASK,
-          from: DEFAULT_RULE_FROM_VALUE,
+          from: '',
         },
       ],
     }));
