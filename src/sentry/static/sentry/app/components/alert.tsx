@@ -4,7 +4,6 @@ import React from 'react';
 import classNames from 'classnames';
 import color from 'color';
 import styled from '@emotion/styled';
-import omit from 'lodash/omit';
 
 import InlineSvg from 'app/components/inlineSvg';
 import TextBlock from 'app/views/settings/components/text/textBlock';
@@ -94,11 +93,17 @@ const StyledTextBlock = styled(TextBlock)`
 `;
 
 const Alert = styled(
-  ({type, icon, iconSize, children, className, ...props}: AlertProps) => (
-    <div
-      className={classNames(type ? `ref-${type}` : '', className)}
-      {...omit(props, ['system', 'thinner'])}
-    >
+  ({
+    type,
+    icon,
+    iconSize,
+    children,
+    system,
+    className,
+    thinner,
+    ...props
+  }: AlertProps) => (
+    <div className={classNames(type ? `ref-${type}` : '', className)} {...props}>
       {icon && <StyledInlineSvg src={icon} size={iconSize!} />}
       <StyledTextBlock>{children}</StyledTextBlock>
     </div>
