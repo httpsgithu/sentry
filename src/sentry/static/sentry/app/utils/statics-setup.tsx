@@ -2,7 +2,7 @@
 
 // This (global) errors for some reason :|
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-declare var  __webpack_public_path__:string; 
+let var __webpack_public_path__: string;
 
 /**
  * Set the webpack public path at runtime. The __sentryGlobalStaticPrefix will
