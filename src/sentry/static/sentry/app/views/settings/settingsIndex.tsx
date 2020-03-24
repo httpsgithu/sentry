@@ -3,7 +3,6 @@ import PropTypes from 'prop-types';
 import React from 'react';
 import styled from '@emotion/styled';
 import {css} from '@emotion/core';
-import omit from 'lodash/omit';
 
 import {t} from 'app/locale';
 import OrganizationAvatar from 'app/components/avatar/organizationAvatar';
@@ -325,8 +324,11 @@ const HomeLinkIcon = styled(HomeLink)`
 `;
 
 const ExternalHomeLink = styled(
-  (props: CenterableProps & React.ComponentPropsWithoutRef<typeof ExternalLink>) => (
-    <ExternalLink {...omit(props, 'isCentered')} />
+  ({
+    isCentered,
+    ...props
+  }: CenterableProps & React.ComponentProps<typeof ExternalLink>) => (
+    <ExternalLink {...props} />
   )
 )<CenterableProps>`
   color: ${p => p.theme.purple};
@@ -338,20 +340,23 @@ const ExternalHomeLink = styled(
   ${p => p.isCentered && flexCenter};
 `;
 
-type SupportLinkProps<T extends boolean> = {
-  isOnPremise: T;
+type SupportLinkProps = {
+  isOnPremise: boolean;
   href: string;
   to: string;
   isCentered?: boolean;
-} & React.ComponentProps<T extends true ? typeof ExternalLink : typeof HomeLink>;
+} & (
+  | ({isOnPremise: true} & React.ComponentProps<typeof ExternalLink>)
+  | ({isOnPremise: false} & React.ComponentProps<typeof HomeLink>)
+);
 
-const SupportLinkComponent = <T extends boolean>({
+const SupportLinkComponent = ({
   isCentered,
   isOnPremise,
   href,
   to,
   ...props
-}: SupportLinkProps<T>) => {
+}: SupportLinkProps) => {
   if (isOnPremise) {
     return <ExternalHomeLink isCentered={isCentered} href={href} {...props} />;
   }

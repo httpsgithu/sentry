@@ -1,7 +1,6 @@
 import React from 'react';
 import {Location} from 'history';
 import styled from '@emotion/styled';
-import omit from 'lodash/omit';
 
 import Button from 'app/components/button';
 import Hovercard from 'app/components/hovercard';
@@ -58,7 +57,7 @@ class OnboardingHovercard extends React.Component<Props, State> {
   };
 
   render() {
-    const {children, ...props} = this.props;
+    const {children, organization, location, ...props} = this.props;
 
     if (!this.shouldShowHovercard) {
       return children;
@@ -82,12 +81,7 @@ class OnboardingHovercard extends React.Component<Props, State> {
     );
 
     return (
-      <Hovercard
-        show
-        position="left"
-        body={hovercardBody}
-        {...omit(props, ['organization', 'location'])}
-      >
+      <Hovercard show position="left" body={hovercardBody} {...props}>
         {children}
       </Hovercard>
     );
