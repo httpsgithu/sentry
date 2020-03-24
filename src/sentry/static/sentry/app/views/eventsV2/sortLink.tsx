@@ -59,12 +59,12 @@ class SortLink extends React.Component<Props> {
   }
 }
 
-type LinkProps = React.ComponentProps<typeof Link>;
+type LinkProps = React.ComponentPropsWithoutRef<typeof Link>;
 type StyledLinkProps = LinkProps & {align: Alignments};
 
 const StyledLink = styled((props: StyledLinkProps) => {
-  const {ref, ...forwardProps} = omit(props, ['align']);
-  return <Link ref={ref as any} {...forwardProps} />;
+  const forwardProps = omit(props, ['align']);
+  return <Link {...forwardProps} />;
 })`
   display: block;
   width: 100%;

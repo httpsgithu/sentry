@@ -10,6 +10,8 @@ import space from 'app/styles/space';
 type Size = 'small' | 'normal';
 type Priority = 'info' | 'warning' | 'success' | 'error' | 'muted';
 
+type LinkProps = React.ComponentPropsWithoutRef<typeof Link>;
+
 type OtherProps = {
   icon?: string;
   onClick?: (e: React.MouseEvent) => void;
@@ -23,11 +25,11 @@ type DefaultProps = {
   href?: string;
 };
 
-type Props = OtherProps & DefaultProps & Partial<Pick<Link['props'], 'to'>>;
+type Props = OtherProps & DefaultProps & Partial<Pick<LinkProps, 'to'>>;
 
 type StyledLinkProps = DefaultProps &
-  Partial<Pick<Link['props'], 'to'>> &
-  Omit<Link['props'], 'to' | 'size'>;
+  Partial<Pick<LinkProps, 'to'>> &
+  Omit<LinkProps, 'to' | 'size'>;
 
 class AlertLink extends React.Component<Props> {
   static defaultProps: DefaultProps = {
@@ -69,20 +71,13 @@ class AlertLink extends React.Component<Props> {
 
 export default AlertLink;
 
-const StyledLink = styled(({openInNewTab, to, href, ref, ...props}: StyledLinkProps) => {
+const StyledLink = styled(({openInNewTab, to, href, ...props}: StyledLinkProps) => {
   const linkProps = omit(props, ['withoutMarginBottom', 'priority', 'size']);
   if (href) {
-    return (
-      <ExternalLink
-        {...linkProps}
-        href={href}
-        ref={ref as React.RefObject<HTMLAnchorElement>}
-        openInNewTab={openInNewTab}
-      />
-    );
+    return <ExternalLink {...linkProps} href={href} openInNewTab={openInNewTab} />;
   }
 
-  return <Link {...linkProps} ref={ref as any} to={to || '#'} />;
+  return <Link {...linkProps} to={to || '#'} />;
 })`
   display: flex;
   align-items: center;

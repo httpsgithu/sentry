@@ -325,7 +325,7 @@ const HomeLinkIcon = styled(HomeLink)`
 `;
 
 const ExternalHomeLink = styled(
-  (props: CenterableProps & React.ComponentProps<typeof ExternalLink>) => (
+  (props: CenterableProps & React.ComponentPropsWithoutRef<typeof ExternalLink>) => (
     <ExternalLink {...omit(props, 'isCentered')} />
   )
 )<CenterableProps>`
@@ -350,13 +350,10 @@ const SupportLinkComponent = <T extends boolean>({
   isOnPremise,
   href,
   to,
-  ref,
   ...props
 }: SupportLinkProps<T>) => {
   if (isOnPremise) {
-    return (
-      <ExternalHomeLink isCentered={isCentered} href={href} ref={ref as any} {...props} />
-    );
+    return <ExternalHomeLink isCentered={isCentered} href={href} {...props} />;
   }
   return <HomeLink to={to} {...props} />;
 };
