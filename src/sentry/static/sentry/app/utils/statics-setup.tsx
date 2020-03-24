@@ -1,7 +1,7 @@
 /* eslint no-native-reassign:0 */
 
 // eslint-disable-next-line no-var
-declare var  __webpack_public_path__:string; 
+declare var __webpack_public_path__: string;
 
 /**
  * Set the webpack public path at runtime. The __sentryGlobalStaticPrefix will
