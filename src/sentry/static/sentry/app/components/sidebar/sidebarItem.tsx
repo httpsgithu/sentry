@@ -8,7 +8,6 @@ import HookOrDefault from 'app/components/hookOrDefault';
 import Tooltip from 'app/components/tooltip';
 import {t} from 'app/locale';
 import space from 'app/styles/space';
-import Link from 'app/components/links/link';
 import TextOverflow from 'app/components/textOverflow';
 import {Theme} from 'app/utils/theme';
 
@@ -97,7 +96,7 @@ const SidebarItem = ({
       <StyledSidebarItem
         data-test-id={props['data-test-id']}
         active={isActive ? 'true' : undefined}
-        to={(to ? to : href) || '#'}
+        href={to ? to : href}
         className={className}
         onClick={(event: React.MouseEvent<HTMLAnchorElement>) => {
           typeof onClick === 'function' && onClick(id, event);
@@ -147,7 +146,7 @@ const getActiveStyle = ({active, theme}: {active?: string; theme?: Theme}) => {
   `;
 };
 
-const StyledSidebarItem = styled(Link)`
+const StyledSidebarItem = styled('a')`
   display: flex;
   color: inherit;
   position: relative;
