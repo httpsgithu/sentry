@@ -12,11 +12,13 @@ const ExternalLink = React.forwardRef<HTMLAnchorElement, Props>(function Externa
   {openInNewTab = true, ...props},
   ref
 ) {
+  const anchorProps = openInNewTab ? {target: '_blank', rel: 'noreferrer noopener'} : {};
   return (
     <a
       ref={ref}
       target={openInNewTab ? '_blank' : '_self'}
       rel="noreferrer noopener"
+      {...anchorProps}
       {...props}
     />
   );

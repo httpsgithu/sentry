@@ -13,6 +13,7 @@ type MenuItemProps = {
   eventKey?: any;
   isActive?: boolean;
   noAnchor?: boolean;
+  href?: string;
   className?: string;
   onClick?: (evt: React.MouseEvent) => void;
 } & Partial<Pick<Link['props'], 'to'>>;
@@ -28,6 +29,11 @@ class MenuItem extends React.Component<Props> {
     eventKey: PropTypes.any,
     isActive: PropTypes.bool,
     noAnchor: PropTypes.bool,
+    // basic link
+    href: PropTypes.string,
+    // router link
+    to: PropTypes.string,
+    query: PropTypes.object,
     className: PropTypes.string,
     onClick: PropTypes.func,
   };
@@ -50,6 +56,18 @@ class MenuItem extends React.Component<Props> {
         >
           {this.props.children}
         </Link>
+      );
+    }
+    if (this.props.href) {
+      return (
+        <a
+          title={this.props.title}
+          onClick={this.handleClick}
+          href={this.props.href}
+          tabIndex={-1}
+        >
+          {this.props.children}
+        </a>
       );
     }
 
