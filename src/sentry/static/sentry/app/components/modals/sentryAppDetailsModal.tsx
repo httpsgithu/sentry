@@ -1,3 +1,4 @@
+import {Box, Flex} from 'reflexbox';
 import React from 'react';
 import styled from '@emotion/styled';
 
@@ -157,15 +158,19 @@ export default class SentryAppDetailsModal extends AsyncComponent<Props, State> 
 
     return (
       <React.Fragment>
-        <DetailsWrapper>
+        <Flex alignItems="center" mb={2}>
           <PluginIcon pluginId={sentryApp.slug} size={50} />
-          <DetailsInner>
+
+          <Flex
+            pl={1}
+            alignItems="flex-start"
+            flexDirection="column"
+            justifyContent="center"
+          >
             <Name>{sentryApp.name}</Name>
-            <FeaturesLength>
-              {features.length && this.featureTags(features)}
-            </FeaturesLength>
-          </DetailsInner>
-        </DetailsWrapper>
+            <Flex>{features.length && this.featureTags(features)}</Flex>
+          </Flex>
+        </Flex>
 
         <Description dangerouslySetInnerHTML={{__html: marked(overview)}} />
         <FeatureList {...featureProps} provider={{...sentryApp, key: sentryApp.slug}} />
@@ -208,22 +213,7 @@ export default class SentryAppDetailsModal extends AsyncComponent<Props, State> 
   }
 }
 
-const DetailsWrapper = styled('div')`
-  display: flex;
-  margin-bottom: 2px;
-  align-items: center;
-`;
-
-const DetailsInner = styled('div')`
-  display: flex;
-  padding-left: 1px;
-  align-items: flex-start;
-  flex-direction: column;
-  justify-content: center;
-`;
-
-const Name = styled('div')`
-  display: flex;
+const Name = styled(Box)`
   font-weight: bold;
   font-size: 1.4em;
   margin-bottom: ${space(1)};
@@ -239,34 +229,18 @@ const Description = styled('div')`
   }
 `;
 
-const Author = styled('div')`
-  display: flex;
+const Author = styled(Box)`
   color: ${p => p.theme.gray2};
 `;
 
-const FeaturesLength = styled('div')`
-  display: flex;
-`;
-
 const DisabledNotice = styled(({reason, ...p}: {reason: React.ReactNode}) => (
-  <DisabledNoticeWrapper {...p}>
+  <Flex alignItems="center" flex={1} {...p}>
     <InlineSvg src="icon-circle-exclamation" size="1.5em" />
-    <Reason>{reason}</Reason>
-  </DisabledNoticeWrapper>
+    <Box ml={1}>{reason}</Box>
+  </Flex>
 ))`
   color: ${p => p.theme.red};
   font-size: 0.9em;
-`;
-
-const DisabledNoticeWrapper = styled('div')`
-  display: flex;
-  align-items: center;
-  flex: 1;
-`;
-
-const Reason = styled('div')`
-  display: flex;
-  margin-left: 1px;
 `;
 
 const StyledTag = styled(Tag)`

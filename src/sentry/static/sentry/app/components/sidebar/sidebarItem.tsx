@@ -10,6 +10,7 @@ import {t} from 'app/locale';
 import space from 'app/styles/space';
 import TextOverflow from 'app/components/textOverflow';
 import {Theme} from 'app/utils/theme';
+import Link from 'app/components/links/link';
 
 import {SidebarOrientation} from './types';
 
@@ -96,7 +97,7 @@ const SidebarItem = ({
       <StyledSidebarItem
         data-test-id={props['data-test-id']}
         active={isActive ? 'true' : undefined}
-        href={to ? to : href}
+        to={(to ? to : href) || location.pathname}
         className={className}
         onClick={(event: React.MouseEvent<HTMLAnchorElement>) => {
           typeof onClick === 'function' && onClick(id, event);
@@ -146,7 +147,7 @@ const getActiveStyle = ({active, theme}: {active?: string; theme?: Theme}) => {
   `;
 };
 
-const StyledSidebarItem = styled('a')`
+const StyledSidebarItem = styled(Link)`
   display: flex;
   color: inherit;
   position: relative;
