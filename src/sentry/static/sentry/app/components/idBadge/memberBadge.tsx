@@ -63,7 +63,7 @@ const MemberBadge = ({
         <StyledName
           useLink={useLink && !!orgId}
           hideEmail={hideEmail}
-          to={(member && orgId && `/settings/${orgId}/members/${member.id}/`) || '#'}
+          to={(member && orgId && `/settings/${orgId}/members/${member.id}/`) || ''}
         >
           {title}
         </StyledName>

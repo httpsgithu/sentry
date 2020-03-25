@@ -84,7 +84,7 @@ const StyledLink = styled(({openInNewTab, to, href, ...props}: StyledLinkProps) 
     return <ExternalLink {...linkProps} href={href} openInNewTab={openInNewTab} />;
   }
 
-  return <Link {...linkProps} to={to || '#'} />;
+  return <Link {...linkProps} to={to || ''} />;
 })`
   display: flex;
   background-color: ${p => p.theme.alert[p.priority].backgroundLight};

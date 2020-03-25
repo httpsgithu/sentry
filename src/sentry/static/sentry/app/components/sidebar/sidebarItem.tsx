@@ -97,7 +97,7 @@ const SidebarItem = ({
       <StyledSidebarItem
         data-test-id={props['data-test-id']}
         active={isActive ? 'true' : undefined}
-        to={(to ? to : href) || location.pathname}
+        to={(to ? to : href) || ''}
         className={className}
         onClick={(event: React.MouseEvent<HTMLAnchorElement>) => {
           typeof onClick === 'function' && onClick(id, event);

@@ -47,7 +47,7 @@ class Link extends React.Component<Props> {
       return <Anchor href={to} ref={ref} {...props} />;
     }
 
-    return <Anchor href="#" ref={ref} {...props} disabled />;
+    return <Anchor href="" ref={ref} {...props} disabled />;
   }
 }
 
