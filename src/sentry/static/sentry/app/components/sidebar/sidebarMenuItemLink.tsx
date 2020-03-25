@@ -22,6 +22,10 @@ type Props = {
    * Inline styles
    */
   style?: React.CSSProperties;
+  /**
+   * specifies whether to open the linked document in a new tab
+   */
+  openInNewTab?: boolean;
 };
 
 const SidebarMenuItemLink = ({to, href, ...props}: Props) => {
