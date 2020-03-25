@@ -5,6 +5,7 @@ import omit from 'lodash/omit';
 import Link from 'app/components/links/link';
 import ExternalLink from 'app/components/links/externalLink';
 import InlineSvg from 'app/components/inlineSvg';
+import {IconChevron} from 'app/icons';
 import space from 'app/styles/space';
 
 type Size = 'small' | 'normal';
@@ -13,7 +14,7 @@ type Priority = 'info' | 'warning' | 'success' | 'error' | 'muted';
 type LinkProps = React.ComponentPropsWithoutRef<typeof Link>;
 
 type OtherProps = {
-  icon?: string;
+  icon?: string | React.ReactNode;
   onClick?: (e: React.MouseEvent) => void;
 };
 
@@ -61,9 +62,15 @@ class AlertLink extends React.Component<Props> {
         withoutMarginBottom={withoutMarginBottom}
         openInNewTab={openInNewTab}
       >
-        {icon && <StyledInlineSvg src={icon} size="1.5em" spacingSize={size} />}
+        {icon && (
+          <IconWrapper>
+            {typeof icon === 'string' ? <InlineSvg src={icon} /> : icon}
+          </IconWrapper>
+        )}
         <AlertLinkText>{children}</AlertLinkText>
-        <InlineSvg src="icon-chevron-right" size="1em" />
+        <IconLink>
+          <IconChevron direction="right" />
+        </IconLink>
       </StyledLink>
     );
   }
@@ -80,7 +87,6 @@ const StyledLink = styled(({openInNewTab, to, href, ...props}: StyledLinkProps) 
   return <Link {...linkProps} to={to || '#'} />;
 })`
   display: flex;
-  align-items: center;
   background-color: ${p => p.theme.alert[p.priority].backgroundLight};
   color: ${p => p.theme.gray4};
   border: 1px dashed ${p => p.theme.alert[p.priority].border};
@@ -89,20 +95,22 @@ const StyledLink = styled(({openInNewTab, to, href, ...props}: StyledLinkProps) 
   border-radius: 0.25em;
   transition: 0.2s border-color;
 
-  &:hover {
-    border-color: ${p => p.theme.blueLight};
-  }
-
   &.focus-visible {
     outline: none;
     box-shadow: ${p => p.theme.alert[p.priority].border}7f 0 0 0 2px;
   }
 `;
 
-const AlertLinkText = styled('div')`
-  flex-grow: 1;
+const IconWrapper = styled('span')`
+  display: flex;
+  margin: ${space(0.5)} ${space(1.5)} ${space(0.5)} 0;
 `;
 
-const StyledInlineSvg = styled(InlineSvg)<{spacingSize: Size}>`
-  margin-right: ${p => (p.spacingSize === 'small' ? space(1) : space(1.5))};
+const IconLink = styled(IconWrapper)`
+  margin: ${space(0.5)} 0;
+`;
+
+const AlertLinkText = styled('div')`
+  line-height: 1.5;
+  flex-grow: 1;
 `;
