@@ -38,7 +38,7 @@ python-rapidjson==1.4
 psycopg2-binary==2.8.6; python_version == '3.6'
 # For development only: This version removes needing to setting flags for Apple's M1 chipset
 psycopg2-binary==2.9.1; python_version > '3.6'
-PyJWT==2.1.0
+PyJWT==2.4.0
 python-dateutil==2.8.1
 python-memcached==1.59
 python-u2flib-server==5.0.0
