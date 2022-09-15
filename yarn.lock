@@ -1855,14 +1855,14 @@
     htmlparser2 "^4.1.0"
     title-case "^3.0.2"
 
-"@sentry/browser@6.13.0":
-  version "6.13.0"
-  resolved "https://registry.yarnpkg.com/@sentry/browser/-/browser-6.13.0.tgz#fddcf1997d47c166a86494a6ea594f4cc60e773d"
-  integrity sha512-Eh0k2qYhqWiEP3N04AwSrpl4VRD0pzt6SRgJxgiGzSvBT43EOjyNQ3xzMylAechfjSCTWmzZMvwcgT5fNM9cuw==
+"@sentry/browser@7.13.0":
+  version "7.13.0"
+  resolved "https://registry.yarnpkg.com/@sentry/browser/-/browser-7.13.0.tgz#883b8598c8a0c33af246242e7172e39306dc564a"
+  integrity sha512-WbgClHPYe8TKsdVVbuzd6alxwh3maFQNuljMkSTnYvPx2P+NT0wHljTs37D39FGfSmAwaqn7D/1ZHAtC+6mWxA==
   dependencies:
-    "@sentry/core" "6.13.0"
-    "@sentry/types" "6.13.0"
-    "@sentry/utils" "6.13.0"
+    "@sentry/core" "7.13.0"
+    "@sentry/types" "7.13.0"
+    "@sentry/utils" "7.13.0"
     tslib "^1.9.3"
 
 "@sentry/core@6.13.0":
@@ -1876,6 +1876,16 @@
     "@sentry/utils" "6.13.0"
     tslib "^1.9.3"
 
+"@sentry/core@7.13.0":
+  version "7.13.0"
+  resolved "https://registry.yarnpkg.com/@sentry/core/-/core-7.13.0.tgz#65597d71f8bfa1186f34009803e03ca9edb3adee"
+  integrity sha512-hB46fklmKrSDMEvZOF8qBHhys7PONBFyxQtbNDZUlv/kabs4gF3VEg1ftCaXnjx4lLNlsUl/ScFdM6194RvISg==
+  dependencies:
+    "@sentry/hub" "7.13.0"
+    "@sentry/types" "7.13.0"
+    "@sentry/utils" "7.13.0"
+    tslib "^1.9.3"
+
 "@sentry/hub@6.13.0":
   version "6.13.0"
   resolved "https://registry.yarnpkg.com/@sentry/hub/-/hub-6.13.0.tgz#076a5f9b6d0efb8c1832820e3eecd5e24b5e1706"
@@ -1883,6 +1893,15 @@
   dependencies:
     "@sentry/types" "6.13.0"
     "@sentry/utils" "6.13.0"
+    tslib "^1.9.3"
+
+"@sentry/hub@7.13.0":
+  version "7.13.0"
+  resolved "https://registry.yarnpkg.com/@sentry/hub/-/hub-7.13.0.tgz#752068e528cfb277ed154bc94e311cad50ef792e"
+  integrity sha512-88/GsD1BoyrBwRKJCmVHZtSH5rizOsImUHWEXc1AOa1aR8nanfn56JdAbd6tC55pA+nT4R4H4vN/PrUaomTbtg==
+  dependencies:
+    "@sentry/types" "7.13.0"
+    "@sentry/utils" "7.13.0"
     tslib "^1.9.3"
 
 "@sentry/integrations@6.13.0":
@@ -1919,15 +1938,14 @@
     lru_map "^0.3.3"
     tslib "^1.9.3"
 
-"@sentry/react@6.13.0":
-  version "6.13.0"
-  resolved "https://registry.yarnpkg.com/@sentry/react/-/react-6.13.0.tgz#110aada56a5f952b63f8ce94ce0c71792bcffd4a"
-  integrity sha512-Pkkq2YQn7uvqHX+OvoGrd9Nq0ixrQyixm2SI0BjptDXkZ6AqlI+fhhP8Mm+ezBgPT9WqO2+BUW/YivyTjVYwHg==
+"@sentry/react@7.13.0":
+  version "7.13.0"
+  resolved "https://registry.yarnpkg.com/@sentry/react/-/react-7.13.0.tgz#64fa5a2b944c977f75626c6208afa3478c13714c"
+  integrity sha512-ulvBmMiwt+4RXwnDkP9qNr7rMJIFE4QXuNxho5pIqWEU9q2656CoL5kau9f2TQQEBxNc9dR4QmUdGyzuEaYPIQ==
   dependencies:
-    "@sentry/browser" "6.13.0"
-    "@sentry/minimal" "6.13.0"
-    "@sentry/types" "6.13.0"
-    "@sentry/utils" "6.13.0"
+    "@sentry/browser" "7.13.0"
+    "@sentry/types" "7.13.0"
+    "@sentry/utils" "7.13.0"
     hoist-non-react-statics "^3.3.2"
     tslib "^1.9.3"
 
@@ -1957,12 +1975,25 @@
   resolved "https://registry.yarnpkg.com/@sentry/types/-/types-6.13.0.tgz#a8ad870c6ecb407cbe9ca883b0688bacb30daacf"
   integrity sha512-04ZVmz4txuI3w1KS81eByppvvMfOINj7jZYnO5zX/S3cjHiOpAJiZkN/k9tTi1Ua3td8bEkQLB6Cxrq9MSiH3Q==
 
+"@sentry/types@7.13.0":
+  version "7.13.0"
+  resolved "https://registry.yarnpkg.com/@sentry/types/-/types-7.13.0.tgz#398e33e5c92ea0ce91e2c86e3ab003fe00c471a2"
+  integrity sha512-ttckM1XaeyHRLMdr79wmGA5PFbTGx2jio9DCD/mkEpSfk6OGfqfC7gpwy7BNstDH/VKyQj/lDCJPnwvWqARMoQ==
+
 "@sentry/utils@6.13.0":
   version "6.13.0"
   resolved "https://registry.yarnpkg.com/@sentry/utils/-/utils-6.13.0.tgz#c75647890a5a9dfdb3df321517aa4886c8715b03"
   integrity sha512-e82DBwjYqWkNmafIkHnbqirK4t7WCmqCGaoo1Et6vTRCBS4GthWvS6EzaozY7EKs/TzsfIiDdTLGTbYMQOq9Zw==
   dependencies:
     "@sentry/types" "6.13.0"
+    tslib "^1.9.3"
+
+"@sentry/utils@7.13.0":
+  version "7.13.0"
+  resolved "https://registry.yarnpkg.com/@sentry/utils/-/utils-7.13.0.tgz#0d47a9278806ece78ba3a83c7dbebce817462759"
+  integrity sha512-jnR85LgRLSk7IQe2OhKOPMY4fasJCNQNW0iCXsH+S2R1qnsF+N4ksNkQ+7JyyM9E7F03YpI2qd76bKY0VIn5iA==
+  dependencies:
+    "@sentry/types" "7.13.0"
     tslib "^1.9.3"
 
 "@sindresorhus/slugify@^1.0.0":
