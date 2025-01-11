@@ -1,15 +1,15 @@
-import * as React from 'react';
 import isEqual from 'lodash/isEqual';
 
-import {Form, FormState} from 'app/components/forms';
-import LoadingIndicator from 'app/components/loadingIndicator';
-import DefaultSettings from 'app/plugins/components/settings';
+import Form from 'sentry/components/deprecatedforms/form';
+import FormState from 'sentry/components/forms/state';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import DefaultSettings from 'sentry/plugins/components/settings';
 
 type Field = Parameters<typeof DefaultSettings.prototype.renderField>[0]['config'];
 
-type FieldWithValues = Field & {value?: any; defaultValue?: any};
+type FieldWithValues = Field & {defaultValue?: any; value?: any};
 
-type ApiData = {default_project?: string; config: FieldWithValues[]};
+type ApiData = {config: FieldWithValues[]; default_project?: string};
 
 type Props = DefaultSettings['props'];
 
@@ -34,7 +34,7 @@ class Settings extends DefaultSettings<Props, State> {
   }
 
   isConfigured() {
-    return !!(this.state.formData && this.state.formData.default_project);
+    return !!this.state.formData?.default_project;
   }
 
   isLastPage = () => {
@@ -58,7 +58,7 @@ class Settings extends DefaultSettings<Props, State> {
             formData,
             initialData,
             // start off in edit mode if there isn't a project set
-            editing: !(formData && formData.default_project),
+            editing: !formData?.default_project,
             // call this here to prevent FormState.READY from being
             // set before fieldList is
           },
@@ -117,7 +117,7 @@ class Settings extends DefaultSettings<Props, State> {
       }),
       error: this.onSaveError.bind(this, error => {
         this.setState({
-          errors: (error.responseJSON || {}).errors || {},
+          errors: error.responseJSON?.errors || {},
         });
       }),
       complete: this.onSaveComplete,

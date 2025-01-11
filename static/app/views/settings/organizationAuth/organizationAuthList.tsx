@@ -1,17 +1,21 @@
-import ExternalLink from 'app/components/links/externalLink';
-import {Panel, PanelAlert, PanelBody, PanelHeader} from 'app/components/panels';
-import {t, tct} from 'app/locale';
-import {AuthProvider, Organization} from 'app/types';
-import {descopeFeatureName} from 'app/utils';
-import getCsrfToken from 'app/utils/getCsrfToken';
-import withOrganization from 'app/utils/withOrganization';
-import EmptyMessage from 'app/views/settings/components/emptyMessage';
-import SettingsPageHeader from 'app/views/settings/components/settingsPageHeader';
-import PermissionAlert from 'app/views/settings/organization/permissionAlert';
+import EmptyMessage from 'sentry/components/emptyMessage';
+import ExternalLink from 'sentry/components/links/externalLink';
+import Panel from 'sentry/components/panels/panel';
+import PanelAlert from 'sentry/components/panels/panelAlert';
+import PanelBody from 'sentry/components/panels/panelBody';
+import PanelHeader from 'sentry/components/panels/panelHeader';
+import {t, tct} from 'sentry/locale';
+import type {AuthProvider} from 'sentry/types/auth';
+import type {Organization} from 'sentry/types/organization';
+import {descopeFeatureName} from 'sentry/utils';
+import getCsrfToken from 'sentry/utils/getCsrfToken';
+import withOrganization from 'sentry/utils/withOrganization';
+import SettingsPageHeader from 'sentry/views/settings/components/settingsPageHeader';
+import PermissionAlert from 'sentry/views/settings/organization/permissionAlert';
 
 import ProviderItem from './providerItem';
 
-const providerPopularity = {
+const PROVIDER_POPULARITY: Record<string, number> = {
   google: 0,
   github: 1,
   okta: 2,
@@ -20,6 +24,7 @@ const providerPopularity = {
   onelogin: 5,
   rippling: 6,
   auth0: 7,
+  jumpcloud: 8,
 };
 
 type Props = {
@@ -28,22 +33,22 @@ type Props = {
   activeProvider?: AuthProvider;
 };
 
-const OrganizationAuthList = ({organization, providerList, activeProvider}: Props) => {
+function OrganizationAuthList({organization, providerList, activeProvider}: Props) {
   const features = organization.features;
 
   // Sort provider list twice: first, by popularity,
   // and then a second time, to sort unavailable providers for the current plan to the end of the list.
   const sortedByPopularity = (providerList ?? []).sort((a, b) => {
-    if (!(a.key in providerPopularity)) {
+    if (!(a.key in PROVIDER_POPULARITY)) {
       return -1;
     }
-    if (!(b.key in providerPopularity)) {
+    if (!(b.key in PROVIDER_POPULARITY)) {
       return 1;
     }
-    if (providerPopularity[a.key] === providerPopularity[b.key]) {
+    if (PROVIDER_POPULARITY[a.key] === PROVIDER_POPULARITY[b.key]) {
       return 0;
     }
-    return providerPopularity[a.key] > providerPopularity[b.key] ? 1 : -1;
+    return PROVIDER_POPULARITY[a.key]! > PROVIDER_POPULARITY[b.key]! ? 1 : -1;
   });
 
   const list = sortedByPopularity.sort((a, b) => {
@@ -111,6 +116,9 @@ const OrganizationAuthList = ({organization, providerList, activeProvider}: Prop
       </Panel>
     </div>
   );
-};
+}
 
 export default withOrganization(OrganizationAuthList);
+
+// For tests
+export {OrganizationAuthList};

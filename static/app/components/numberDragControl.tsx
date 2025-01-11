@@ -1,21 +1,21 @@
-import * as React from 'react';
+import {Component} from 'react';
 import styled from '@emotion/styled';
 
-import {IconArrow} from 'app/icons';
-import space from 'app/styles/space';
-import {trackAnalyticsEvent} from 'app/utils/analytics';
+import {IconArrow} from 'sentry/icons';
+import {space} from 'sentry/styles/space';
+import {trackAnalytics} from 'sentry/utils/analytics';
 
 type NumberDragControlProps = {
   onChange: (delta: number, event: React.MouseEvent<HTMLDivElement>) => void;
   axis?: 'x' | 'y';
   /**
-   * The value to increment by as the mouse is dragged. Defaults to 1
-   */
-  step?: number;
-  /**
    * The value to increment by if the shift key is held. Defaults to 1
    */
   shiftStep?: number;
+  /**
+   * The value to increment by as the mouse is dragged. Defaults to 1
+   */
+  step?: number;
 };
 
 type Props = Omit<React.HTMLAttributes<HTMLDivElement>, keyof NumberDragControlProps> &
@@ -25,7 +25,7 @@ type State = {
   isClicked: boolean;
 };
 
-class NumberDragControl extends React.Component<Props, State> {
+class NumberDragControl extends Component<Props, State> {
   state: State = {
     isClicked: false,
   };
@@ -44,10 +44,8 @@ class NumberDragControl extends React.Component<Props, State> {
 
           // XXX(epurkhiser): We can remove this later, just curious if people
           // are actually using the drag control
-          trackAnalyticsEvent({
-            eventName: 'Number Drag Control: Clicked',
-            eventKey: 'number_drag_control.clicked',
-            organization_id: null,
+          trackAnalytics('number_drag_control.clicked', {
+            organization: null,
           });
 
           event.currentTarget.requestPointerLock();
@@ -70,8 +68,8 @@ class NumberDragControl extends React.Component<Props, State> {
         isActive={this.state.isClicked}
         isX={isX}
       >
-        <IconArrow direction={isX ? 'left' : 'up'} size="8px" />
-        <IconArrow direction={isX ? 'right' : 'down'} size="8px" />
+        <IconArrow direction={isX ? 'left' : 'up'} legacySize="8px" />
+        <IconArrow direction={isX ? 'right' : 'down'} legacySize="8px" />
       </Wrapper>
     );
   }

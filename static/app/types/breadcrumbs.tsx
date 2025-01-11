@@ -1,7 +1,4 @@
-import SvgIcon from 'app/icons/svgIcon';
-import {Color} from 'app/utils/theme';
-
-export type IconProps = React.ComponentProps<typeof SvgIcon>;
+import type {Color} from 'sentry/utils/theme';
 
 export enum BreadcrumbLevelType {
   FATAL = 'fatal',
@@ -10,6 +7,7 @@ export enum BreadcrumbLevelType {
   INFO = 'info',
   DEBUG = 'debug',
   UNDEFINED = 'undefined',
+  LOG = 'log',
 }
 
 export enum BreadcrumbType {
@@ -28,56 +26,79 @@ export enum BreadcrumbType {
   SYSTEM = 'system',
   SESSION = 'session',
   TRANSACTION = 'transaction',
+  INIT = 'init',
+  NETWORK = 'network',
+  DEVICE = 'device',
 }
 
-type BreadcrumbTypeBase = {
+export enum BreadcrumbMessageFormat {
+  SQL = 'sql',
+}
+
+interface BreadcrumbTypeBase {
   level: BreadcrumbLevelType;
-  timestamp?: string; // it's recommended
+  // it's recommended
   category?: string | null;
+  event_id?: string | null;
   message?: string;
-  event_id?: string;
-};
+  messageFormat?: BreadcrumbMessageFormat.SQL;
+  messageRaw?: string;
+  timestamp?: string;
+}
 
-export type BreadcrumbTypeSystem = {
+export interface BreadcrumbTypeSystem extends BreadcrumbTypeBase {
+  action: string;
+  extras: Record<string, any>;
   type: BreadcrumbType.SYSTEM;
+}
+
+export interface BreadcrumbTypeSession extends BreadcrumbTypeBase {
   action: string;
   extras: Record<string, any>;
-} & BreadcrumbTypeBase;
-
-export type BreadcrumbTypeSession = {
   type: BreadcrumbType.SESSION;
-  action: string;
-  extras: Record<string, any>;
-} & BreadcrumbTypeBase;
+}
 
-export type BreadcrumbTypeNavigation = {
+export interface BreadcrumbTypeNavigation extends BreadcrumbTypeBase {
   type: BreadcrumbType.NAVIGATION;
-  data?: {
-    to?: string;
+  data?: null | {
     from?: string;
+    to?: string;
   };
-} & BreadcrumbTypeBase;
+}
 
-export type BreadcrumbTypeHTTP = {
+export interface BreadcrumbTypeInit extends BreadcrumbTypeBase {
+  data: {
+    action: 'replay-init';
+    label: string;
+    url: string;
+  };
+  type: BreadcrumbType.INIT;
+}
+
+export interface BreadcrumbTypeHTTP extends BreadcrumbTypeBase {
   type: BreadcrumbType.HTTP;
-  data?: {
-    url?: string;
-    method?:
-      | 'POST'
-      | 'PUT'
-      | 'GET'
-      | 'HEAD'
-      | 'DELETE'
-      | 'CONNECT'
-      | 'OPTIONS'
-      | 'TRACE'
-      | 'PATCH';
-    status_code?: number;
-    reason?: string;
-  };
-} & BreadcrumbTypeBase;
+  data?:
+    | null
+    | Record<string, any>
+    // Though this is the expected type, more data can be attached to these crumbs
+    | {
+        method?:
+          | 'POST'
+          | 'PUT'
+          | 'GET'
+          | 'HEAD'
+          | 'DELETE'
+          | 'CONNECT'
+          | 'OPTIONS'
+          | 'TRACE'
+          | 'PATCH';
+        reason?: string;
+        status_code?: number;
+        url?: string;
+      };
+}
 
-export type BreadcrumbTypeDefault = {
+export interface BreadcrumbTypeDefault extends BreadcrumbTypeBase {
   type:
     | BreadcrumbType.INFO
     | BreadcrumbType.DEBUG
@@ -88,20 +109,36 @@ export type BreadcrumbTypeDefault = {
     | BreadcrumbType.WARNING
     | BreadcrumbType.ERROR
     | BreadcrumbType.DEFAULT
+    | BreadcrumbType.INIT
     | BreadcrumbType.SESSION
     | BreadcrumbType.SYSTEM
-    | BreadcrumbType.SESSION
     | BreadcrumbType.TRANSACTION;
-  data?: Record<string, any>;
-} & BreadcrumbTypeBase;
+  data?: Record<string, any> | null;
+}
 
 export type RawCrumb =
   | BreadcrumbTypeNavigation
   | BreadcrumbTypeHTTP
   | BreadcrumbTypeDefault;
 
-export type Crumb = RawCrumb & {
-  description: string;
+interface BaseCrumb {
   color: Color;
+  description: string;
   id: number;
-};
+}
+
+interface NavigationCrumb extends BaseCrumb, BreadcrumbTypeNavigation {}
+interface HTTPCrumb extends BaseCrumb, BreadcrumbTypeHTTP {}
+interface DefaultCrumb extends BaseCrumb, BreadcrumbTypeDefault {}
+
+export type Crumb = NavigationCrumb | HTTPCrumb | DefaultCrumb;
+
+export function isBreadcrumbLogLevel(logLevel: string): logLevel is BreadcrumbLevelType {
+  return Object.values(BreadcrumbLevelType).includes(logLevel as any);
+}
+
+export function isBreadcrumbTypeDefault(
+  breadcrumb: Crumb
+): breadcrumb is Extract<Crumb, BreadcrumbTypeDefault> {
+  return ![BreadcrumbType.HTTP, BreadcrumbType.NAVIGATION].includes(breadcrumb.type);
+}

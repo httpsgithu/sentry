@@ -1,13 +1,16 @@
-import {ECharts} from 'echarts';
-import {Query} from 'history';
+import type {ECharts} from 'echarts';
+import type {Query} from 'history';
 
-import {HistogramData} from 'app/utils/performance/histogram/types';
-import {getBucketWidth} from 'app/utils/performance/histogram/utils';
+import type {WebVital} from 'sentry/utils/fields';
+import type {HistogramData} from 'sentry/utils/performance/histogram/types';
+import {getBucketWidth} from 'sentry/utils/performance/histogram/utils';
+import type {VitalsData} from 'sentry/utils/performance/vitals/vitalsCardsDiscoverQuery';
+import {getTransactionSummaryBaseUrl} from 'sentry/views/performance/transactionSummary/utils';
 
-import {Point, Rectangle} from './types';
+import type {Point, Rectangle} from './types';
 
-export function generateVitalsRoute({orgSlug}: {orgSlug: String}): string {
-  return `/organizations/${orgSlug}/performance/summary/vitals/`;
+export function generateVitalsRoute({orgSlug}: {orgSlug: string}): string {
+  return `${getTransactionSummaryBaseUrl(orgSlug)}/vitals/`;
 }
 
 export function vitalsRouteWithQuery({
@@ -17,8 +20,8 @@ export function vitalsRouteWithQuery({
   query,
 }: {
   orgSlug: string;
-  transaction: string;
   query: Query;
+  transaction: string;
   projectID?: string | string[];
 }) {
   const pathname = generateVitalsRoute({
@@ -52,13 +55,14 @@ export function findNearestBucketIndex(
 ): number | null {
   const width = getBucketWidth(chartData);
   // it's possible that the data is not available yet or the x axis is out of range
-  if (!chartData.length || xAxis >= chartData[chartData.length - 1].bin + width) {
+  if (!chartData.length || xAxis >= chartData[chartData.length - 1]!.bin + width) {
     return null;
-  } else if (xAxis < chartData[0].bin) {
+  }
+  if (xAxis < chartData[0]!.bin) {
     return -1;
   }
 
-  return Math.floor((xAxis - chartData[0].bin) / width);
+  return Math.floor((xAxis - chartData[0]!.bin) / width);
 }
 
 /**
@@ -77,12 +81,12 @@ export function getRefRect(chartData: HistogramData): Rectangle | null {
   for (let i = 0; i < chartData.length; i++) {
     const data1 = chartData[i];
     for (let j = i + 1; j < chartData.length; j++) {
-      const data2 = chartData[j];
+      const data2 = chartData[j]!;
 
-      if (data1.bin !== data2.bin && data1.count !== data2.count) {
+      if (data1!.bin !== data2!.bin && data1!.count !== data2!.count) {
         return {
-          point1: {x: i, y: Math.min(data1.count, data2.count)},
-          point2: {x: j, y: Math.max(data1.count, data2.count)},
+          point1: {x: i, y: Math.min(data1!.count, data2!.count)},
+          point2: {x: j, y: Math.max(data1!.count, data2!.count)},
         };
       }
     }
@@ -106,7 +110,7 @@ export function asPixelRect(chartRef: ECharts, dataRect: Rectangle): Rectangle |
     dataRect.point1.y,
   ]);
 
-  if (isNaN(point1?.[0]) || isNaN(point1?.[1])) {
+  if (isNaN(point1?.[0]!) || isNaN(point1?.[1]!)) {
     return null;
   }
 
@@ -115,13 +119,13 @@ export function asPixelRect(chartRef: ECharts, dataRect: Rectangle): Rectangle |
     dataRect.point2.y,
   ]);
 
-  if (isNaN(point2?.[0]) || isNaN(point2?.[1])) {
+  if (isNaN(point2?.[0]!) || isNaN(point2?.[1]!)) {
     return null;
   }
 
   return {
-    point1: {x: point1[0], y: point1[1]},
-    point2: {x: point2[0], y: point2[1]},
+    point1: {x: point1[0]!, y: point1[1]!},
+    point2: {x: point2[0]!, y: point2[1]!},
   };
 }
 
@@ -153,4 +157,18 @@ export function mapPoint(
     x: destRect.point1.x + (destRect.point2.x - destRect.point1.x) * xPercentage,
     y: destRect.point1.y + (destRect.point2.y - destRect.point1.y) * yPercentage,
   };
+}
+
+export function isMissingVitalsData(
+  vitalsData: VitalsData | null,
+  allVitals: WebVital[]
+): boolean {
+  if (!vitalsData || allVitals.some(vital => !vitalsData[vital])) {
+    return true;
+  }
+
+  const measurementsWithoutCounts = Object.values(vitalsData).filter(
+    vitalObj => vitalObj.total === 0
+  );
+  return measurementsWithoutCounts.length > 0;
 }

@@ -1,11 +1,12 @@
+from django.http import HttpRequest, HttpResponse
 from django.views.generic import View
 
-from sentry.models import ApiApplication
+from sentry.models.apiapplication import ApiApplication
 from sentry.web.helpers import render_to_response
 
 
 class DebugOAuthAuthorizeView(View):
-    def get(self, request):
+    def get(self, request: HttpRequest) -> HttpResponse:
         application = ApiApplication(
             name="Example Application",
             homepage_url="http://example.com",
@@ -28,7 +29,7 @@ class DebugOAuthAuthorizeView(View):
 
 
 class DebugOAuthAuthorizeErrorView(View):
-    def get(self, request):
+    def get(self, request: HttpRequest) -> HttpResponse:
         return render_to_response(
             "sentry/oauth-error.html",
             {

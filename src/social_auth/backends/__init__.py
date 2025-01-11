@@ -10,19 +10,24 @@ Also the modules *must* define a BACKENDS dictionary with the backend name
 enabled.
 """
 
+from __future__ import annotations
+
 import logging
 import threading
+from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request
 
 import requests
-from django.contrib.auth import authenticate
+from django.conf import settings
+from django.contrib.auth import authenticate, load_backend
 from django.utils.crypto import constant_time_compare, get_random_string
 from requests_oauthlib import OAuth1
 
+from sentry.users.services.user.service import user_service
 from sentry.utils import json
-from sentry.utils.compat import map
+from sentry.utils.http import absolute_uri
 from social_auth.exceptions import (
     AuthCanceled,
     AuthFailed,
@@ -122,10 +127,10 @@ class SocialAuthBackend:
             out["pipeline_index"] = base_index + idx
             mod_name, func_name = name.rsplit(".", 1)
             mod = __import__(mod_name, {}, {}, [func_name])
-            func = getattr(mod, func_name, None)
+            func = getattr(mod, func_name)
 
             try:
-                result = {}
+                result: dict[str, Any] = {}
                 if func_name == "save_status_to_session":
                     result = func(request, *args, **out) or {}
                 else:
@@ -182,7 +187,10 @@ class SocialAuthBackend:
         Return user with given ID from the User model used by this backend.
         This is called by django.contrib.auth.middleware.
         """
-        return UserSocialAuth.get_user(user_id)
+        user = user_service.get_user(user_id=user_id)
+        if user and user.is_active:
+            return user
+        return None
 
 
 class OAuthBackend(SocialAuthBackend):
@@ -199,7 +207,7 @@ class OAuthBackend(SocialAuthBackend):
     access_token is always stored.
     """
 
-    EXTRA_DATA = None
+    EXTRA_DATA: list[tuple[str, str]] | None = None
     ID_KEY = "id"
 
     def get_user_id(self, details, response):
@@ -246,7 +254,7 @@ class BaseAuth:
         AUTH_BACKEND   Authorization backend related with this service
     """
 
-    AUTH_BACKEND = None
+    AUTH_BACKEND: type[SocialAuthBackend]
 
     def __init__(self, request, redirect):
         self.request = request
@@ -270,6 +278,8 @@ class BaseAuth:
 
     def to_session_dict(self, next_idx, *args, **kwargs):
         """Returns dict to store on session for partial pipeline."""
+        backend = kwargs["backend"]
+        kwargs["backend"] = f"{backend.__module__}.{backend.__class__.__name__}"
         return {
             "next": next_idx,
             "backend": self.AUTH_BACKEND.name,
@@ -286,6 +296,12 @@ class BaseAuth:
         kwargs = kwargs.copy()
         saved_kwargs = {key: ctype_to_model(val) for key, val in session_data["kwargs"].items()}
         saved_kwargs.update((key, val) for key, val in kwargs.items())
+
+        if isinstance(saved_kwargs.get("backend"), str):
+            backend_path = saved_kwargs["backend"]
+            if backend_path in settings.AUTHENTICATION_BACKENDS:
+                saved_kwargs["backend"] = load_backend(backend_path)
+
         return (session_data["next"], args, saved_kwargs)
 
     def continue_pipeline(self, *args, **kwargs):
@@ -347,13 +363,7 @@ class BaseAuth:
         instances.delete()
 
     def build_absolute_uri(self, path=None):
-        """Build absolute URI for given path. Replace http:// schema with
-        https:// if SOCIAL_AUTH_REDIRECT_IS_HTTPS is defined.
-        """
-        uri = self.request.build_absolute_uri(path)
-        if setting("SOCIAL_AUTH_REDIRECT_IS_HTTPS"):
-            uri = uri.replace("http://", "https://")
-        return uri
+        return absolute_uri(path)
 
 
 class OAuthAuth(BaseAuth):
@@ -361,9 +371,9 @@ class OAuthAuth(BaseAuth):
 
     SETTINGS_KEY_NAME = ""
     SETTINGS_SECRET_NAME = ""
-    SCOPE_VAR_NAME = None
+    SCOPE_VAR_NAME: str | None = None
     SCOPE_PARAMETER_NAME = "scope"
-    DEFAULT_SCOPE = None
+    DEFAULT_SCOPE: list[str] | None = None
     SCOPE_SEPARATOR = " "
 
     def __init__(self, request, redirect):
@@ -385,7 +395,7 @@ class OAuthAuth(BaseAuth):
 
     def get_scope(self):
         """Return list with needed access scope"""
-        scope = self.DEFAULT_SCOPE or []
+        scope: list[str] = self.DEFAULT_SCOPE or []
         if self.SCOPE_VAR_NAME:
             scope = scope + setting(self.SCOPE_VAR_NAME, [])
         return scope
@@ -509,7 +519,7 @@ class BaseOAuth1(OAuthAuth):
 
     def access_token(self, token):
         """Return request for access token value"""
-        return self.get_querystring(self.ACCESS_TOKEN_URL, auth=self.oauth_auth(token))
+        return self.request(self.ACCESS_TOKEN_URL, auth=self.oauth_auth(token))
 
 
 class BaseOAuth2(OAuthAuth):
@@ -523,10 +533,10 @@ class BaseOAuth2(OAuthAuth):
         ACCESS_TOKEN_URL        Token URL
     """
 
-    AUTHORIZATION_URL = None
-    ACCESS_TOKEN_URL = None
+    AUTHORIZATION_URL: str
+    ACCESS_TOKEN_URL: str
     REFRESH_TOKEN_URL = None
-    REVOKE_TOKEN_URL = None
+    REVOKE_TOKEN_URL: str | None = None
     REVOKE_TOKEN_METHOD = "POST"
     RESPONSE_TYPE = "code"
     REDIRECT_STATE = True
@@ -673,17 +683,14 @@ class BaseOAuth2(OAuthAuth):
         url = cls.REVOKE_TOKEN_URL.format(token=token, uid=uid)
         params = cls.revoke_token_params(token, uid) or {}
         headers = cls.revoke_token_headers(token, uid) or {}
-        data = None
+        data: bytes | None = None
 
         if cls.REVOKE_TOKEN_METHOD == "GET":
             url = f"{url}?{urlencode(params)}"
         else:
-            data = urlencode(params)
+            data = urlencode(params).encode()
 
-        request = Request(url, data=data, headers=headers)
-        if cls.REVOKE_TOKEN_URL.lower() not in ("get", "post"):
-            # Patch get_method to return the needed method
-            request.get_method = lambda: cls.REVOKE_TOKEN_METHOD
+        request = Request(url, data=data, headers=headers, method=cls.REVOKE_TOKEN_METHOD)
         response = dsa_urlopen(request)
         return cls.process_revoke_token_response(response)
 
@@ -697,7 +704,7 @@ class BaseOAuth2(OAuthAuth):
 
 
 # Cache for discovered backends.
-BACKENDSCACHE = {}
+BACKENDSCACHE: dict[str, type[BaseAuth]] = {}
 
 _import_lock = threading.Lock()
 

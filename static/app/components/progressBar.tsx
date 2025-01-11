@@ -1,6 +1,5 @@
+import type {Theme} from '@emotion/react';
 import styled from '@emotion/styled';
-
-import {Theme} from 'app/utils/theme';
 
 type Variant = 'small' | 'large';
 
@@ -10,13 +9,13 @@ type Props = {
    */
   value: number;
   /**
-   * The style of the progressBar
-   */
-  variant?: Variant;
-  /**
    * Styles applied to the component's root
    */
   className?: string;
+  /**
+   * The style of the progressBar
+   */
+  variant?: Variant;
 };
 
 const getVariantStyle = ({

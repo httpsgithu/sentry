@@ -1,9 +1,11 @@
-import {EventTag, Measurement} from 'app/types/event';
-import {
+import type {Theme} from '@emotion/react';
+
+import type {EventTag, Measurement} from 'sentry/types/event';
+import type {
   DiscoverQueryProps,
   GenericChildrenProps,
-} from 'app/utils/discover/genericDiscoverQuery';
-import {Theme} from 'app/utils/theme';
+} from 'sentry/utils/discover/genericDiscoverQuery';
+import type {TraceTree} from 'sentry/views/performance/newTraceDetails/traceModels/traceTree';
 
 /**
  * `EventLite` represents the type of a simplified event from
@@ -12,25 +14,43 @@ import {Theme} from 'app/utils/theme';
 export type EventLite = {
   event_id: string;
   generation: number | null;
-  span_id: string;
-  transaction: string;
-  'transaction.duration': number;
-  project_id: number;
-  project_slug: string;
   parent_event_id: string | null;
   parent_span_id: string | null;
+  performance_issues: TracePerformanceIssue[];
+  project_id: number;
+  project_slug: string;
+  span_id: string;
+  timestamp: number;
+  transaction: string;
+  'transaction.duration': number;
 };
 
 export type TraceError = {
+  event_id: string;
   issue: string;
   issue_id: number;
-  event_id: string;
-  span: string;
+  level: keyof Theme['level'];
+  message: string;
   project_id: number;
   project_slug: string;
+  span: string;
   title: string;
-  level: keyof Theme['level'];
+  event_type?: string;
+  generation?: number;
+  timestamp?: number;
+  type?: number;
 };
+
+export type TracePerformanceIssue = Omit<TraceError, 'issue' | 'span'> & {
+  culprit: string;
+  end: number;
+  span: string[];
+  start: number;
+  suspect_spans: string[];
+  type: number;
+  issue_short_id?: string;
+};
+export type TraceErrorOrIssue = TracePerformanceIssue | TraceError;
 
 export type TraceLite = EventLite[];
 
@@ -58,37 +78,48 @@ export type TraceFull = Omit<QuickTraceEvent, 'generation' | 'errors'> & {
  * additional information by setting `detailed=1`.
  */
 export type TraceFullDetailed = Omit<TraceFull, 'children'> & {
-  children: TraceFullDetailed[];
-  measurements?: Record<string, Measurement>;
-  tags?: EventTag[];
+  children: TraceTree.Transaction[];
+  sdk_name: string;
   start_timestamp: number;
   timestamp: number;
   'transaction.op': string;
   'transaction.status': string;
+  measurements?: Record<string, Measurement>;
+  profile_id?: string;
+  tags?: EventTag[];
+  transaction?: string;
+};
+
+export type TraceSplitResults<U extends TraceFull | TraceFullDetailed | EventLite> = {
+  orphan_errors: TraceError[];
+  transactions: U[];
 };
 
 export type TraceProps = {
   traceId: string;
-  start?: string;
   end?: string;
-  statsPeriod?: string;
+  start?: string;
+  statsPeriod?: string | null;
 };
 
 export type TraceRequestProps = DiscoverQueryProps & TraceProps;
 
 export type EmptyQuickTrace = {
-  type: 'empty' | 'missing';
   trace: QuickTraceEvent[];
+  type: 'empty' | 'missing';
+  orphanErrors?: TraceError[];
 };
 
 export type PartialQuickTrace = {
-  type: 'partial';
   trace: QuickTraceEvent[] | null;
+  type: 'partial';
+  orphanErrors?: TraceError[];
 };
 
 export type FullQuickTrace = {
-  type: 'full';
   trace: QuickTraceEvent[] | null;
+  type: 'full';
+  orphanErrors?: TraceError[];
 };
 
 export type BaseTraceChildrenProps = Omit<
@@ -100,11 +131,13 @@ export type QuickTrace = EmptyQuickTrace | PartialQuickTrace | FullQuickTrace;
 
 export type QuickTraceQueryChildrenProps = BaseTraceChildrenProps &
   QuickTrace & {
-    currentEvent: QuickTraceEvent | null;
+    currentEvent: QuickTraceEvent | TraceError | null;
   };
 
 export type TraceMeta = {
+  errors: number;
+  performance_issues: number;
   projects: number;
   transactions: number;
-  errors: number;
+  transactiontoSpanChildrenCount: Record<string, number>;
 };

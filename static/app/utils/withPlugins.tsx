@@ -1,12 +1,14 @@
-import * as React from 'react';
+import {Component} from 'react';
 
-import {fetchPlugins} from 'app/actionCreators/plugins';
-import PluginsStore from 'app/stores/pluginsStore';
-import {Organization, Plugin, Project} from 'app/types';
-import {defined} from 'app/utils';
-import getDisplayName from 'app/utils/getDisplayName';
-import withOrganization from 'app/utils/withOrganization';
-import withProject from 'app/utils/withProject';
+import {fetchPlugins} from 'sentry/actionCreators/plugins';
+import PluginsStore from 'sentry/stores/pluginsStore';
+import type {Plugin} from 'sentry/types/integrations';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import {defined} from 'sentry/utils';
+import getDisplayName from 'sentry/utils/getDisplayName';
+import withOrganization from 'sentry/utils/withOrganization';
+import withProject from 'sentry/utils/withProject';
 
 type WithPluginProps = {
   organization: Organization;
@@ -14,8 +16,8 @@ type WithPluginProps = {
 };
 
 type State = {
-  plugins: Plugin[];
   loading: boolean;
+  plugins: Plugin[];
 };
 
 /**
@@ -25,10 +27,7 @@ type State = {
 function withPlugins<P extends WithPluginProps>(
   WrappedComponent: React.ComponentType<P>
 ) {
-  class WithPlugins extends React.Component<
-    Omit<P, keyof 'plugins'> & WithPluginProps,
-    State
-  > {
+  class WithPlugins extends Component<Omit<P, 'plugins'> & WithPluginProps, State> {
     static displayName = `withPlugins(${getDisplayName(WrappedComponent)})`;
     state = {plugins: [], loading: true};
 

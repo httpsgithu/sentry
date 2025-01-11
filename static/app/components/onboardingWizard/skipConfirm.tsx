@@ -1,51 +1,42 @@
-import * as React from 'react';
+import {Fragment, useState} from 'react';
 import styled from '@emotion/styled';
 
-import Button from 'app/components/button';
-import ButtonBar from 'app/components/buttonBar';
-import HookOrDefault from 'app/components/hookOrDefault';
-import {t} from 'app/locale';
-import {fadeIn} from 'app/styles/animations';
-import space from 'app/styles/space';
+import {Button, LinkButton} from 'sentry/components/button';
+import ButtonBar from 'sentry/components/buttonBar';
+import HookOrDefault from 'sentry/components/hookOrDefault';
+import {t} from 'sentry/locale';
+import {fadeIn} from 'sentry/styles/animations';
+import {space} from 'sentry/styles/space';
 
 type Props = {
   children: (opts: {skip: (e: React.MouseEvent) => void}) => React.ReactNode;
   onSkip: () => void;
 };
 
-type State = {
-  showConfirmation: boolean;
-};
+function SkipConfirm(props: Props) {
+  const [showConfirmation, setShowConfirmation] = useState<boolean>(false);
+  const {onSkip, children} = props;
 
-class SkipConfirm extends React.Component<Props, State> {
-  state: State = {
-    showConfirmation: false,
-  };
-
-  toggleConfirm = (e: React.MouseEvent) => {
+  const toggleConfirm = (e: React.MouseEvent) => {
     e.stopPropagation();
-    this.setState(state => ({showConfirmation: !state.showConfirmation}));
+    setShowConfirmation(!showConfirmation);
   };
 
-  handleSkip = (e: React.MouseEvent) => {
+  const handleSkip = (e: React.MouseEvent) => {
     e.stopPropagation();
-    this.props.onSkip();
+    onSkip();
   };
 
-  render() {
-    const {children} = this.props;
-
-    return (
-      <React.Fragment>
-        {children({skip: this.toggleConfirm})}
-        <Confirmation
-          visible={this.state.showConfirmation}
-          onSkip={this.handleSkip}
-          onDismiss={this.toggleConfirm}
-        />
-      </React.Fragment>
-    );
-  }
+  return (
+    <Fragment>
+      {children({skip: toggleConfirm})}
+      <Confirmation
+        visible={showConfirmation}
+        onSkip={handleSkip}
+        onDismiss={toggleConfirm}
+      />
+    </Fragment>
+  );
 }
 
 export default SkipConfirm;
@@ -53,15 +44,15 @@ export default SkipConfirm;
 const SkipHelp = HookOrDefault({
   hookName: 'onboarding-wizard:skip-help',
   defaultComponent: () => (
-    <Button priority="primary" size="xsmall" to="https://forum.sentry.io/" external>
+    <LinkButton priority="primary" size="xs" href="https://forum.sentry.io/" external>
       {t('Community Forum')}
-    </Button>
+    </LinkButton>
   ),
 });
 
 type ConfirmProps = React.HTMLAttributes<HTMLDivElement> & {
-  onSkip: (e: React.MouseEvent) => void;
   onDismiss: (e: React.MouseEvent) => void;
+  onSkip: (e: React.MouseEvent) => void;
   visible: boolean;
 };
 
@@ -70,7 +61,7 @@ const Confirmation = styled(({onDismiss, onSkip, visible: _, ...props}: ConfirmP
     <p>{t("Not sure what to do? We're here for you!")}</p>
     <ButtonBar gap={1}>
       <SkipHelp />
-      <Button size="xsmall" onClick={onSkip}>
+      <Button size="xs" onClick={onSkip}>
         {t('Just skip')}
       </Button>
     </ButtonBar>
@@ -87,7 +78,7 @@ const Confirmation = styled(({onDismiss, onSkip, visible: _, ...props}: ConfirmP
   align-items: center;
   flex-direction: column;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.9);
+  background: ${p => p.theme.surface200};
   animation: ${fadeIn} 200ms normal forwards;
   font-size: ${p => p.theme.fontSizeMedium};
 

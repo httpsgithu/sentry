@@ -1,34 +1,31 @@
 import {Component, Fragment} from 'react';
-import ReactDOM from 'react-dom';
-import {components, StylesConfig} from 'react-select';
+import {components} from 'react-select';
 import styled from '@emotion/styled';
+import type {Query} from 'history';
 
-import {ModalRenderProps} from 'app/actionCreators/modal';
-import AsyncComponent from 'app/components/asyncComponent';
-import SelectControl from 'app/components/forms/selectControl';
-import IdBadge from 'app/components/idBadge';
-import Link from 'app/components/links/link';
-import LoadingIndicator from 'app/components/loadingIndicator';
-import {t, tct} from 'app/locale';
-import ConfigStore from 'app/stores/configStore';
-import OrganizationsStore from 'app/stores/organizationsStore';
-import OrganizationStore from 'app/stores/organizationStore';
-import space from 'app/styles/space';
-import {Integration, Organization, Project} from 'app/types';
-import Projects from 'app/utils/projects';
-import replaceRouterParams from 'app/utils/replaceRouterParams';
-import IntegrationIcon from 'app/views/organizationIntegrations/integrationIcon';
+import type {ModalRenderProps} from 'sentry/actionCreators/modal';
+import DeprecatedAsyncComponent from 'sentry/components/deprecatedAsyncComponent';
+import type {StylesConfig} from 'sentry/components/forms/controls/selectControl';
+import SelectControl from 'sentry/components/forms/controls/selectControl';
+import IdBadge from 'sentry/components/idBadge';
+import Link from 'sentry/components/links/link';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import {t, tct} from 'sentry/locale';
+import ConfigStore from 'sentry/stores/configStore';
+import OrganizationsStore from 'sentry/stores/organizationsStore';
+import OrganizationStore from 'sentry/stores/organizationStore';
+import {space} from 'sentry/styles/space';
+import type {Integration} from 'sentry/types/integrations';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import Projects from 'sentry/utils/projects';
+import replaceRouterParams from 'sentry/utils/replaceRouterParams';
+import IntegrationIcon from 'sentry/views/settings/organizationIntegrations/integrationIcon';
 
 type Props = ModalRenderProps & {
-  /**
-   * The destination route
-   */
-  nextPath: string;
+  integrationConfigs: Integration[];
 
-  /**
-   * List of available organizations
-   */
-  organizations: Organization[];
+  loading: boolean;
 
   /**
    * Does modal need to prompt for organization.
@@ -42,30 +39,38 @@ type Props = ModalRenderProps & {
   needProject: boolean;
 
   /**
-   * Organization slug
+   * The destination route
    */
-  organization: string;
-
-  projects: Project[];
-  loading: boolean;
+  nextPath: string | {pathname: string; query?: Query};
 
   /**
    * Finish callback
+   * @param path type will match nextPath's type {@link Props.nextPath}
    */
-  onFinish: (path: string) => void;
-
+  onFinish: (path: string | {pathname: string; query?: Query}) => number | void;
   /**
    * Callback for when organization is selected
    */
   onSelectOrganization: (orgSlug: string) => void;
 
   /**
-   * Id of the project (most likely from the URL)
-   * on which the modal was opened
+   * Organization slug
    */
-  comingFromProjectId?: string;
-  integrationConfigs: Integration[];
+  organization: string;
+
+  /**
+   * List of available organizations
+   */
+  organizations: Organization[];
+
+  projects: Project[];
+
+  allowAllProjectsSelection?: boolean;
 };
+
+function autoFocusReactSelect(reactSelectRef: any) {
+  reactSelectRef?.select?.focus?.();
+}
 
 const selectStyles: StylesConfig = {
   menu: provided => ({
@@ -108,11 +113,11 @@ class ContextPickerModal extends Component<Props> {
     }
   }
 
-  // TODO(ts) The various generics in react-select types make getting this
-  // right hard.
-  orgSelect: any | null = null;
-  projectSelect: any | null = null;
-  configSelect: any | null = null;
+  componentWillUnmount() {
+    window.clearTimeout(this.onFinishTimeout);
+  }
+
+  onFinishTimeout: number | undefined = undefined;
 
   // Performs checks to see if we need to prompt user
   // i.e. When there is only 1 org and no project is needed or
@@ -136,44 +141,38 @@ class ContextPickerModal extends Component<Props> {
       return;
     }
 
+    window.clearTimeout(this.onFinishTimeout);
+    const pathname = typeof nextPath === 'string' ? nextPath : nextPath.pathname;
+
     // If there is only one org and we don't need a project slug, then call finish callback
     if (!needProject) {
-      onFinish(
-        replaceRouterParams(nextPath, {
-          orgId: organizations[0].slug,
-        })
-      );
+      const newPathname = replaceRouterParams(pathname, {
+        orgId: organizations[0]!.slug,
+      });
+      this.onFinishTimeout =
+        onFinish(
+          typeof nextPath === 'string'
+            ? newPathname
+            : {...nextPath, pathname: newPathname}
+        ) ?? undefined;
       return;
     }
 
     // Use latest org or if only 1 org, use that
     let org = latestOrg;
     if (!org && organizations.length === 1) {
-      org = organizations[0].slug;
+      org = organizations[0]!.slug;
     }
 
-    onFinish(
-      replaceRouterParams(nextPath, {
-        orgId: org,
-        projectId: projects[0].slug,
-        project: this.props.projects.find(p => p.slug === projects[0].slug)?.id,
-      })
-    );
-  };
-
-  doFocus = (ref: any | null) => {
-    if (!ref || this.props.loading) {
-      return;
-    }
-
-    // eslint-disable-next-line react/no-find-dom-node
-    const el = ReactDOM.findDOMNode(ref) as HTMLElement;
-
-    if (el !== null) {
-      const input = el.querySelector('input');
-
-      input && input.focus();
-    }
+    const newPathname = replaceRouterParams(pathname, {
+      orgId: org,
+      projectId: projects[0]!.slug,
+      project: this.props.projects.find(p => p.slug === projects[0]!.slug)?.id,
+    });
+    this.onFinishTimeout =
+      onFinish(
+        typeof nextPath === 'string' ? newPathname : {...nextPath, pathname: newPathname}
+      ) ?? undefined;
   };
 
   handleSelectOrganization = ({value}: {value: string}) => {
@@ -202,8 +201,14 @@ class ContextPickerModal extends Component<Props> {
     if (!value) {
       return;
     }
-
-    onFinish(`${nextPath}${value}/`);
+    const newPath =
+      typeof nextPath === 'string'
+        ? `${nextPath}${value}/`
+        : {
+            ...nextPath,
+            pathname: `${nextPath.pathname}${value}/`,
+          };
+    onFinish(newPath);
     return;
   };
 
@@ -218,34 +223,6 @@ class ContextPickerModal extends Component<Props> {
     return [memberProjects, nonMemberProjects];
   };
 
-  onMenuOpen = (
-    ref: any | null,
-    listItems: (Project | Integration)[],
-    valueKey: string,
-    currentSelected: string = ''
-  ) => {
-    // Hacky way to pre-focus to an item with newer versions of react select
-    // See https://github.com/JedWatson/react-select/issues/3648
-    setTimeout(() => {
-      if (ref) {
-        const choices = ref.select.state.menuOptions.focusable;
-        const toBeFocused = listItems.find(({id}) => id === currentSelected);
-        const selectedIndex = toBeFocused
-          ? choices.findIndex(option => option.value === toBeFocused[valueKey])
-          : 0;
-        if (selectedIndex >= 0 && toBeFocused) {
-          // Focusing selected option only if it exists
-          ref.select.scrollToFocusedOptionOnUpdate = true;
-          ref.select.inputIsHiddenAfterUpdate = false;
-          ref.select.setState({
-            focusedValue: null,
-            focusedOption: choices[selectedIndex],
-          });
-        }
-      }
-    });
-  };
-
   // TODO(TS): Fix typings
   customOptionProject = ({label, ...props}: any) => {
     const project = this.props.projects.find(({slug}) => props.value === slug);
@@ -254,11 +231,12 @@ class ContextPickerModal extends Component<Props> {
     }
     return (
       <components.Option label={label} {...props}>
-        <IdBadge
+        <ProjectBadgeOption
           project={project}
           avatarSize={20}
           displayName={label}
           avatarProps={{consistentWidth: true}}
+          disableLink
         />
       </components.Option>
     );
@@ -283,25 +261,25 @@ class ContextPickerModal extends Component<Props> {
   }
 
   renderProjectSelectOrMessage() {
-    const {organization, projects, comingFromProjectId} = this.props;
+    const {organization, projects, allowAllProjectsSelection} = this.props;
     const [memberProjects, nonMemberProjects] = this.getMemberProjects();
     const {isSuperuser} = ConfigStore.get('user') || {};
 
     const projectOptions = [
       {
         label: t('My Projects'),
-        options: memberProjects.map(p => ({
+        options: memberProjects!.map(p => ({
           value: p.slug,
-          label: t(`${p.slug}`),
-          isDisabled: false,
+          label: p.slug,
+          disabled: false,
         })),
       },
       {
         label: t('All Projects'),
-        options: nonMemberProjects.map(p => ({
+        options: nonMemberProjects!.map(p => ({
           value: p.slug,
-          label: t(`${p.slug}`),
-          isDisabled: isSuperuser ? false : true,
+          label: p.slug,
+          disabled: allowAllProjectsSelection ? false : !isSuperuser,
         })),
       },
     ];
@@ -320,17 +298,11 @@ class ContextPickerModal extends Component<Props> {
 
     return (
       <StyledSelectControl
-        ref={(ref: any) => {
-          this.projectSelect = ref;
-          this.doFocus(this.projectSelect);
-        }}
+        ref={autoFocusReactSelect}
         placeholder={t('Select a Project to continue')}
         name="project"
         options={projectOptions}
         onChange={this.handleSelectProject}
-        onMenuOpen={() =>
-          this.onMenuOpen(this.projectSelect, projects, 'slug', comingFromProjectId)
-        }
         components={{Option: this.customOptionProject, DropdownIndicator: null}}
         styles={selectStyles}
         menuIsOpen
@@ -345,7 +317,7 @@ class ContextPickerModal extends Component<Props> {
     const options = [
       {
         label: tct('[providerName] Configurations', {
-          providerName: integrationConfigs[0].provider.name,
+          providerName: integrationConfigs[0]!.provider.name,
         }),
         options: integrationConfigs.map(config => ({
           value: config.id,
@@ -355,21 +327,17 @@ class ContextPickerModal extends Component<Props> {
               <span>{config.domainName}</span>
             </StyledIntegrationItem>
           ),
-          isDisabled: isSuperuser ? false : true,
+          disabled: isSuperuser ? false : true,
         })),
       },
     ];
     return (
       <StyledSelectControl
-        ref={(ref: any) => {
-          this.configSelect = ref;
-          this.doFocus(this.configSelect);
-        }}
+        ref={autoFocusReactSelect}
         placeholder={t('Select a configuration to continue')}
         name="configurations"
         options={options}
         onChange={this.handleSelectConfiguration}
-        onMenuOpen={() => this.onMenuOpen(this.configSelect, integrationConfigs, 'id')}
         components={{DropdownIndicator: null}}
         styles={selectStyles}
         menuIsOpen
@@ -406,18 +374,14 @@ class ContextPickerModal extends Component<Props> {
 
     return (
       <Fragment>
-        <Header closeButton>{this.headerText}</Header>
+        <Header closeButton>
+          <h5>{this.headerText}</h5>
+        </Header>
         <Body>
           {loading && <StyledLoadingIndicator overlay />}
           {needOrg && (
             <StyledSelectControl
-              ref={(ref: any) => {
-                this.orgSelect = ref;
-                if (shouldShowProjectSelector) {
-                  return;
-                }
-                this.doFocus(this.orgSelect);
-              }}
+              ref={shouldShowProjectSelector ? undefined : autoFocusReactSelect}
               placeholder={t('Select an Organization')}
               name="organization"
               options={orgChoices}
@@ -446,20 +410,25 @@ type ContainerProps = Omit<
   | 'onSelectOrganization'
   | 'integrationConfigs'
 > & {
+  allowAllProjectsSelection?: boolean;
+  configUrl?: string;
+
   /**
    * List of slugs we want to be able to choose from
    */
   projectSlugs?: string[];
-  configUrl?: string;
-} & AsyncComponent['props'];
+} & DeprecatedAsyncComponent['props'];
 
 type ContainerState = {
-  selectedOrganization?: string;
   organizations: Organization[];
   integrationConfigs?: Integration[];
-} & AsyncComponent['state'];
+  selectedOrganization?: string;
+} & DeprecatedAsyncComponent['state'];
 
-class ContextPickerModalContainer extends AsyncComponent<ContainerProps, ContainerState> {
+class ContextPickerModalContainer extends DeprecatedAsyncComponent<
+  ContainerProps,
+  ContainerState
+> {
   getDefaultState() {
     const storeState = OrganizationStore.get();
     return {
@@ -469,7 +438,7 @@ class ContextPickerModalContainer extends AsyncComponent<ContainerProps, Contain
     };
   }
 
-  getEndpoints(): ReturnType<AsyncComponent['getEndpoints']> {
+  getEndpoints(): ReturnType<DeprecatedAsyncComponent['getEndpoints']> {
     const {configUrl} = this.props;
     if (configUrl) {
       return [['integrationConfigs', configUrl]];
@@ -495,9 +464,9 @@ class ContextPickerModalContainer extends AsyncComponent<ContainerProps, Contain
     initiallyLoaded,
     integrationConfigs,
   }: {
-    projects?: Project[];
     initiallyLoaded?: boolean;
     integrationConfigs?: Integration[];
+    projects?: Project[];
   }) {
     return (
       <ContextPickerModal
@@ -508,6 +477,7 @@ class ContextPickerModalContainer extends AsyncComponent<ContainerProps, Contain
         organization={this.state.selectedOrganization!}
         onSelectOrganization={this.handleSelectOrganization}
         integrationConfigs={integrationConfigs || []}
+        allowAllProjectsSelection={this.props.allowAllProjectsSelection}
       />
     );
   }
@@ -546,6 +516,10 @@ export default ContextPickerModalContainer;
 
 const StyledSelectControl = styled(SelectControl)`
   margin-top: ${space(1)};
+`;
+
+const ProjectBadgeOption = styled(IdBadge)`
+  margin: ${space(1)};
 `;
 
 const StyledLoadingIndicator = styled(LoadingIndicator)`

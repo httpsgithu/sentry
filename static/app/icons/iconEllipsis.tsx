@@ -1,21 +1,25 @@
-import * as React from 'react';
+import {forwardRef} from 'react';
 
-import SvgIcon from './svgIcon';
+import type {SVGIconProps} from './svgIcon';
+import {SvgIcon} from './svgIcon';
 
-type Props = React.ComponentProps<typeof SvgIcon>;
+interface IconEllipsisProps extends SVGIconProps {
+  compact?: boolean;
+}
 
-const IconEllipsis = React.forwardRef(function IconEllipsis(
-  props: Props,
-  ref: React.Ref<SVGSVGElement>
-) {
-  return (
-    <SvgIcon {...props} ref={ref}>
-      <circle cx="8" cy="8" r="1.31" />
-      <circle cx="1.31" cy="8" r="1.31" />
-      <circle cx="14.69" cy="8" r="1.31" />
-    </SvgIcon>
-  );
-});
+const IconEllipsis = forwardRef<SVGSVGElement, IconEllipsisProps>(
+  ({compact = false, ...props}: IconEllipsisProps, ref) => {
+    const circleRadius = compact ? 1.11 : 1.31;
+    const circleSpacing = compact ? 5.5 : 6.69;
+    return (
+      <SvgIcon {...props} ref={ref}>
+        <circle cx="8" cy="8" r={circleRadius} />
+        <circle cx={8 - circleSpacing} cy="8" r={circleRadius} />
+        <circle cx={8 + circleSpacing} cy="8" r={circleRadius} />
+      </SvgIcon>
+    );
+  }
+);
 
 IconEllipsis.displayName = 'IconEllipsis';
 

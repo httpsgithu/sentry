@@ -1,16 +1,20 @@
 from rest_framework.exceptions import ParseError
+from rest_framework.request import Request
 from rest_framework.response import Response
+from sentry_sdk import start_span
 
 from sentry import features, search
-from sentry.api.bases import OrganizationEventsEndpointBase
-from sentry.api.helpers.group_index import (
-    ValidationError,
-    rate_limit_endpoint,
-    validate_search_filter_permissions,
-)
+from sentry.api.api_owners import ApiOwner
+from sentry.api.api_publish_status import ApiPublishStatus
+from sentry.api.base import region_silo_endpoint
+from sentry.api.bases.organization import OrganizationEndpoint
+from sentry.api.helpers.group_index import validate_search_filter_permissions
+from sentry.api.helpers.group_index.validators import ValidationError
 from sentry.api.issue_search import convert_query_values, parse_search_query
-from sentry.api.utils import InvalidParams, get_date_range_from_params
+from sentry.api.utils import get_date_range_from_params
+from sentry.exceptions import InvalidParams
 from sentry.snuba import discover
+from sentry.types.ratelimit import RateLimit, RateLimitCategory
 
 ERR_INVALID_STATS_PERIOD = "Invalid stats_period. Valid choices are '', '24h', and '14d'"
 
@@ -18,31 +22,50 @@ ERR_INVALID_STATS_PERIOD = "Invalid stats_period. Valid choices are '', '24h', a
 ISSUES_COUNT_MAX_HITS_LIMIT = 100
 
 
-class OrganizationIssuesCountEndpoint(OrganizationEventsEndpointBase):
-    def _count(self, request, query, organization, projects, environments, extra_query_kwargs=None):
-        query_kwargs = {"projects": projects}
+@region_silo_endpoint
+class OrganizationIssuesCountEndpoint(OrganizationEndpoint):
+    publish_status = {
+        "GET": ApiPublishStatus.UNKNOWN,
+    }
+    owner = ApiOwner.ISSUES
+    enforce_rate_limit = True
+    rate_limits = {
+        "GET": {
+            RateLimitCategory.IP: RateLimit(limit=10, window=1),
+            RateLimitCategory.USER: RateLimit(limit=10, window=1),
+            RateLimitCategory.ORGANIZATION: RateLimit(limit=10, window=1),
+        }
+    }
 
-        query = query.strip()
-        if query:
-            search_filters = convert_query_values(
-                parse_search_query(query), projects, request.user, environments
-            )
-            validate_search_filter_permissions(organization, search_filters, request.user)
-            query_kwargs["search_filters"] = search_filters
+    def _count(
+        self, request: Request, query, organization, projects, environments, extra_query_kwargs=None
+    ):
+        with start_span(op="_count"):
+            query_kwargs = {"projects": projects}
 
-        if extra_query_kwargs is not None:
-            assert "environment" not in extra_query_kwargs
-            query_kwargs.update(extra_query_kwargs)
+            query = query.strip()
+            if query:
+                search_filters = convert_query_values(
+                    parse_search_query(query), projects, request.user, environments
+                )
+                validate_search_filter_permissions(organization, search_filters, request.user)
+                query_kwargs["search_filters"] = search_filters
 
-        query_kwargs["environments"] = environments if environments else None
+            if extra_query_kwargs is not None:
+                assert "environment" not in extra_query_kwargs
+                query_kwargs.update(extra_query_kwargs)
 
-        query_kwargs["max_hits"] = ISSUES_COUNT_MAX_HITS_LIMIT
+            query_kwargs["environments"] = environments if environments else None
 
-        result = search.query(**query_kwargs)
-        return result.hits
+            query_kwargs["max_hits"] = ISSUES_COUNT_MAX_HITS_LIMIT
 
-    @rate_limit_endpoint(limit=10, window=1)
-    def get(self, request, organization):
+            query_kwargs["actor"] = request.user
+        with start_span(op="start_search") as span:
+            span.set_data("query_kwargs", query_kwargs)
+            result = search.backend.query(**query_kwargs)
+            return result.hits
+
+    def get(self, request: Request, organization) -> Response:
         stats_period = request.GET.get("groupStatsPeriod")
         try:
             start, end = get_date_range_from_params(request.GET)
@@ -58,8 +81,12 @@ class OrganizationIssuesCountEndpoint(OrganizationEventsEndpointBase):
         if not projects:
             return Response([])
 
-        if len(projects) > 1 and not features.has(
-            "organizations:global-views", organization, actor=request.user
+        is_fetching_replay_data = request.headers.get("X-Sentry-Replay-Request") == "1"
+
+        if (
+            len(projects) > 1
+            and not features.has("organizations:global-views", organization, actor=request.user)
+            and not is_fetching_replay_data
         ):
             return Response(
                 {"detail": "You do not have the multi project stream feature enabled"}, status=400

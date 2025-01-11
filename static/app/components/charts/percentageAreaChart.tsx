@@ -1,35 +1,38 @@
-import * as React from 'react';
-import {EChartOption} from 'echarts';
-import moment from 'moment';
+import {Component} from 'react';
+import type {LineSeriesOption} from 'echarts';
+import moment from 'moment-timezone';
 
-import {Series, SeriesDataUnit} from 'app/types/echarts';
+import type {Series, SeriesDataUnit} from 'sentry/types/echarts';
+import toArray from 'sentry/utils/array/toArray';
 
 import AreaSeries from './series/areaSeries';
+import type {BaseChartProps} from './baseChart';
 import BaseChart from './baseChart';
 
 const FILLER_NAME = '__filler';
 
-type ChartProps = React.ComponentProps<typeof BaseChart>;
-
-export type AreaChartSeries = Series & Omit<EChartOption.SeriesLine, 'data' | 'name'>;
+export interface AreaChartSeries
+  extends Series,
+    Omit<LineSeriesOption, 'data' | 'name' | 'color' | 'id' | 'areaStyle'> {
+  dataArray?: LineSeriesOption['data'];
+}
 
 type DefaultProps = {
   getDataItemName: ({name}: SeriesDataUnit) => SeriesDataUnit['name'];
   getValue: ({value}: SeriesDataUnit, total?: number) => number;
 };
 
-type Props = Omit<ChartProps, 'series'> &
-  DefaultProps & {
-    stacked?: boolean;
-    series: AreaChartSeries[];
-  };
+interface Props extends Omit<BaseChartProps, 'series'>, DefaultProps {
+  series: AreaChartSeries[];
+  stacked?: boolean;
+}
 
 /**
  * A stacked 100% column chart over time
  *
  * See https://exceljet.net/chart-type/100-stacked-bar-chart
  */
-export default class PercentageAreaChart extends React.Component<Props> {
+export default class PercentageAreaChart extends Component<Props> {
   static defaultProps: DefaultProps = {
     // TODO(billyvg): Move these into BaseChart? or get rid completely
     getDataItemName: ({name}) => name,
@@ -40,9 +43,9 @@ export default class PercentageAreaChart extends React.Component<Props> {
     const {series, getDataItemName, getValue} = this.props;
 
     const totalsArray: [string | number, number][] = series.length
-      ? series[0].data.map(({name}, i) => [
+      ? series[0]!.data.map(({name}, i) => [
           name,
-          series.reduce((sum, {data}) => sum + data[i].value, 0),
+          series.reduce((sum, {data}) => sum + data[i]!.value, 0),
         ])
       : [];
     const totals = new Map<string | number, number>(totalsArray);
@@ -70,12 +73,12 @@ export default class PercentageAreaChart extends React.Component<Props> {
         tooltip={{
           formatter: seriesParams => {
             // `seriesParams` can be an array or an object :/
-            const series = Array.isArray(seriesParams) ? seriesParams : [seriesParams];
+            const series = toArray(seriesParams);
 
             // Filter series that have 0 counts
             const date =
               `${
-                series.length && moment(series[0].axisValue).format('MMM D, YYYY')
+                series.length && moment(series[0].data[0]).format('MMM D, YYYY')
               }<br />` || '';
 
             return [
@@ -90,19 +93,17 @@ export default class PercentageAreaChart extends React.Component<Props> {
                 )
                 .join(''),
               '</div>',
-              `<div class="tooltip-date">${date}</div>`,
+              `<div class="tooltip-footer">${date}</div>`,
               '<div class="tooltip-arrow"></div>',
             ].join('');
           },
         }}
-        xAxis={{boundaryGap: true}}
         yAxis={{
           min: 0,
           max: 100,
           type: 'value',
           interval: 25,
           splitNumber: 4,
-          data: [0, 25, 50, 100],
           axisLabel: {
             formatter: '{value}%',
           },

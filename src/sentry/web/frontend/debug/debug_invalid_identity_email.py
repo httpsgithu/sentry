@@ -1,3 +1,4 @@
+from django.http import HttpRequest, HttpResponse
 from django.views.generic import View
 
 from sentry.tasks.commits import generate_invalid_identity_email
@@ -7,8 +8,8 @@ from .mail import MailPreview
 
 
 class DebugInvalidIdentityEmailView(View):
-    def get(self, request):
-        identity = UserSocialAuth(user=request.user, provider="dummy")
+    def get(self, request: HttpRequest) -> HttpResponse:
+        identity = UserSocialAuth(user_id=request.user.id, provider="dummy")
 
         email = generate_invalid_identity_email(identity=identity)
         return MailPreview(

@@ -1,13 +1,14 @@
-import * as React from 'react';
+import {Component, createRef, Fragment} from 'react';
 import styled from '@emotion/styled';
 
-import TextOverflow from 'app/components/textOverflow';
-import {t} from 'app/locale';
-import space from 'app/styles/space';
-import {defined} from 'app/utils';
-import InputField from 'app/views/settings/components/forms/inputField';
+import TextField from 'sentry/components/forms/fields/textField';
+import TextOverflow from 'sentry/components/textOverflow';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import {defined} from 'sentry/utils';
 
-import {SourceSuggestion, SourceSuggestionType} from '../../types';
+import type {SourceSuggestion} from '../../types';
+import {SourceSuggestionType} from '../../types';
 import {binarySuggestions, unarySuggestions} from '../../utils';
 
 import SourceSuggestionExamples from './sourceSuggestionExamples';
@@ -17,24 +18,24 @@ const defaultHelp = t(
 );
 
 type Props = {
-  value: string;
-  onChange: (value: string) => void;
   isRegExMatchesSelected: boolean;
+  onChange: (value: string) => void;
   suggestions: Array<SourceSuggestion>;
+  value: string;
   error?: string;
   onBlur?: (value: string, event: React.FocusEvent<HTMLInputElement>) => void;
 };
 
 type State = {
-  suggestions: Array<SourceSuggestion>;
-  fieldValues: Array<SourceSuggestion | Array<SourceSuggestion>>;
   activeSuggestion: number;
-  showSuggestions: boolean;
-  hideCaret: boolean;
+  fieldValues: Array<SourceSuggestion | Array<SourceSuggestion>>;
   help: string;
+  hideCaret: boolean;
+  showSuggestions: boolean;
+  suggestions: Array<SourceSuggestion>;
 };
 
-class SourceField extends React.Component<Props, State> {
+class SourceField extends Component<Props, State> {
   state: State = {
     suggestions: [],
     fieldValues: [],
@@ -63,8 +64,8 @@ class SourceField extends React.Component<Props, State> {
     }
   }
 
-  selectorField = React.createRef<HTMLDivElement>();
-  suggestionList = React.createRef<HTMLUListElement>();
+  selectorField = createRef<HTMLDivElement>();
+  suggestionList = createRef<HTMLUListElement>();
 
   getAllSuggestions() {
     return [...this.getValueSuggestions(), ...unarySuggestions, ...binarySuggestions];
@@ -95,16 +96,16 @@ class SourceField extends React.Component<Props, State> {
       }
     }
 
-    const filteredSuggestions = valuesToBeFiltered.filter(
-      s => s.value.toLowerCase().indexOf(value.toLowerCase()) > -1
+    const filteredSuggestions = valuesToBeFiltered.filter(s =>
+      s.value.toLowerCase().includes(value.toLowerCase())
     );
 
     return filteredSuggestions;
   }
 
   getNewSuggestions(fieldValues: Array<SourceSuggestion | Array<SourceSuggestion>>) {
-    const lastFieldValue = fieldValues[fieldValues.length - 1];
-    const penultimateFieldValue = fieldValues[fieldValues.length - 2];
+    const lastFieldValue = fieldValues[fieldValues.length - 1]!;
+    const penultimateFieldValue = fieldValues[fieldValues.length - 2]!;
 
     if (Array.isArray(lastFieldValue)) {
       // recursion
@@ -171,8 +172,8 @@ class SourceField extends React.Component<Props, State> {
     const splittedValue = newValue.split(' ');
 
     for (const splittedValueIndex in splittedValue) {
-      const value = splittedValue[splittedValueIndex];
-      const lastFieldValue = fieldValues[fieldValues.length - 1];
+      const value = splittedValue[splittedValueIndex]!;
+      const lastFieldValue = fieldValues[fieldValues.length - 1]!;
 
       if (
         lastFieldValue &&
@@ -184,18 +185,18 @@ class SourceField extends React.Component<Props, State> {
       }
 
       if (value.includes('!') && !!value.split('!')[1]) {
-        const valueAfterUnaryOperator = value.split('!')[1];
+        const valueAfterUnaryOperator = value.split('!')[1]!;
         const selector = this.getAllSuggestions().find(
           s => s.value === valueAfterUnaryOperator
         );
         if (!selector) {
           fieldValues.push([
-            unarySuggestions[0],
+            unarySuggestions[0]!,
             {type: SourceSuggestionType.STRING, value: valueAfterUnaryOperator},
           ]);
           continue;
         }
-        fieldValues.push([unarySuggestions[0], selector]);
+        fieldValues.push([unarySuggestions[0]!, selector]);
         continue;
       }
 
@@ -220,7 +221,7 @@ class SourceField extends React.Component<Props, State> {
   scrollToSuggestion() {
     const {activeSuggestion, hideCaret} = this.state;
 
-    this.suggestionList?.current?.children[activeSuggestion].scrollIntoView({
+    this.suggestionList?.current?.children[activeSuggestion]!.scrollIntoView({
       behavior: 'smooth',
       block: 'nearest',
       inline: 'start',
@@ -239,7 +240,7 @@ class SourceField extends React.Component<Props, State> {
     const newValue: Array<string> = [];
 
     for (const index in fieldValues) {
-      const fieldValue = fieldValues[index];
+      const fieldValue = fieldValues[index]!;
       if (Array.isArray(fieldValue)) {
         if (fieldValue[0]?.value || fieldValue[1]?.value) {
           newValue.push(`${fieldValue[0]?.value ?? ''}${fieldValue[1]?.value ?? ''}`);
@@ -255,15 +256,15 @@ class SourceField extends React.Component<Props, State> {
   getNewFieldValues(
     suggestion: SourceSuggestion
   ): Array<SourceSuggestion | Array<SourceSuggestion>> {
-    const fieldValues = [...this.state.fieldValues];
-    const lastFieldValue = fieldValues[fieldValues.length - 1];
+    const fieldValues = [...this.state.fieldValues]!;
+    const lastFieldValue = fieldValues[fieldValues.length - 1]!;
 
     if (!defined(lastFieldValue)) {
       return [suggestion];
     }
 
     if (Array.isArray(lastFieldValue)) {
-      fieldValues[fieldValues.length - 1] = [lastFieldValue[0], suggestion];
+      fieldValues[fieldValues.length - 1] = [lastFieldValue[0]!, suggestion];
       return fieldValues;
     }
 
@@ -273,6 +274,11 @@ class SourceField extends React.Component<Props, State> {
 
     if (lastFieldValue?.type === 'string' && !lastFieldValue?.value) {
       fieldValues[fieldValues.length - 1] = suggestion;
+      return fieldValues;
+    }
+
+    if (suggestion.type === 'value' && lastFieldValue?.value !== suggestion.value) {
+      return [suggestion];
     }
 
     return fieldValues;
@@ -323,7 +329,7 @@ class SourceField extends React.Component<Props, State> {
     });
   };
 
-  handleClickSuggestionItem = (suggestion: SourceSuggestion) => () => {
+  handleClickSuggestionItem = (suggestion: SourceSuggestion) => {
     const fieldValues = this.getNewFieldValues(suggestion);
     this.setState(
       {
@@ -339,20 +345,20 @@ class SourceField extends React.Component<Props, State> {
   handleKeyDown = (_value: string, event: React.KeyboardEvent<HTMLInputElement>) => {
     event.persist();
 
-    const {keyCode} = event;
+    const {key} = event;
     const {activeSuggestion, suggestions} = this.state;
 
-    if (keyCode === 8 || keyCode === 32) {
+    if (key === 'Backspace' || key === ' ') {
       this.toggleSuggestions(true);
       return;
     }
 
-    if (keyCode === 13) {
-      this.handleClickSuggestionItem(suggestions[activeSuggestion])();
+    if (key === 'Enter') {
+      this.handleClickSuggestionItem(suggestions[activeSuggestion]!);
       return;
     }
 
-    if (keyCode === 38) {
+    if (key === 'ArrowUp') {
       if (activeSuggestion === 0) {
         return;
       }
@@ -362,7 +368,7 @@ class SourceField extends React.Component<Props, State> {
       return;
     }
 
-    if (keyCode === 40) {
+    if (key === 'ArrowDown') {
       if (activeSuggestion === suggestions.length - 1) {
         return;
       }
@@ -383,9 +389,8 @@ class SourceField extends React.Component<Props, State> {
 
     return (
       <Wrapper ref={this.selectorField} hideCaret={hideCaret}>
-        <StyledInput
+        <StyledTextField
           data-test-id="source-field"
-          type="text"
           label={t('Source')}
           name="source"
           placeholder={t('Enter a custom attribute, variable or header name')}
@@ -404,7 +409,7 @@ class SourceField extends React.Component<Props, State> {
           showHelpInTooltip
         />
         {showSuggestions && suggestions.length > 0 && (
-          <React.Fragment>
+          <Fragment>
             <Suggestions
               ref={this.suggestionList}
               error={error}
@@ -413,7 +418,10 @@ class SourceField extends React.Component<Props, State> {
               {suggestions.slice(0, 50).map((suggestion, index) => (
                 <Suggestion
                   key={suggestion.value}
-                  onClick={this.handleClickSuggestionItem(suggestion)}
+                  onClick={event => {
+                    event.preventDefault();
+                    this.handleClickSuggestionItem(suggestion);
+                  }}
                   active={index === activeSuggestion}
                   tabIndex={-1}
                 >
@@ -433,7 +441,7 @@ class SourceField extends React.Component<Props, State> {
               ))}
             </Suggestions>
             <SuggestionsOverlay onClick={this.handleClickOutside} />
-          </React.Fragment>
+          </Fragment>
         )}
       </Wrapper>
     );
@@ -448,7 +456,7 @@ const Wrapper = styled('div')<{hideCaret?: boolean}>`
   ${p => p.hideCaret && `caret-color: transparent;`}
 `;
 
-const StyledInput = styled(InputField)`
+const StyledTextField = styled(TextField)`
   z-index: 1002;
   :focus {
     outline: none;
@@ -476,7 +484,7 @@ const Suggestions = styled('ul')<{error?: string}>`
 const Suggestion = styled('li')<{active: boolean}>`
   display: grid;
   grid-template-columns: auto 1fr max-content;
-  grid-gap: ${space(1)};
+  gap: ${space(1)};
   border-bottom: 1px solid ${p => p.theme.border};
   padding: ${space(1)} ${space(2)};
   font-size: ${p => p.theme.fontSizeMedium};
@@ -492,6 +500,7 @@ const SuggestionDescription = styled('div')`
   display: flex;
   overflow: hidden;
   color: ${p => p.theme.gray300};
+  line-height: 1.2;
 `;
 
 const SuggestionsOverlay = styled('div')`

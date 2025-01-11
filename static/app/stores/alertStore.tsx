@@ -1,48 +1,48 @@
-import Reflux from 'reflux';
+import type {Theme} from '@emotion/react';
+import {createStore} from 'reflux';
 
-import AlertActions from 'app/actions/alertActions';
-import {defined} from 'app/utils';
-import localStorage from 'app/utils/localStorage';
+import {defined} from 'sentry/utils';
+import localStorage from 'sentry/utils/localStorage';
+
+import type {StrictStoreDefinition} from './types';
 
 type Alert = {
-  message: string;
-  type: 'warning' | 'warn' | 'error';
+  message: React.ReactNode;
+  type: keyof Theme['alert'];
   expireAfter?: number;
-  key?: number;
   id?: string;
-  url?: string;
+  key?: number;
   neverExpire?: boolean;
   noDuplicates?: boolean;
+  onClose?: () => void;
+  opaque?: boolean;
+  url?: string;
 };
 
-type AlertStoreInterface = Reflux.StoreDefinition & {
-  init: () => void;
-  getInitialState: () => Alert[];
-  onAddAlert: (alert: Alert) => void;
-  onCloseAlert: (alert: Alert, duration?: number) => void;
-};
-
-type Internals = {
-  alerts: Alert[];
+interface InternalAlertStoreDefinition {
   count: number;
-};
+}
+interface AlertStoreDefinition
+  extends StrictStoreDefinition<Alert[]>,
+    InternalAlertStoreDefinition {
+  addAlert(alert: Alert): void;
+  closeAlert(alert: Alert, duration?: number): void;
+}
 
-const storeConfig: AlertStoreInterface & Internals = {
-  listenables: AlertActions,
-  alerts: [],
+const storeConfig: AlertStoreDefinition = {
+  state: [],
   count: 0,
 
   init() {
-    this.alerts = [];
+    // XXX: Do not use `this.listenTo` in this store. We avoid usage of reflux
+    // listeners due to their leaky nature in tests.
+
+    this.state = [];
     this.count = 0;
   },
 
-  getInitialState() {
-    return this.alerts;
-  },
-
-  onAddAlert(alert) {
-    const alertAlreadyExists = this.alerts.some(a => a.id === alert.id);
+  addAlert(alert) {
+    const alertAlreadyExists = this.state.some(a => a.id === alert.id);
     if (alertAlreadyExists && alert.noDuplicates) {
       return;
     }
@@ -55,7 +55,7 @@ const storeConfig: AlertStoreInterface & Internals = {
         // Remove any objects that have passed their mute duration.
         const now = Math.floor(new Date().valueOf() / 1000);
         for (const key in expirations) {
-          if (expirations.hasOwnProperty(key) && expirations[key] < now) {
+          if (expirations.hasOwnProperty(key) && expirations[key]! < now) {
             delete expirations[key];
           }
         }
@@ -73,7 +73,7 @@ const storeConfig: AlertStoreInterface & Internals = {
 
     if (alert.expireAfter && !alert.neverExpire) {
       window.setTimeout(() => {
-        this.onCloseAlert(alert);
+        this.closeAlert(alert);
       }, alert.expireAfter);
     }
 
@@ -82,11 +82,11 @@ const storeConfig: AlertStoreInterface & Internals = {
     // intentionally recreate array via concat because of Reflux
     // "bug" where React components are given same reference to tracked
     // data objects, and don't *see* that values have changed
-    this.alerts = this.alerts.concat([alert]);
-    this.trigger(this.alerts);
+    this.state = this.state.concat([alert]);
+    this.trigger(this.state);
   },
 
-  onCloseAlert(alert, duration = 60 * 60 * 7 * 24) {
+  closeAlert(alert, duration = 60 * 60 * 7 * 24) {
     if (defined(alert.id) && defined(duration)) {
       const expiry = Math.floor(new Date().valueOf() / 1000) + duration;
       const mutedData = localStorage.getItem('alerts:muted');
@@ -100,11 +100,14 @@ const storeConfig: AlertStoreInterface & Internals = {
     }
 
     // TODO(dcramer): we need some animations here for closing alerts
-    this.alerts = this.alerts.filter(item => alert !== item);
-    this.trigger(this.alerts);
+    this.state = this.state.filter(item => alert !== item);
+    this.trigger(this.state);
+  },
+
+  getState() {
+    return this.state;
   },
 };
 
-const AlertStore = Reflux.createStore(storeConfig) as Reflux.Store & AlertStoreInterface;
-
+const AlertStore = createStore(storeConfig);
 export default AlertStore;

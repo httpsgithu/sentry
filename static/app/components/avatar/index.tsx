@@ -1,22 +1,56 @@
-import * as React from 'react';
+import {forwardRef} from 'react';
 
-import OrganizationAvatar from 'app/components/avatar/organizationAvatar';
-import ProjectAvatar from 'app/components/avatar/projectAvatar';
-import TeamAvatar from 'app/components/avatar/teamAvatar';
-import UserAvatar from 'app/components/avatar/userAvatar';
-import {AvatarProject, OrganizationSummary, Team} from 'app/types';
+import DocIntegrationAvatar from 'sentry/components/avatar/docIntegrationAvatar';
+import OrganizationAvatar from 'sentry/components/avatar/organizationAvatar';
+import ProjectAvatar from 'sentry/components/avatar/projectAvatar';
+import SentryAppAvatar from 'sentry/components/avatar/sentryAppAvatar';
+import TeamAvatar from 'sentry/components/avatar/teamAvatar';
+import UserAvatar from 'sentry/components/avatar/userAvatar';
+import type {Actor} from 'sentry/types/core';
+import type {AvatarSentryApp, DocIntegration} from 'sentry/types/integrations';
+import type {OrganizationSummary, Team} from 'sentry/types/organization';
+import type {AvatarProject} from 'sentry/types/project';
+
+import ActorAvatar from './actorAvatar';
 
 type Props = {
-  team?: Team;
+  actor?: Actor;
+  docIntegration?: DocIntegration;
+  /**
+   * True if the Avatar is full color, rather than B&W (Used for SentryAppAvatar)
+   */
+  isColor?: boolean;
+  /**
+   * True if the rendered Avatar should be a static asset
+   */
+  isDefault?: boolean;
   organization?: OrganizationSummary;
   project?: AvatarProject;
-} & UserAvatar['props'];
+  sentryApp?: AvatarSentryApp;
+  team?: Team;
+} & React.ComponentProps<typeof UserAvatar>;
 
-const Avatar = React.forwardRef(function Avatar(
-  {hasTooltip = false, user, team, project, organization, ...props}: Props,
+const Avatar = forwardRef(function Avatar(
+  {
+    hasTooltip = false,
+    actor,
+    user,
+    team,
+    project,
+    organization,
+    sentryApp,
+    isColor = true,
+    isDefault = false,
+    docIntegration,
+    ...props
+  }: Props,
   ref: React.Ref<HTMLSpanElement>
 ) {
   const commonProps = {hasTooltip, forwardedRef: ref, ...props};
+
+  if (actor) {
+    return <ActorAvatar actor={actor} {...commonProps} />;
+  }
 
   if (user) {
     return <UserAvatar user={user} {...commonProps} />;
@@ -28,6 +62,21 @@ const Avatar = React.forwardRef(function Avatar(
 
   if (project) {
     return <ProjectAvatar project={project} {...commonProps} />;
+  }
+
+  if (sentryApp) {
+    return (
+      <SentryAppAvatar
+        sentryApp={sentryApp}
+        isColor={isColor}
+        isDefault={isDefault}
+        {...commonProps}
+      />
+    );
+  }
+
+  if (docIntegration) {
+    return <DocIntegrationAvatar docIntegration={docIntegration} {...commonProps} />;
   }
 
   return <OrganizationAvatar organization={organization} {...commonProps} />;

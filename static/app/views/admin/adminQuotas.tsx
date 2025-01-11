@@ -1,19 +1,25 @@
-import {TextField} from 'app/components/forms';
-import InternalStatChart from 'app/components/internalStatChart';
-import AsyncView from 'app/views/asyncView';
+import {Fragment} from 'react';
+
+import DeprecatedAsyncComponent from 'sentry/components/deprecatedAsyncComponent';
+import TextField from 'sentry/components/forms/fields/textField';
+import InternalStatChart from 'sentry/components/internalStatChart';
+import Panel from 'sentry/components/panels/panel';
+import PanelBody from 'sentry/components/panels/panelBody';
+import PanelHeader from 'sentry/components/panels/panelHeader';
+import {t} from 'sentry/locale';
 
 type Config = {
   backend: string;
   options: Record<string, string>;
 };
 
-type State = AsyncView['state'] & {
-  since: number;
-  resolution: string;
+type State = DeprecatedAsyncComponent['state'] & {
   config: Config;
+  resolution: string;
+  since: number;
 };
 
-export default class AdminQuotas extends AsyncView<{}, State> {
+export default class AdminQuotas extends DeprecatedAsyncComponent<{}, State> {
   getDefaultState() {
     return {
       ...super.getDefaultState(),
@@ -22,56 +28,62 @@ export default class AdminQuotas extends AsyncView<{}, State> {
     };
   }
 
-  getEndpoints(): ReturnType<AsyncView['getEndpoints']> {
+  getEndpoints(): ReturnType<DeprecatedAsyncComponent['getEndpoints']> {
     return [['config', '/internal/quotas/']];
   }
 
   renderBody() {
     const {config} = this.state;
     return (
-      <div>
+      <Fragment>
         <h3>Quotas</h3>
 
-        <div className="box">
-          <div className="box-header">
-            <h4>Config</h4>
-          </div>
-
-          <div className="box-content with-padding">
-            <TextField name="backend" value={config.backend} label="Backend" disabled />
+        <Panel>
+          <PanelHeader>{t('Config')}</PanelHeader>
+          <PanelBody withPadding>
+            <TextField
+              name="backend"
+              value={config.backend}
+              label="Backend"
+              disabled
+              inline={false}
+              stacked
+            />
             <TextField
               name="rateLimit"
               value={config.options['system.rate-limit']}
               label="Rate Limit"
               disabled
+              inline={false}
+              stacked
             />
-          </div>
-        </div>
+          </PanelBody>
+        </Panel>
 
-        <div className="box">
-          <div className="box-header">
-            <h4>Total Events</h4>
-          </div>
-          <InternalStatChart
-            since={this.state.since}
-            resolution={this.state.resolution}
-            stat="events.total"
-            label="Events"
-          />
-        </div>
+        <Panel>
+          <PanelHeader>{t('Total Events')}</PanelHeader>
+          <PanelBody withPadding>
+            <InternalStatChart
+              since={this.state.since}
+              resolution={this.state.resolution}
+              stat="events.total"
+              label="Events"
+            />
+          </PanelBody>
+        </Panel>
 
-        <div className="box">
-          <div className="box-header">
-            <h4>Dropped Events</h4>
-          </div>
-          <InternalStatChart
-            since={this.state.since}
-            resolution={this.state.resolution}
-            stat="events.dropped"
-            label="Events"
-          />
-        </div>
-      </div>
+        <Panel>
+          <PanelHeader>{t('Dropped Events')}</PanelHeader>
+          <PanelBody withPadding>
+            <InternalStatChart
+              since={this.state.since}
+              resolution={this.state.resolution}
+              stat="events.dropped"
+              label="Events"
+            />
+          </PanelBody>
+        </Panel>
+      </Fragment>
     );
   }
 }

@@ -1,39 +1,42 @@
-import * as React from 'react';
-import {withRouter, WithRouterProps} from 'react-router';
+import {Component} from 'react';
+import type {Theme} from '@emotion/react';
 import {withTheme} from '@emotion/react';
-import {EChartOption} from 'echarts/lib/echarts';
-import {Query} from 'history';
+import type {Query} from 'history';
 import isEqual from 'lodash/isEqual';
 import memoize from 'lodash/memoize';
 import partition from 'lodash/partition';
 
-import {addErrorMessage} from 'app/actionCreators/indicator';
-import {Client, ResponseMeta} from 'app/api';
-import MarkLine from 'app/components/charts/components/markLine';
-import {t} from 'app/locale';
-import {DateString, Organization} from 'app/types';
-import {Series} from 'app/types/echarts';
-import {escape} from 'app/utils';
-import {getFormattedDate, getUtcDateString} from 'app/utils/dates';
-import {formatVersion} from 'app/utils/formatters';
-import parseLinkHeader from 'app/utils/parseLinkHeader';
-import {Theme} from 'app/utils/theme';
-import withApi from 'app/utils/withApi';
-import withOrganization from 'app/utils/withOrganization';
+import {addErrorMessage} from 'sentry/actionCreators/indicator';
+import type {Client, ResponseMeta} from 'sentry/api';
+import MarkLine from 'sentry/components/charts/components/markLine';
+import {t} from 'sentry/locale';
+import type {DateString} from 'sentry/types/core';
+import type {Series} from 'sentry/types/echarts';
+import type {WithRouterProps} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import {escape} from 'sentry/utils';
+import {getFormattedDate, getUtcDateString} from 'sentry/utils/dates';
+import parseLinkHeader from 'sentry/utils/parseLinkHeader';
+import normalizeUrl from 'sentry/utils/url/normalizeUrl';
+import {formatVersion} from 'sentry/utils/versions/formatVersion';
+import withApi from 'sentry/utils/withApi';
+import withOrganization from 'sentry/utils/withOrganization';
+// eslint-disable-next-line no-restricted-imports
+import withSentryRouter from 'sentry/utils/withSentryRouter';
 
 type ReleaseMetaBasic = {
-  version: string;
   date: string;
+  version: string;
 };
 
 type ReleaseConditions = {
-  start: DateString;
   end: DateString;
-  project: Readonly<number[]>;
   environment: Readonly<string[]>;
-  statsPeriod?: string;
+  project: Readonly<number[]>;
+  start: DateString;
   cursor?: string;
   query?: string;
+  statsPeriod?: string | null;
 };
 
 // This is not an exported action/function because releases list uses AsyncComponent
@@ -43,7 +46,7 @@ function getOrganizationReleases(
   organization: Organization,
   conditions: ReleaseConditions
 ) {
-  const query = {};
+  const query: Record<string, string> = {};
   Object.keys(conditions).forEach(key => {
     let value = conditions[key];
     if (value && (key === 'start' || key === 'end')) {
@@ -61,32 +64,40 @@ function getOrganizationReleases(
   }) as Promise<[ReleaseMetaBasic[], any, ResponseMeta]>;
 }
 
-type Props = WithRouterProps & {
+const getOrganizationReleasesMemoized = memoize(
+  getOrganizationReleases,
+  (_, __, conditions) =>
+    Object.values(conditions)
+      .map(val => JSON.stringify(val))
+      .join('-')
+);
+
+export interface ReleaseSeriesProps extends WithRouterProps {
   api: Client;
-  theme: Theme;
-  organization: Organization;
   children: (s: State) => React.ReactNode;
-  projects: Readonly<number[]>;
-  environments: Readonly<string[]>;
-  start: DateString;
   end: DateString;
-  period?: string;
-  utc?: boolean | null;
-  releases?: ReleaseMetaBasic[] | null;
-  tooltip?: EChartOption.Tooltip;
-  memoized?: boolean;
-  preserveQueryParams?: boolean;
+  environments: Readonly<string[]>;
+  organization: Organization;
+  projects: Readonly<number[]>;
+  start: DateString;
+  theme: Theme;
   emphasizeReleases?: string[];
+  memoized?: boolean;
+  period?: string | null;
+  preserveQueryParams?: boolean;
   query?: string;
   queryExtra?: Query;
-};
+  releases?: ReleaseMetaBasic[] | null;
+  tooltip?: Exclude<Parameters<typeof MarkLine>[0], undefined>['tooltip'];
+  utc?: boolean | null;
+}
 
 type State = {
-  releases: ReleaseMetaBasic[] | null;
   releaseSeries: Series[];
+  releases: ReleaseMetaBasic[] | null;
 };
 
-class ReleaseSeries extends React.Component<Props, State> {
+class ReleaseSeries extends Component<ReleaseSeriesProps, State> {
   state: State = {
     releases: null,
     releaseSeries: [],
@@ -127,15 +138,6 @@ class ReleaseSeries extends React.Component<Props, State> {
 
   _isMounted: boolean = false;
 
-  getOrganizationReleasesMemoized = memoize(
-    (api, conditions, organization) =>
-      getOrganizationReleases(api, conditions, organization),
-    (_, __, conditions) =>
-      Object.values(conditions)
-        .map(val => JSON.stringify(val))
-        .join('-')
-  );
-
   async fetchData() {
     const {
       api,
@@ -161,7 +163,7 @@ class ReleaseSeries extends React.Component<Props, State> {
     while (hasMore) {
       try {
         const getReleases = memoized
-          ? this.getOrganizationReleasesMemoized
+          ? getOrganizationReleasesMemoized
           : getOrganizationReleases;
         const [newReleases, , resp] = await getReleases(api, organization, conditions);
         releases.push(...newReleases);
@@ -173,7 +175,7 @@ class ReleaseSeries extends React.Component<Props, State> {
         if (pageLinks) {
           const paginationObject = parseLinkHeader(pageLinks);
           hasMore = paginationObject?.next?.results ?? false;
-          conditions.cursor = paginationObject.next.cursor;
+          conditions.cursor = paginationObject.next!.cursor;
         } else {
           hasMore = false;
         }
@@ -254,25 +256,26 @@ class ReleaseSeries extends React.Component<Props, State> {
         name: formatVersion(release.version, true),
         value: formatVersion(release.version, true),
         onClick: () => {
-          router.push({
-            pathname: `/organizations/${organization.slug}/releases/${release.version}/`,
-            query,
-          });
+          router.push(
+            normalizeUrl({
+              pathname: `/organizations/${
+                organization.slug
+              }/releases/${encodeURIComponent(release.version)}/`,
+              query,
+            })
+          );
         },
         label: {
           formatter: () => formatVersion(release.version, true),
         },
       })),
-    });
-
-    // TODO(tonyx): This conflicts with the types declaration of `MarkLine`
-    // if we add it in the constructor. So we opt to add it here so typescript
-    // doesn't complain.
-    (markLine as any).tooltip =
-      tooltip ||
-      ({
+      tooltip: tooltip || {
         trigger: 'item',
-        formatter: ({data}: EChartOption.Tooltip.Format) => {
+        formatter: ({data}: any) => {
+          // Should only happen when navigating pages
+          if (!data) {
+            return '';
+          }
           // XXX using this.props here as this function does not get re-run
           // unless projects are changed. Using a closure variable would result
           // in stale values.
@@ -286,14 +289,14 @@ class ReleaseSeries extends React.Component<Props, State> {
               'Release'
             )}</strong></span> ${version}</div>`,
             '</div>',
-            '<div class="tooltip-date">',
+            '<div class="tooltip-footer">',
             time,
-            '</div>',
             '</div>',
             '<div class="tooltip-arrow"></div>',
           ].join('');
         },
-      } as EChartOption.Tooltip);
+      },
+    });
 
     return {
       seriesName: 'Releases',
@@ -313,4 +316,4 @@ class ReleaseSeries extends React.Component<Props, State> {
   }
 }
 
-export default withRouter(withOrganization(withApi(withTheme(ReleaseSeries))));
+export default withSentryRouter(withOrganization(withApi(withTheme(ReleaseSeries))));

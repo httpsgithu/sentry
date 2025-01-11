@@ -1,37 +1,44 @@
-import Reflux from 'reflux';
+import type {StoreDefinition} from 'reflux';
+import {createStore} from 'reflux';
 
-import FormSearchActions from 'app/actions/formSearchActions';
-import {FieldObject} from 'app/views/settings/components/forms/type';
+import type {FieldObject} from 'sentry/components/forms/types';
 
 /**
  * Processed form field metadata.
  */
 export type FormSearchField = {
-  route: string;
-  title: React.ReactNode;
   description: React.ReactNode;
   field: FieldObject;
+  route: string;
+  title: React.ReactNode;
 };
 
-type StoreInterface = {
-  reset: () => void;
-  get: () => Internals['searchMap'];
-};
+interface StoreInterface {
+  get(): InternalDefinition['searchMap'];
+  reset(): void;
+}
 
-type Internals = {
+type InternalDefinition = {
+  loadSearchMap: (searchMap: null | FormSearchField[]) => void;
   searchMap: null | FormSearchField[];
-  onLoadSearchMap: (searchMap: null | FormSearchField[]) => void;
 };
+
+interface ExternalIssuesDefinition
+  extends StoreDefinition,
+    InternalDefinition,
+    StoreInterface {}
 
 /**
  * Store for "form" searches, but probably will include more
  */
-const formSearchStoreConfig: Reflux.StoreDefinition & Internals & StoreInterface = {
+const storeConfig: ExternalIssuesDefinition = {
   searchMap: null,
 
   init() {
+    // XXX: Do not use `this.listenTo` in this store. We avoid usage of reflux
+    // listeners due to their leaky nature in tests.
+
     this.reset();
-    this.listenTo(FormSearchActions.loadSearchMap, this.onLoadSearchMap);
   },
 
   get() {
@@ -46,7 +53,7 @@ const formSearchStoreConfig: Reflux.StoreDefinition & Internals & StoreInterface
   /**
    * Adds to search map
    */
-  onLoadSearchMap(searchMap) {
+  loadSearchMap(searchMap) {
     // Only load once
     if (this.searchMap !== null) {
       return;
@@ -57,7 +64,5 @@ const formSearchStoreConfig: Reflux.StoreDefinition & Internals & StoreInterface
   },
 };
 
-const FormSearchStore = Reflux.createStore(formSearchStoreConfig) as Reflux.Store &
-  StoreInterface;
-
+const FormSearchStore = createStore(storeConfig);
 export default FormSearchStore;

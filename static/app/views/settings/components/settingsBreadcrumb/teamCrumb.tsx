@@ -1,43 +1,46 @@
-import {browserHistory, RouteComponentProps} from 'react-router';
+import debounce from 'lodash/debounce';
 
-import IdBadge from 'app/components/idBadge';
-import {Team} from 'app/types';
-import recreateRoute from 'app/utils/recreateRoute';
-import withTeams from 'app/utils/withTeams';
-import BreadcrumbDropdown from 'app/views/settings/components/settingsBreadcrumb/breadcrumbDropdown';
-import MenuItem from 'app/views/settings/components/settingsBreadcrumb/menuItem';
+import IdBadge from 'sentry/components/idBadge';
+import {DEFAULT_DEBOUNCE_DURATION} from 'sentry/constants';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import recreateRoute from 'sentry/utils/recreateRoute';
+import {useNavigate} from 'sentry/utils/useNavigate';
+import {useParams} from 'sentry/utils/useParams';
+import {useTeams} from 'sentry/utils/useTeams';
 
-import {RouteWithName} from './types';
+import BreadcrumbDropdown from './breadcrumbDropdown';
+import MenuItem from './menuItem';
 import {CrumbLink} from '.';
 
-type Props = RouteComponentProps<{teamId: string}, {}> & {
-  teams: Team[];
-  routes: RouteWithName[];
-  route?: RouteWithName;
-};
+type Props = RouteComponentProps<{teamId: string}, {}>;
 
-const TeamCrumb = ({teams, params, routes, route, ...props}: Props) => {
+function TeamCrumb({routes, route, ...props}: Props) {
+  const navigate = useNavigate();
+  const {teams, onSearch, fetching} = useTeams();
+  const params = useParams();
+
   const team = teams.find(({slug}) => slug === params.teamId);
   const hasMenu = teams.length > 1;
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onSearch(e.target.value);
+  };
+  const debouncedHandleSearch = debounce(handleSearchChange, DEFAULT_DEBOUNCE_DURATION);
 
   if (!team) {
     return null;
   }
+  const teamUrl = `/settings/${params.orgId}/teams/${team.slug}/`;
 
   return (
     <BreadcrumbDropdown
       name={
-        <CrumbLink
-          to={recreateRoute(route, {
-            routes,
-            params: {...params, teamId: team.slug},
-          })}
-        >
+        <CrumbLink to={teamUrl}>
           <IdBadge avatarSize={18} team={team} />
         </CrumbLink>
       }
       onSelect={item => {
-        browserHistory.push(
+        navigate(
           recreateRoute('', {
             routes,
             params: {...params, teamId: item.value},
@@ -55,10 +58,11 @@ const TeamCrumb = ({teams, params, routes, route, ...props}: Props) => {
           </MenuItem>
         ),
       }))}
+      onChange={debouncedHandleSearch}
+      busyItemsStillVisible={fetching}
       {...props}
     />
   );
-};
+}
 
-export {TeamCrumb};
-export default withTeams(TeamCrumb);
+export default TeamCrumb;

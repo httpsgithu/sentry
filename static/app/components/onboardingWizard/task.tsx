@@ -1,22 +1,26 @@
-import * as React from 'react';
-import {withRouter, WithRouterProps} from 'react-router';
+import {forwardRef} from 'react';
 import styled from '@emotion/styled';
 import {motion} from 'framer-motion';
-import moment from 'moment';
+import moment from 'moment-timezone';
 
-import {navigateTo} from 'app/actionCreators/navigation';
-import Avatar from 'app/components/avatar';
-import Button from 'app/components/button';
-import Card from 'app/components/card';
-import LetterAvatar from 'app/components/letterAvatar';
-import Tooltip from 'app/components/tooltip';
-import {IconCheckmark, IconClose, IconLock, IconSync} from 'app/icons';
-import {t, tct} from 'app/locale';
-import space from 'app/styles/space';
-import {AvatarUser, OnboardingTask, OnboardingTaskKey, Organization} from 'app/types';
-import {trackAnalyticsEvent} from 'app/utils/analytics';
-import testableTransition from 'app/utils/testableTransition';
-import withOrganization from 'app/utils/withOrganization';
+import {navigateTo} from 'sentry/actionCreators/navigation';
+import Avatar from 'sentry/components/avatar';
+import {Button} from 'sentry/components/button';
+import Card from 'sentry/components/card';
+import LetterAvatar from 'sentry/components/letterAvatar';
+import {Tooltip} from 'sentry/components/tooltip';
+import {IconCheckmark, IconClose, IconLock, IconSync} from 'sentry/icons';
+import {t, tct} from 'sentry/locale';
+import DemoWalkthroughStore from 'sentry/stores/demoWalkthroughStore';
+import {space} from 'sentry/styles/space';
+import type {OnboardingTask, OnboardingTaskKey} from 'sentry/types/onboarding';
+import type {Organization} from 'sentry/types/organization';
+import type {AvatarUser} from 'sentry/types/user';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import {isDemoModeEnabled} from 'sentry/utils/demoMode';
+import testableTransition from 'sentry/utils/testableTransition';
+import useRouter from 'sentry/utils/useRouter';
+import withOrganization from 'sentry/utils/withOrganization';
 
 import SkipConfirm from './skipConfirm';
 import {taskIsDone} from './utils';
@@ -26,35 +30,38 @@ const recordAnalytics = (
   organization: Organization,
   action: string
 ) =>
-  trackAnalyticsEvent({
-    eventKey: 'onboarding.wizard_clicked',
-    eventName: 'Onboarding Wizard Clicked',
-    organization_id: organization.id,
+  trackAnalytics('quick_start.task_card_clicked', {
+    organization,
     todo_id: task.task,
     todo_title: task.title,
     action,
+    new_experience: false,
   });
 
-type Props = WithRouterProps & {
-  /**
-   * Task to render
-   */
-  task: OnboardingTask;
-  /**
-   * Fired when the task has been skipped
-   */
-  onSkip: (taskKey: OnboardingTaskKey) => void;
+type Props = {
+  forwardedRef: React.Ref<HTMLDivElement>;
+  hidePanel: () => void;
   /**
    * Fired when a task is completed. This will typically happen if there is a
    * supplemental component with the ability to complete a task
    */
   onMarkComplete: (taskKey: OnboardingTaskKey) => void;
 
-  forwardedRef: React.Ref<HTMLDivElement>;
+  /**
+   * Fired when the task has been skipped
+   */
+  onSkip: (taskKey: OnboardingTaskKey) => void;
+
   organization: Organization;
+  /**
+   * Task to render
+   */
+  task: OnboardingTask;
 };
 
-function Task({router, task, onSkip, onMarkComplete, forwardedRef, organization}: Props) {
+function Task(props: Props) {
+  const {task, onSkip, onMarkComplete, forwardedRef, organization, hidePanel} = props;
+  const router = useRouter();
   const handleSkip = () => {
     recordAnalytics(task, organization, 'skipped');
     onSkip(task.task);
@@ -64,17 +71,28 @@ function Task({router, task, onSkip, onMarkComplete, forwardedRef, organization}
     recordAnalytics(task, organization, 'clickthrough');
     e.stopPropagation();
 
+    if (isDemoModeEnabled()) {
+      DemoWalkthroughStore.activateGuideAnchor(task.task);
+    }
+
     if (task.actionType === 'external') {
       window.open(task.location, '_blank');
     }
 
     if (task.actionType === 'action') {
-      task.action();
+      task.action(router);
     }
 
     if (task.actionType === 'app') {
-      navigateTo(`${task.location}?onboardingTask`, router);
+      // Convert all paths to a location object
+      let to =
+        typeof task.location === 'string' ? {pathname: task.location} : task.location;
+      // Add referrer to all links
+      to = {...to, query: {...to.query, referrer: 'onboarding_task'}};
+
+      navigateTo(to, router);
     }
+    hidePanel();
   };
 
   if (taskIsDone(task) && task.completionSeen) {
@@ -110,10 +128,10 @@ function Task({router, task, onSkip, onMarkComplete, forwardedRef, organization}
     <Tooltip
       containerDisplayMode="block"
       title={tct('[requisite] before completing this task', {
-        requisite: task.requisiteTasks[0].title,
+        requisite: task.requisiteTasks[0]!.title,
       })}
     >
-      <IconLock color="orange400" />
+      <IconLock color="pink400" locked />
     </Tooltip>
   );
 
@@ -124,7 +142,15 @@ function Task({router, task, onSkip, onMarkComplete, forwardedRef, organization}
 
   const skipAction = task.skippable && (
     <SkipConfirm onSkip={handleSkip}>
-      {({skip}) => <StyledIconClose size="xs" onClick={skip} />}
+      {({skip}) => (
+        <CloseButton
+          borderless
+          size="zero"
+          aria-label={t('Close')}
+          icon={<IconClose size="xs" />}
+          onClick={skip}
+        />
+      )}
     </SkipConfirm>
   );
 
@@ -147,7 +173,7 @@ function Task({router, task, onSkip, onMarkComplete, forwardedRef, organization}
           {task.status === 'pending' ? (
             <InProgressIndicator user={task.user} />
           ) : (
-            <Button priority="primary" size="small">
+            <Button priority="primary" size="sm">
               {t('Start')}
             </Button>
           )}
@@ -165,9 +191,9 @@ const TaskCard = styled(Card)`
 const IncompleteTitle = styled('div')`
   display: grid;
   grid-template-columns: max-content 1fr;
-  grid-gap: ${space(1)};
+  gap: ${space(1)};
   align-items: center;
-  font-weight: 600;
+  font-weight: ${p => p.theme.fontWeightBold};
 `;
 
 const CompleteTitle = styled(IncompleteTitle)`
@@ -206,15 +232,15 @@ const InProgressIndicator = styled(({user, ...props}: InProgressIndicatorProps) 
   </div>
 ))`
   font-size: ${p => p.theme.fontSizeMedium};
-  font-weight: bold;
-  color: ${p => p.theme.orange400};
+  font-weight: ${p => p.theme.fontWeightBold};
+  color: ${p => p.theme.pink400};
   display: grid;
   grid-template-columns: max-content max-content;
   align-items: center;
-  grid-gap: ${space(1)};
+  gap: ${space(1)};
 `;
 
-const StyledIconClose = styled(IconClose)`
+const CloseButton = styled(Button)`
   position: absolute;
   right: ${space(1.5)};
   top: ${space(1.5)};
@@ -243,7 +269,7 @@ CompleteIndicator.defaultProps = {
 const SkippedIndicator = styled(IconClose)``;
 SkippedIndicator.defaultProps = {
   isCircled: true,
-  color: 'orange400',
+  color: 'pink400',
 };
 
 const completedItemAnimation = {
@@ -254,7 +280,7 @@ const completedItemAnimation = {
 const DateCompleted = styled(motion.div)`
   color: ${p => p.theme.subText};
   font-size: ${p => p.theme.fontSizeSmall};
-  font-weight: 300;
+  font-weight: ${p => p.theme.fontWeightNormal};
 `;
 
 DateCompleted.defaultProps = {
@@ -277,9 +303,9 @@ TaskBlankAvatar.defaultProps = {
   transition,
 };
 
-const WrappedTask = withOrganization(withRouter(Task));
+const WrappedTask = withOrganization(Task);
 
-export default React.forwardRef<
+export default forwardRef<
   HTMLDivElement,
   Omit<React.ComponentProps<typeof WrappedTask>, 'forwardedRef'>
 >((props, ref) => <WrappedTask forwardedRef={ref} {...props} />);

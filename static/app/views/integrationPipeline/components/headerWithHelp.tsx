@@ -1,17 +1,17 @@
 import styled from '@emotion/styled';
 
-import Button from 'app/components/actions/button';
-import LogoSentry from 'app/components/logoSentry';
-import {t} from 'app/locale';
-import space from 'app/styles/space';
+import {LinkButton} from 'sentry/components/button';
+import LogoSentry from 'sentry/components/logoSentry';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
 
 export default function HeaderWithHelp({docsUrl}: {docsUrl: string}) {
   return (
     <Header>
       <StyledLogoSentry />
-      <Button external href={docsUrl} size="xsmall">
+      <LinkButton external href={docsUrl} size="xs">
         {t('Need Help?')}
-      </Button>
+      </LinkButton>
     </Header>
   );
 }

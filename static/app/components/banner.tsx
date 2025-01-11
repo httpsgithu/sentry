@@ -1,12 +1,12 @@
-import * as React from 'react';
+import {useState} from 'react';
 import {css} from '@emotion/react';
 import styled from '@emotion/styled';
 
-import Button from 'app/components/button';
-import ButtonBar from 'app/components/buttonBar';
-import {IconClose} from 'app/icons';
-import {t} from 'app/locale';
-import space from 'app/styles/space';
+import {Button} from 'sentry/components/button';
+import ButtonBar from 'sentry/components/buttonBar';
+import {IconClose} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
 
 const makeKey = (prefix: string) => `${prefix}-banner-dismissed`;
 
@@ -14,9 +14,9 @@ function dismissBanner(bannerKey: string) {
   localStorage.setItem(makeKey(bannerKey), 'true');
 }
 
-function useDismissable(bannerKey: string) {
+export function useDismissable(bannerKey: string) {
   const key = makeKey(bannerKey);
-  const [value, setValue] = React.useState(localStorage.getItem(key));
+  const [value, setValue] = useState(localStorage.getItem(key));
 
   const dismiss = () => {
     setValue('true');
@@ -27,26 +27,20 @@ function useDismissable(bannerKey: string) {
 }
 
 type BannerWrapperProps = {
-  backgroundImg?: string;
   backgroundComponent?: React.ReactNode;
+  backgroundImg?: string;
 };
 
 type Props = BannerWrapperProps & {
-  title?: string;
-  subtitle?: string;
-  isDismissable?: boolean;
-  dismissKey?: string;
+  children?: React.ReactNode;
   className?: string;
+  dismissKey?: string;
+  isDismissable?: boolean;
+  subtitle?: string;
+  title?: string;
 };
 
-type BannerType = React.FC<Props> & {
-  /**
-   * Helper function to hide banners outside of their usage
-   */
-  dismiss: typeof dismissBanner;
-};
-
-const Banner: BannerType = ({
+function Banner({
   title,
   subtitle,
   isDismissable = true,
@@ -55,7 +49,7 @@ const Banner: BannerType = ({
   backgroundImg,
   backgroundComponent,
   children,
-}) => {
+}: Props) {
   const [dismissed, dismiss] = useDismissable(dismissKey);
 
   if (dismissed) {
@@ -73,7 +67,7 @@ const Banner: BannerType = ({
       </BannerContent>
     </BannerWrapper>
   );
-};
+}
 
 Banner.dismiss = dismissBanner;
 
@@ -95,12 +89,12 @@ const BannerWrapper = styled('div')<BannerWrapperProps>`
   justify-content: center;
   position: relative;
   margin-bottom: ${space(2)};
-  box-shadow: ${p => p.theme.dropShadowLight};
+  box-shadow: ${p => p.theme.dropShadowMedium};
   border-radius: ${p => p.theme.borderRadius};
   height: 180px;
   color: ${p => p.theme.white};
 
-  @media (min-width: ${p => p.theme.breakpoints[0]}) {
+  @media (min-width: ${p => p.theme.breakpoints.small}) {
     height: 220px;
   }
 `;
@@ -117,7 +111,7 @@ const BannerContent = styled('div')`
 const BannerTitle = styled('h1')`
   margin: 0;
 
-  @media (min-width: ${p => p.theme.breakpoints[0]}) {
+  @media (min-width: ${p => p.theme.breakpoints.small}) {
     font-size: 40px;
   }
 `;
@@ -125,7 +119,7 @@ const BannerTitle = styled('h1')`
 const BannerSubtitle = styled('div')`
   margin: 0;
 
-  @media (min-width: ${p => p.theme.breakpoints[0]}) {
+  @media (min-width: ${p => p.theme.breakpoints.small}) {
     font-size: ${p => p.theme.fontSizeExtraLarge};
   }
 `;
@@ -147,10 +141,10 @@ const CloseButton = styled(Button)`
 
 CloseButton.defaultProps = {
   icon: <IconClose />,
-  label: t('Close'),
+  ['aria-label']: t('Close'),
   priority: 'link',
   borderless: true,
-  size: 'xsmall',
+  size: 'xs',
 };
 
 export default Banner;

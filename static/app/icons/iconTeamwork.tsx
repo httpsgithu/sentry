@@ -1,17 +1,13 @@
-import * as React from 'react';
+import {forwardRef} from 'react';
 
-import SvgIcon from './svgIcon';
+import type {SVGIconProps} from './svgIcon';
+import {SvgIcon} from './svgIcon';
 
-type Props = React.ComponentProps<typeof SvgIcon>;
-
-const IconTeamwork = React.forwardRef(function IconTeamwork(
-  props: Props,
-  ref: React.Ref<SVGSVGElement>
-) {
+const IconTeamwork = forwardRef<SVGSVGElement, SVGIconProps>((props, ref) => {
   return (
     <SvgIcon {...props} ref={ref}>
-      <path d="M5.86,6A1.28,1.28,0,0,0,7.31,4.66,1.32,1.32,0,0,0,5.89,3.3H3.8V1.77A1.59,1.59,0,0,0,2.2.09,1.58,1.58,0,0,0,.6,1.77V12.33c0,2.53,1,3.66,3.32,3.66a4.56,4.56,0,0,0,2.49-.62A1.18,1.18,0,0,0,7,14.31c0-.68-.46-1.43-1.12-1.43a.72.72,0,0,0-.28,0L5.44,13a1.83,1.83,0,0,1-.76.18c-.41,0-.88-.14-.88-1.26V6Z" />
-      <path d="M12.6,10.47a2.77,2.77,0,1,0,2.8,2.77,2.78,2.78,0,0,0-2.8-2.77" />
+      <path d="m5.9,5.97c.92,0,1.44-.5,1.44-1.37,0-.82-.57-1.37-1.41-1.37h-2.08v-1.54c0-1.11-.8-1.69-1.58-1.69S.69.58.69,1.69v10.62c0,2.55,1.02,3.69,3.3,3.69,1.23,0,1.94-.32,2.47-.63.4-.22.55-.7.55-1.07,0-.68-.46-1.44-1.11-1.44-.09,0-.18.02-.28.05-.03.01-.07.03-.12.05-.17.08-.41.19-.75.19-.41,0-.88-.14-.88-1.27v-5.91h2.04Z" />
+      <path d="m12.53,10.44c-1.53,0-2.78,1.25-2.78,2.78s1.25,2.78,2.78,2.78,2.78-1.25,2.78-2.78-1.25-2.78-2.78-2.78Z" />
     </SvgIcon>
   );
 });

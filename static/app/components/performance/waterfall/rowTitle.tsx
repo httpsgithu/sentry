@@ -1,6 +1,6 @@
 import styled from '@emotion/styled';
 
-import {ROW_HEIGHT} from 'app/components/performance/waterfall/constants';
+import {ROW_HEIGHT} from 'sentry/components/performance/waterfall/constants';
 
 export const RowTitleContainer = styled('div')`
   display: flex;
@@ -27,6 +27,6 @@ export const RowTitleContent = styled('span')<{errored: boolean}>`
   color: ${p => (p.errored ? p.theme.error : 'inherit')};
 `;
 
-export const SpanGroupRowTitleContent = styled('span')`
-  color: ${p => p.theme.linkColor};
+export const SpanGroupRowTitleContent = styled('span')<{color: string}>`
+  color: ${p => p.color};
 `;

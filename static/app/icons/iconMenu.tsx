@@ -1,13 +1,9 @@
-import * as React from 'react';
+import {forwardRef} from 'react';
 
-import SvgIcon from './svgIcon';
+import type {SVGIconProps} from './svgIcon';
+import {SvgIcon} from './svgIcon';
 
-type Props = React.ComponentProps<typeof SvgIcon>;
-
-const IconMenu = React.forwardRef(function IconMenu(
-  props: Props,
-  ref: React.Ref<SVGSVGElement>
-) {
+const IconMenu = forwardRef<SVGSVGElement, SVGIconProps>((props, ref) => {
   return (
     <SvgIcon {...props} ref={ref}>
       <path d="M15.19,2.53H.81A.75.75,0,0,1,.81,1H15.19a.75.75,0,1,1,0,1.5Z" />

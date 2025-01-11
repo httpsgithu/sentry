@@ -1,39 +1,19 @@
-import * as React from 'react';
 import styled from '@emotion/styled';
 import moment from 'moment-timezone';
 
-import DateTime from 'app/components/dateTime';
-import TimeSince from 'app/components/timeSince';
-import space from 'app/styles/space';
-import textStyles from 'app/styles/text';
-import {AvatarUser} from 'app/types';
-import {isRenderFunc} from 'app/utils/isRenderFunc';
+import {DateTime} from 'sentry/components/dateTime';
+import TimeSince from 'sentry/components/timeSince';
+import {space} from 'sentry/styles/space';
+import textStyles from 'sentry/styles/text';
+import type {AvatarUser} from 'sentry/types/user';
 
-import ActivityAvatar from './avatar';
-import ActivityBubble from './bubble';
+import {ActivityAvatar} from './avatar';
+import type {ActivityBubbleProps} from './bubble';
+import {ActivityBubble} from './bubble';
 
 export type ActivityAuthorType = 'user' | 'system';
 
-type ChildFunction = () => React.ReactNode;
-
-type Props = {
-  children?: React.ReactChild | ChildFunction;
-  className?: string;
-  /**
-   * This is used to uniquely identify the activity item for use as an anchor
-   */
-  id?: string;
-
-  /**
-   * If supplied, will show the time that the activity started
-   */
-  date?: string | Date;
-
-  /**
-   * If supplied, will show the interval that the activity occurred in
-   */
-  interval?: number;
-
+interface ActivityItemProps {
   /**
    * Used to render an avatar for the author. Currently can be a user, otherwise
    * defaults as a "system" avatar (i.e. sentry)
@@ -44,28 +24,40 @@ type Props = {
     type: ActivityAuthorType;
     user?: AvatarUser;
   };
-
-  // Size of the avatar.
   avatarSize?: number;
+  bubbleProps?: ActivityBubbleProps;
+  children?: React.ReactNode;
 
-  // Hides date in header
+  className?: string;
+  /**
+   * If supplied, will show the time that the activity started
+   */
+  date?: string | Date;
+  /**
+   * Can be a react node or a render function. render function will not include default wrapper
+   */
+  header?: React.ReactNode;
+  /**
+   * Do not show the date in the header
+   */
   hideDate?: boolean;
-
-  // Instead of showing a relative time/date, show the time
+  /**
+   * This is used to uniquely identify the activity item for use as an anchor
+   */
+  id?: string;
+  /**
+   * If supplied, will show the interval that the activity occurred in
+   */
+  interval?: number;
+  /**
+   * Removes padding on the activtiy body
+   */
+  noPadding?: boolean;
+  /**
+   * Show exact time instead of relative date/time.
+   */
   showTime?: boolean;
-
-  /**
-   * Can be a react node or a render function. render function will not include default wrapper
-   */
-  header?: React.ReactNode | ChildFunction;
-
-  /**
-   * Can be a react node or a render function. render function will not include default wrapper
-   */
-  footer?: React.ReactNode | ChildFunction;
-
-  bubbleProps?: React.ComponentProps<typeof ActivityBubble>;
-};
+}
 
 function ActivityItem({
   author,
@@ -75,12 +67,12 @@ function ActivityItem({
   children,
   date,
   interval,
-  footer,
+  noPadding,
   id,
   header,
   hideDate = false,
   showTime = false,
-}: Props) {
+}: ActivityItemProps) {
   const showDate = !hideDate && date && !interval;
   const showRange = !hideDate && date && interval;
   const dateEnded = showRange
@@ -99,8 +91,7 @@ function ActivityItem({
       )}
 
       <StyledActivityBubble {...bubbleProps}>
-        {header && isRenderFunc<ChildFunction>(header) && header()}
-        {header && !isRenderFunc<ChildFunction>(header) && (
+        {header && (
           <ActivityHeader>
             <ActivityHeaderContent>{header}</ActivityHeaderContent>
             {date && showDate && !showTime && <StyledTimeSince date={date} />}
@@ -108,27 +99,15 @@ function ActivityItem({
 
             {showRange && (
               <StyledDateTimeWindow>
-                <StyledDateTime timeOnly={timeOnly} timeAndDate={!timeOnly} date={date} />
+                <StyledDateTime timeOnly={timeOnly} date={date} />
                 {' — '}
-                <StyledDateTime
-                  timeOnly={timeOnly}
-                  timeAndDate={!timeOnly}
-                  date={dateEnded}
-                />
+                <StyledDateTime timeOnly={timeOnly} date={dateEnded} />
               </StyledDateTimeWindow>
             )}
           </ActivityHeader>
         )}
 
-        {children && isRenderFunc<ChildFunction>(children) && children()}
-        {children && !isRenderFunc<ChildFunction>(children) && (
-          <ActivityBody>{children}</ActivityBody>
-        )}
-
-        {footer && isRenderFunc<ChildFunction>(footer) && footer()}
-        {footer && !isRenderFunc<ChildFunction>(footer) && (
-          <ActivityFooter>{footer}</ActivityFooter>
-        )}
+        {children && (noPadding ? children : <ActivityBody>{children}</ActivityBody>)}
       </StyledActivityBubble>
     </ActivityItemWrapper>
   );
@@ -139,12 +118,10 @@ const ActivityItemWrapper = styled('div')`
   margin-bottom: ${space(2)};
 `;
 
-const HeaderAndFooter = styled('div')`
-  padding: 6px ${space(2)};
-`;
-
-const ActivityHeader = styled(HeaderAndFooter)`
+const ActivityHeader = styled('div')`
   display: flex;
+  align-items: center;
+  padding: 6px ${space(2)};
   border-bottom: 1px solid ${p => p.theme.border};
   font-size: ${p => p.theme.fontSizeMedium};
 
@@ -155,12 +132,6 @@ const ActivityHeader = styled(HeaderAndFooter)`
 
 const ActivityHeaderContent = styled('div')`
   flex: 1;
-`;
-
-const ActivityFooter = styled(HeaderAndFooter)`
-  display: flex;
-  border-top: 1px solid ${p => p.theme.border};
-  font-size: ${p => p.theme.fontSizeMedium};
 `;
 
 const ActivityBody = styled('div')`
@@ -189,4 +160,4 @@ const StyledActivityBubble = styled(ActivityBubble)`
   overflow-wrap: break-word;
 `;
 
-export default ActivityItem;
+export {ActivityItem};

@@ -1,287 +1,242 @@
-import * as React from 'react';
-import {Mention, MentionsInput, MentionsInputProps} from 'react-mentions';
-import {withTheme} from '@emotion/react';
+import {useCallback, useMemo, useState} from 'react';
+import type {MentionsInputProps} from 'react-mentions';
+import {Mention, MentionsInput} from 'react-mentions';
+import type {Theme} from '@emotion/react';
+import {useTheme} from '@emotion/react';
 import styled from '@emotion/styled';
 
-import Button from 'app/components/button';
-import NavTabs from 'app/components/navTabs';
-import {IconMarkdown} from 'app/icons';
-import {t} from 'app/locale';
-import ConfigStore from 'app/stores/configStore';
-import space from 'app/styles/space';
-import textStyles from 'app/styles/text';
-import {NoteType} from 'app/types/alerts';
-import marked from 'app/utils/marked';
-import {Theme} from 'app/utils/theme';
+import {Button} from 'sentry/components/button';
+import {TabList, TabPanels, Tabs} from 'sentry/components/tabs';
+import {IconMarkdown} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import textStyles from 'sentry/styles/text';
+import type {NoteType} from 'sentry/types/alerts';
+import domId from 'sentry/utils/domId';
+import marked from 'sentry/utils/marked';
+import {useMembers} from 'sentry/utils/useMembers';
+import {useTeams} from 'sentry/utils/useTeams';
 
-import Mentionables from './mentionables';
-import mentionStyle from './mentionStyle';
-import {CreateError, Mentionable, MentionChangeEvent, Mentioned} from './types';
-
-const defaultProps = {
-  placeholder: t('Add a comment.\nTag users with @, or teams with #'),
-  minHeight: 140,
-  busy: false,
-};
+import {mentionStyle} from './mentionStyle';
+import type {CreateError, MentionChangeEvent, Mentioned} from './types';
 
 type Props = {
-  teams: Mentionable[];
-  memberList: Mentionable[];
   /**
-   * This is the id of the note object from the server
-   * This is to indicate you are editing an existing item
+   * Is the note saving?
    */
-  modelId?: string;
+  busy?: boolean;
+  /**
+   * Display an error message
+   */
+  error?: boolean;
+  errorJSON?: CreateError | null;
+  /**
+   * Minimum height of the edit area
+   */
+  minHeight?: number;
+  /**
+   * This is the id of the server's note object and is meant to indicate that
+   * you are editing an existing item
+   */
+  noteId?: string;
+  onChange?: (e: MentionChangeEvent, extra: {updating?: boolean}) => void;
+  onCreate?: (data: NoteType) => void;
+  onEditFinish?: () => void;
+  onUpdate?: (data: NoteType) => void;
+  placeholder?: string;
   /**
    * The note text itself
    */
   text?: string;
-  error?: boolean;
-  errorJSON?: CreateError | null;
-  onEditFinish?: () => void;
-  onUpdate?: (data: NoteType) => void;
-  onCreate?: (data: NoteType) => void;
-  onChange?: (e: MentionChangeEvent, extra: {updating?: boolean}) => void;
-  theme: Theme;
-} & typeof defaultProps;
-
-type State = {
-  preview: boolean;
-  value: string;
-  memberMentions: Mentioned[];
-  teamMentions: Mentioned[];
 };
 
-class NoteInputComponent extends React.Component<Props, State> {
-  state: State = {
-    preview: false,
-    value: this.props.text || '',
-    memberMentions: [],
-    teamMentions: [],
-  };
+function NoteInput({
+  text,
+  onCreate,
+  onChange,
+  onUpdate,
+  onEditFinish,
+  noteId,
+  errorJSON,
+  busy = false,
+  placeholder = t('Add a comment.\nTag users with @, or teams with #'),
+  minHeight = 140,
+}: Props) {
+  const theme = useTheme();
 
-  cleanMarkdown(text: string) {
-    return text
-      .replace(/\[sentry\.strip:member\]/g, '@')
-      .replace(/\[sentry\.strip:team\]/g, '');
-  }
+  const {members} = useMembers();
+  const {teams} = useTeams();
 
-  submitForm() {
-    if (!!this.props.modelId) {
-      this.update();
-      return;
-    }
-    this.create();
-  }
+  const suggestMembers = members.map(member => ({
+    id: `user:${member.id}`,
+    display: member.name,
+  }));
 
-  create() {
-    const {onCreate} = this.props;
+  const suggestTeams = teams.map(team => ({
+    id: `team:${team.id}`,
+    display: `#${team.slug}`,
+  }));
 
-    if (onCreate) {
-      onCreate({
-        text: this.cleanMarkdown(this.state.value),
-        mentions: this.finalizeMentions(),
-      });
-    }
-  }
+  const [value, setValue] = useState(text ?? '');
 
-  update() {
-    const {onUpdate} = this.props;
+  const [memberMentions, setMemberMentions] = useState<Mentioned[]>([]);
+  const [teamMentions, setTeamMentions] = useState<Mentioned[]>([]);
 
-    if (onUpdate) {
-      onUpdate({
-        text: this.cleanMarkdown(this.state.value),
-        mentions: this.finalizeMentions(),
-      });
-    }
-  }
+  const canSubmit = value.trim() !== '';
 
-  finish() {
-    this.props.onEditFinish && this.props.onEditFinish();
-  }
+  const cleanMarkdown = value
+    .replace(/\[sentry\.strip:member\]/g, '@')
+    .replace(/\[sentry\.strip:team\]/g, '');
 
-  finalizeMentions(): string[] {
-    const {memberMentions, teamMentions} = this.state;
+  const existingItem = !!noteId;
 
-    // each mention looks like [id, display]
-    return [...memberMentions, ...teamMentions]
-      .filter(mention => this.state.value.indexOf(mention[1]) !== -1)
-      .map(mention => mention[0]);
-  }
+  // each mention looks like [id, display]
+  const finalizedMentions = [...memberMentions, ...teamMentions]
+    .filter(mention => value.includes(mention[1]))
+    .map(mention => mention[0]);
 
-  handleToggleEdit = () => {
-    this.setState({preview: false});
-  };
+  const submitForm = useCallback(
+    () =>
+      existingItem
+        ? onUpdate?.({text: cleanMarkdown, mentions: finalizedMentions})
+        : onCreate?.({text: cleanMarkdown, mentions: finalizedMentions}),
+    [existingItem, onUpdate, cleanMarkdown, finalizedMentions, onCreate]
+  );
 
-  handleTogglePreview = () => {
-    this.setState({preview: true});
-  };
+  const handleCancel = useCallback(
+    (e: React.MouseEvent<Element>) => {
+      e.preventDefault();
+      onEditFinish?.();
+    },
+    [onEditFinish]
+  );
 
-  handleSubmit = (e: React.MouseEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    this.submitForm();
-  };
+  const handleSubmit = useCallback(
+    (e: React.MouseEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      submitForm();
+    },
+    [submitForm]
+  );
 
-  handleChange: MentionsInputProps['onChange'] = e => {
-    this.setState({value: e.target.value});
+  const handleAddMember = useCallback(
+    (id: React.ReactText, display: string) =>
+      setMemberMentions(existing => [...existing, [`${id}`, display]]),
+    []
+  );
 
-    if (this.props.onChange) {
-      this.props.onChange(e, {updating: !!this.props.modelId});
-    }
-  };
+  const handleAddTeam = useCallback(
+    (id: React.ReactText, display: string) =>
+      setTeamMentions(existing => [...existing, [`${id}`, display]]),
+    []
+  );
 
-  handleKeyDown: MentionsInputProps['onKeyDown'] = e => {
-    // Auto submit the form on [meta] + Enter
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      this.submitForm();
-    }
-  };
+  const handleChange: MentionsInputProps['onChange'] = useCallback(
+    (e: MentionChangeEvent) => {
+      setValue(e.target.value);
+      onChange?.(e, {updating: existingItem});
+    },
+    [existingItem, onChange]
+  );
 
-  handleCancel = (e: React.MouseEvent<Element>) => {
-    e.preventDefault();
-    this.finish();
-  };
+  const handleKeyDown: MentionsInputProps['onKeyDown'] = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      // Auto submit the form on [meta,ctrl] + Enter
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && canSubmit) {
+        submitForm();
+      }
+    },
+    [canSubmit, submitForm]
+  );
 
-  handleAddMember = (id: React.ReactText, display: string) => {
-    this.setState(({memberMentions}) => ({
-      memberMentions: [...memberMentions, [`${id}`, display]],
-    }));
-  };
+  const errorId = useMemo(() => domId('note-error-'), []);
+  const errorMessage =
+    (errorJSON &&
+      (typeof errorJSON.detail === 'string'
+        ? errorJSON.detail
+        : errorJSON.detail?.message || t('Unable to post comment'))) ||
+    null;
 
-  handleAddTeam = (id: React.ReactText, display: string) => {
-    this.setState(({teamMentions}) => ({
-      teamMentions: [...teamMentions, [`${id}`, display]],
-    }));
-  };
-
-  render() {
-    const {preview, value} = this.state;
-    const {modelId, busy, placeholder, minHeight, errorJSON, memberList, teams, theme} =
-      this.props;
-
-    const existingItem = !!modelId;
-    const btnText = existingItem ? t('Save Comment') : t('Post Comment');
-
-    const errorMessage =
-      (errorJSON &&
-        (typeof errorJSON.detail === 'string'
-          ? errorJSON.detail
-          : (errorJSON.detail && errorJSON.detail.message) ||
-            t('Unable to post comment'))) ||
-      null;
-
-    return (
-      <NoteInputForm
-        data-test-id="note-input-form"
-        noValidate
-        onSubmit={this.handleSubmit}
-      >
-        <NoteInputNavTabs>
-          <NoteInputNavTab className={!preview ? 'active' : ''}>
-            <NoteInputNavTabLink onClick={this.handleToggleEdit}>
-              {existingItem ? t('Edit') : t('Write')}
-            </NoteInputNavTabLink>
-          </NoteInputNavTab>
-          <NoteInputNavTab className={preview ? 'active' : ''}>
-            <NoteInputNavTabLink onClick={this.handleTogglePreview}>
-              {t('Preview')}
-            </NoteInputNavTabLink>
-          </NoteInputNavTab>
-          <MarkdownTab>
-            <IconMarkdown />
-            <MarkdownSupported>{t('Markdown supported')}</MarkdownSupported>
-          </MarkdownTab>
-        </NoteInputNavTabs>
-
-        <NoteInputBody>
-          {preview ? (
-            <NotePreview
-              minHeight={minHeight}
-              dangerouslySetInnerHTML={{__html: marked(this.cleanMarkdown(value))}}
-            />
-          ) : (
+  return (
+    <NoteInputForm data-test-id="note-input-form" noValidate onSubmit={handleSubmit}>
+      <Tabs>
+        <StyledTabList>
+          <TabList.Item key="edit">{existingItem ? t('Edit') : t('Write')}</TabList.Item>
+          <TabList.Item key="preview">{t('Preview')}</TabList.Item>
+        </StyledTabList>
+        <NoteInputPanel>
+          <TabPanels.Item key="edit">
             <MentionsInput
+              aria-errormessage={errorMessage ? errorId : undefined}
               style={mentionStyle({theme, minHeight})}
               placeholder={placeholder}
-              onChange={this.handleChange}
-              onKeyDown={this.handleKeyDown}
+              onChange={handleChange}
+              onKeyDown={handleKeyDown}
               value={value}
               required
               autoFocus
             >
               <Mention
                 trigger="@"
-                data={memberList}
-                onAdd={this.handleAddMember}
+                data={suggestMembers}
+                onAdd={handleAddMember}
                 displayTransform={(_id, display) => `@${display}`}
                 markup="**[sentry.strip:member]__display__**"
                 appendSpaceOnAdd
               />
               <Mention
                 trigger="#"
-                data={teams}
-                onAdd={this.handleAddTeam}
+                data={suggestTeams}
+                onAdd={handleAddTeam}
                 markup="**[sentry.strip:team]__display__**"
                 appendSpaceOnAdd
               />
             </MentionsInput>
-          )}
-        </NoteInputBody>
-
-        <Footer>
-          <div>{errorMessage && <ErrorMessage>{errorMessage}</ErrorMessage>}</div>
-          <div>
-            {existingItem && (
-              <FooterButton priority="danger" type="button" onClick={this.handleCancel}>
-                {t('Cancel')}
-              </FooterButton>
-            )}
-            <FooterButton error={errorMessage} type="submit" disabled={busy}>
-              {btnText}
-            </FooterButton>
+          </TabPanels.Item>
+          <TabPanels.Item key="preview">
+            <NotePreview
+              minHeight={minHeight}
+              dangerouslySetInnerHTML={{__html: marked(cleanMarkdown)}}
+            />
+          </TabPanels.Item>
+        </NoteInputPanel>
+      </Tabs>
+      <Footer>
+        {errorMessage ? (
+          <div id={errorId}>
+            {errorMessage && <ErrorMessage>{errorMessage}</ErrorMessage>}
           </div>
-        </Footer>
-      </NoteInputForm>
-    );
-  }
+        ) : (
+          <MarkdownIndicator>
+            <IconMarkdown /> {t('Markdown supported')}
+          </MarkdownIndicator>
+        )}
+        <div>
+          {existingItem && (
+            <FooterButton priority="danger" onClick={handleCancel}>
+              {t('Cancel')}
+            </FooterButton>
+          )}
+          <FooterButton
+            error={!!errorMessage}
+            type="submit"
+            disabled={busy || !canSubmit}
+          >
+            {existingItem ? t('Save Comment') : t('Post Comment')}
+          </FooterButton>
+        </div>
+      </Footer>
+    </NoteInputForm>
+  );
 }
 
-const NoteInput = withTheme(NoteInputComponent);
-
-type NoteInputContainerProps = {
-  projectSlugs: string[];
-} & Omit<Props, 'memberList' | 'teams' | 'theme'>;
-
-type MentionablesChildFunc = Parameters<
-  React.ComponentProps<typeof Mentionables>['children']
->[0];
-
-class NoteInputContainer extends React.Component<NoteInputContainerProps> {
-  static defaultProps = defaultProps;
-
-  renderInput = ({members, teams}: MentionablesChildFunc) => {
-    const {projectSlugs: _, ...props} = this.props;
-    return <NoteInput memberList={members} teams={teams} {...props} />;
-  };
-
-  render() {
-    const {projectSlugs} = this.props;
-    const me = ConfigStore.get('user');
-
-    return (
-      <Mentionables me={me} projectSlugs={projectSlugs}>
-        {this.renderInput}
-      </Mentionables>
-    );
-  }
-}
-
-export default NoteInputContainer;
+export {NoteInput};
 
 type NotePreviewProps = {
   minHeight: Props['minHeight'];
-  theme: Props['theme'];
+  theme: Theme;
 };
+
 // This styles both the note preview and the note editor input
 const getNotePreviewCss = (p: NotePreviewProps) => {
   const {minHeight, padding, overflow, border} = mentionStyle(p)['&multiLine'].input;
@@ -296,7 +251,7 @@ const getNotePreviewCss = (p: NotePreviewProps) => {
 `;
 };
 
-const getNoteInputErrorStyles = (p: {error?: string; theme: Theme}) => {
+const getNoteInputErrorStyles = (p: {theme: Theme; error?: string}) => {
   if (!p.error) {
     return '';
   }
@@ -335,15 +290,18 @@ const getNoteInputErrorStyles = (p: {error?: string; theme: Theme}) => {
   `;
 };
 
-const NoteInputForm = styled('form')<{error?: string}>`
-  font-size: 15px;
-  line-height: 22px;
-  transition: padding 0.2s ease-in-out;
-
-  ${p => getNoteInputErrorStyles(p)}
+const StyledTabList = styled(TabList)`
+  padding: 0 ${space(2)};
+  padding-top: ${space(0.5)};
 `;
 
-const NoteInputBody = styled('div')`
+const NoteInputForm = styled('form')<{error?: string}>`
+  transition: padding 0.2s ease-in-out;
+
+  ${p => getNoteInputErrorStyles(p)};
+`;
+
+const NoteInputPanel = styled(TabPanels)`
   ${textStyles}
 `;
 
@@ -351,16 +309,10 @@ const Footer = styled('div')`
   display: flex;
   border-top: 1px solid ${p => p.theme.border};
   justify-content: space-between;
-  transition: opacity 0.2s ease-in-out;
   padding-left: ${space(1.5)};
 `;
 
-type FooterButtonProps = {
-  error?: string | null;
-} & React.ComponentProps<typeof Button>;
-
-const FooterButton = styled(Button)<FooterButtonProps>`
-  font-size: 13px;
+const FooterButton = styled(Button)<{error?: boolean}>`
   margin: -1px -1px -1px;
   border-radius: 0 0 ${p => p.theme.borderRadius};
 
@@ -382,39 +334,13 @@ const ErrorMessage = styled('span')`
   font-size: 0.9em;
 `;
 
-const NoteInputNavTabs = styled(NavTabs)`
-  padding: ${space(1)} ${space(2)} 0;
-  border-bottom: 1px solid ${p => p.theme.border};
-  margin-bottom: 0;
-`;
-
-const NoteInputNavTab = styled('li')`
-  margin-right: 13px;
-`;
-
-const NoteInputNavTabLink = styled('a')`
-  .nav-tabs > li > & {
-    font-size: 15px;
-    padding-bottom: 5px;
-  }
-`;
-const MarkdownTab = styled(NoteInputNavTab)`
-  .nav-tabs > & {
-    display: flex;
-    align-items: center;
-    margin-right: 0;
-    color: ${p => p.theme.subText};
-
-    float: right;
-  }
-`;
-
-const MarkdownSupported = styled('span')`
-  margin-left: ${space(0.5)};
-  font-size: 14px;
+const MarkdownIndicator = styled('div')`
+  display: flex;
+  align-items: center;
+  gap: ${space(1)};
+  color: ${p => p.theme.subText};
 `;
 
 const NotePreview = styled('div')<{minHeight: Props['minHeight']}>`
   ${p => getNotePreviewCss(p)};
-  padding-bottom: ${space(1)};
 `;

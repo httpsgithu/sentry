@@ -1,33 +1,61 @@
 import {Component} from 'react';
-import {RouteComponentProps} from 'react-router';
-import styled from '@emotion/styled';
 
-import {Client} from 'app/api';
-import NoProjectMessage from 'app/components/noProjectMessage';
-import {getParams} from 'app/components/organizations/globalSelectionHeader/getParams';
-import SentryDocumentTitle from 'app/components/sentryDocumentTitle';
-import {ALL_ACCESS_PROJECTS} from 'app/constants/globalSelectionHeader';
-import {t} from 'app/locale';
-import {PageContent} from 'app/styles/organization';
-import {Organization} from 'app/types';
-import EventView from 'app/utils/discover/eventView';
-import {TraceFullDetailedQuery} from 'app/utils/performance/quickTrace/traceFullQuery';
-import TraceMetaQuery from 'app/utils/performance/quickTrace/traceMetaQuery';
-import {TraceFullDetailed, TraceMeta} from 'app/utils/performance/quickTrace/types';
-import {decodeScalar} from 'app/utils/queryString';
-import withApi from 'app/utils/withApi';
-import withOrganization from 'app/utils/withOrganization';
+import type {Client} from 'sentry/api';
+import * as Layout from 'sentry/components/layouts/thirds';
+import NoProjectMessage from 'sentry/components/noProjectMessage';
+import {normalizeDateTimeParams} from 'sentry/components/organizations/pageFilters/parse';
+import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
+import {ALL_ACCESS_PROJECTS} from 'sentry/constants/pageFilters';
+import {t} from 'sentry/locale';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import EventView from 'sentry/utils/discover/eventView';
+import {QueryError} from 'sentry/utils/discover/genericDiscoverQuery';
+import {TraceFullDetailedQuery} from 'sentry/utils/performance/quickTrace/traceFullQuery';
+import TraceMetaQuery from 'sentry/utils/performance/quickTrace/traceMetaQuery';
+import type {
+  TraceMeta,
+  TraceSplitResults,
+} from 'sentry/utils/performance/quickTrace/types';
+import {decodeScalar} from 'sentry/utils/queryString';
+import withApi from 'sentry/utils/withApi';
+import withOrganization from 'sentry/utils/withOrganization';
+import type {TraceTree} from 'sentry/views/performance/newTraceDetails/traceModels/traceTree';
 
+import {TraceView as TraceViewV1} from './../newTraceDetails';
 import TraceDetailsContent from './content';
+import {DEFAULT_TRACE_ROWS_LIMIT} from './limitExceededMessage';
+import NewTraceDetailsContent from './newTraceDetailsContent';
+import {getTraceSplitResults} from './utils';
 
 type Props = RouteComponentProps<{traceSlug: string}, {}> & {
   api: Client;
   organization: Organization;
 };
 
+type State = {
+  limit: number;
+};
+
 class TraceSummary extends Component<Props> {
+  state: State = {
+    limit: DEFAULT_TRACE_ROWS_LIMIT,
+  };
+
+  componentDidMount(): void {
+    const {query} = this.props.location;
+
+    if (query.limit) {
+      this.setState({limit: query.limit});
+    }
+  }
+
+  handleLimitChange = (newLimit: number) => {
+    this.setState({limit: newLimit});
+  };
+
   getDocumentTitle(): string {
-    return [t('Trace Details'), t('Performance')].join(' - ');
+    return [t('Trace Details'), t('Performance')].join(' — ');
   }
 
   getTraceSlug(): string {
@@ -37,7 +65,7 @@ class TraceSummary extends Component<Props> {
 
   getDateSelection() {
     const {location} = this.props;
-    const queryParams = getParams(location.query, {
+    const queryParams = normalizeDateTimeParams(location.query, {
       allowAbsolutePageDatetime: true,
     });
     const start = decodeScalar(queryParams.start);
@@ -69,6 +97,7 @@ class TraceSummary extends Component<Props> {
     const traceSlug = this.getTraceSlug();
     const {start, end, statsPeriod} = this.getDateSelection();
     const dateSelected = Boolean(statsPeriod || (start && end));
+    const backend = decodeScalar(location.query.backend);
 
     const content = ({
       isLoading,
@@ -76,29 +105,42 @@ class TraceSummary extends Component<Props> {
       traces,
       meta,
     }: {
+      error: QueryError | null;
       isLoading: boolean;
-      error: string | null;
-      traces: TraceFullDetailed[] | null;
       meta: TraceMeta | null;
-    }) => (
-      <TraceDetailsContent
-        location={location}
-        organization={organization}
-        params={params}
-        traceSlug={traceSlug}
-        traceEventView={this.getTraceEventView()}
-        dateSelected={dateSelected}
-        isLoading={isLoading}
-        error={error}
-        traces={traces}
-        meta={meta}
-      />
-    );
+      traces: (TraceTree.Transaction[] | TraceSplitResults<TraceTree.Transaction>) | null;
+    }) => {
+      const {transactions, orphanErrors} = getTraceSplitResults<TraceTree.Transaction>(
+        traces ?? [],
+        organization
+      );
+
+      const commonProps = {
+        location,
+        organization,
+        params,
+        traceSlug,
+        traceEventView: this.getTraceEventView(),
+        dateSelected,
+        isLoading,
+        error,
+        orphanErrors,
+        traces: transactions ?? (traces as TraceTree.Transaction[]),
+        meta,
+        handleLimitChange: this.handleLimitChange,
+      };
+
+      return organization.features.includes('performance-trace-details') ? (
+        <NewTraceDetailsContent {...commonProps} />
+      ) : (
+        <TraceDetailsContent {...commonProps} />
+      );
+    };
 
     if (!dateSelected) {
       return content({
         isLoading: false,
-        error: 'date selection not specified',
+        error: new QueryError('date selection not specified'),
         traces: null,
         meta: null,
       });
@@ -106,12 +148,14 @@ class TraceSummary extends Component<Props> {
 
     return (
       <TraceFullDetailedQuery
+        type={backend === 'indexedSpans' ? 'spans' : 'detailed'}
         location={location}
         orgSlug={organization.slug}
         traceId={traceSlug}
         start={start}
         end={end}
         statsPeriod={statsPeriod}
+        limit={this.state.limit}
       >
         {traceResults => (
           <TraceMetaQuery
@@ -126,7 +170,7 @@ class TraceSummary extends Component<Props> {
               content({
                 isLoading: traceResults.isLoading || metaResults.isLoading,
                 error: traceResults.error || metaResults.error,
-                traces: traceResults.traces,
+                traces: traceResults.traces as unknown as TraceTree.Transaction[],
                 meta: metaResults.meta,
               })
             }
@@ -139,20 +183,20 @@ class TraceSummary extends Component<Props> {
   render() {
     const {organization} = this.props;
 
+    if (organization.features.includes('trace-view-v1')) {
+      return <TraceViewV1 />;
+    }
+
     return (
       <SentryDocumentTitle title={this.getDocumentTitle()} orgSlug={organization.slug}>
-        <StyledPageContent>
+        <Layout.Page>
           <NoProjectMessage organization={organization}>
             {this.renderContent()}
           </NoProjectMessage>
-        </StyledPageContent>
+        </Layout.Page>
       </SentryDocumentTitle>
     );
   }
 }
 
 export default withOrganization(withApi(TraceSummary));
-
-const StyledPageContent = styled(PageContent)`
-  padding: 0;
-`;

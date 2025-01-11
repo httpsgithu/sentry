@@ -1,23 +1,30 @@
 import logging
 from uuid import uuid4
 
-from django.conf.urls import url
+from django.urls import re_path
+from rest_framework.request import Request
 from rest_framework.response import Response
 
 from sentry import options
-from sentry.app import locks
 from sentry.exceptions import PluginError
-from sentry.integrations import FeatureDescription, IntegrationFeatures
-from sentry.models import Integration, Organization, OrganizationOption, Repository
-from sentry.plugins import providers
+from sentry.integrations.base import FeatureDescription, IntegrationFeatures
+from sentry.integrations.models.integration import Integration
+from sentry.integrations.services.integration.model import RpcIntegration
+from sentry.integrations.services.integration.service import integration_service
+from sentry.locks import locks
+from sentry.models.options.organization_option import OrganizationOption
+from sentry.models.organization import Organization
+from sentry.models.repository import Repository
 from sentry.plugins.bases.issue2 import IssueGroupActionEndpoint, IssuePlugin2
+from sentry.plugins.providers import RepositoryProvider
 from sentry.shared_integrations.constants import ERR_INTERNAL, ERR_UNAUTHORIZED
 from sentry.shared_integrations.exceptions import ApiError
+from sentry.users.services.user import RpcUser
+from sentry.users.services.usersocialauth.service import usersocialauth_service
 from sentry.utils.http import absolute_uri
 from sentry_plugins.base import CorePluginMixin
-from social_auth.models import UserSocialAuth
 
-from .client import GitHubAppsClient, GitHubClient
+from .client import GithubPluginAppsClient, GithubPluginClient
 
 API_ERRORS = {
     404: "GitHub returned a 404 Not Found error. If this repository exists, ensure"
@@ -46,11 +53,11 @@ class GitHubMixin(CorePluginMixin):
         else:
             return ERR_INTERNAL
 
-    def get_client(self, user):
+    def get_client(self, user: RpcUser):
         auth = self.get_auth(user=user)
         if auth is None:
             raise PluginError(API_ERRORS[401])
-        return GitHubClient(auth=auth)
+        return GithubPluginClient(auth=auth)
 
 
 # TODO(dcramer): half of this plugin is for the issue tracking integration
@@ -86,7 +93,7 @@ class GitHubPlugin(GitHubMixin, IssuePlugin2):
 
     def get_group_urls(self):
         return super().get_group_urls() + [
-            url(
+            re_path(
                 r"^autocomplete",
                 IssueGroupActionEndpoint.as_view(view_method_name="view_autocomplete", plugin=self),
             )
@@ -95,35 +102,31 @@ class GitHubPlugin(GitHubMixin, IssuePlugin2):
     def get_url_module(self):
         return "sentry_plugins.github.urls"
 
-    def is_configured(self, request, project, **kwargs):
+    def is_configured(self, project) -> bool:
         return bool(self.get_option("repo", project))
 
-    def get_new_issue_fields(self, request, group, event, **kwargs):
+    def get_new_issue_fields(self, request: Request, group, event, **kwargs):
         fields = super().get_new_issue_fields(request, group, event, **kwargs)
-        return (
-            [
-                {
-                    "name": "repo",
-                    "label": "GitHub Repository",
-                    "default": self.get_option("repo", group.project),
-                    "type": "text",
-                    "readonly": True,
-                }
-            ]
-            + fields
-            + [
-                {
-                    "name": "assignee",
-                    "label": "Assignee",
-                    "default": "",
-                    "type": "select",
-                    "required": False,
-                    "choices": self.get_allowed_assignees(request, group),
-                }
-            ]
-        )
+        return [
+            {
+                "name": "repo",
+                "label": "GitHub Repository",
+                "default": self.get_option("repo", group.project),
+                "type": "text",
+                "readonly": True,
+            },
+            *fields,
+            {
+                "name": "assignee",
+                "label": "Assignee",
+                "default": "",
+                "type": "select",
+                "required": False,
+                "choices": self.get_allowed_assignees(request, group),
+            },
+        ]
 
-    def get_link_existing_issue_fields(self, request, group, event, **kwargs):
+    def get_link_existing_issue_fields(self, request: Request, group, event, **kwargs):
         return [
             {
                 "name": "issue_id",
@@ -140,7 +143,7 @@ class GitHubPlugin(GitHubMixin, IssuePlugin2):
             {
                 "name": "comment",
                 "label": "Comment",
-                "default": "Sentry issue: [{issue_id}]({url})".format(
+                "default": "Sentry Issue: [{issue_id}]({url})".format(
                     url=absolute_uri(group.get_absolute_url(params={"referrer": "github_plugin"})),
                     issue_id=group.qualified_short_id,
                 ),
@@ -150,7 +153,7 @@ class GitHubPlugin(GitHubMixin, IssuePlugin2):
             },
         ]
 
-    def get_allowed_assignees(self, request, group):
+    def get_allowed_assignees(self, request: Request, group):
         try:
             with self.get_client(request.user) as client:
                 response = client.list_assignees(repo=self.get_option("repo", group.project))
@@ -161,7 +164,7 @@ class GitHubPlugin(GitHubMixin, IssuePlugin2):
 
         return (("", "Unassigned"),) + users
 
-    def create_issue(self, request, group, form_data, **kwargs):
+    def create_issue(self, request: Request, group, form_data):
         # TODO: support multiple identities via a selection input in the form?
         with self.get_client(request.user) as client:
             try:
@@ -178,7 +181,7 @@ class GitHubPlugin(GitHubMixin, IssuePlugin2):
 
         return response["number"]
 
-    def link_issue(self, request, group, form_data, **kwargs):
+    def link_issue(self, request: Request, group, form_data, **kwargs):
         with self.get_client(request.user) as client:
             repo = self.get_option("repo", group.project)
             try:
@@ -193,16 +196,16 @@ class GitHubPlugin(GitHubMixin, IssuePlugin2):
 
         return {"title": issue["title"]}
 
-    def get_issue_label(self, group, issue_id, **kwargs):
+    def get_issue_label(self, group, issue_id: str) -> str:
         return f"GH-{issue_id}"
 
-    def get_issue_url(self, group, issue_id, **kwargs):
+    def get_issue_url(self, group, issue_id: str) -> str:
         # XXX: get_option may need tweaked in Sentry so that it can be pre-fetched in bulk
         repo = self.get_option("repo", group.project)
 
         return f"https://github.com/{repo}/issues/{issue_id}"
 
-    def view_autocomplete(self, request, group, **kwargs):
+    def view_autocomplete(self, request: Request, group, **kwargs):
         field = request.GET.get("autocomplete_field")
         query = request.GET.get("autocomplete_query")
         if field != "issue_id" or not query:
@@ -222,7 +225,7 @@ class GitHubPlugin(GitHubMixin, IssuePlugin2):
 
         return Response({field: issues})
 
-    def get_configure_plugin_fields(self, request, project, **kwargs):
+    def get_configure_plugin_fields(self, project, **kwargs):
         return [
             {
                 "name": "repo",
@@ -252,11 +255,9 @@ class GitHubPlugin(GitHubMixin, IssuePlugin2):
         bindings.add("repository.provider", GitHubRepositoryProvider, id="github")
         if self.has_apps_configured():
             bindings.add("repository.provider", GitHubAppsRepositoryProvider, id="github_apps")
-        else:
-            self.logger.info("apps-not-configured")
 
 
-class GitHubRepositoryProvider(GitHubMixin, providers.RepositoryProvider):
+class GitHubRepositoryProvider(GitHubMixin, RepositoryProvider):
     name = "GitHub"
     auth_provider = "github"
     logger = logging.getLogger("sentry.plugins.github")
@@ -292,7 +293,9 @@ class GitHubRepositoryProvider(GitHubMixin, providers.RepositoryProvider):
         return config
 
     def get_webhook_secret(self, organization):
-        lock = locks.get(f"github:webhook-secret:{organization.id}", duration=60)
+        lock = locks.get(
+            f"github:webhook-secret:{organization.id}", duration=60, name="github_webhook_secret"
+        )
         with lock.acquire():
             # TODO(dcramer): get_or_create would be a useful native solution
             secret = OrganizationOption.objects.get_value(
@@ -471,9 +474,10 @@ class GitHubAppsRepositoryProvider(GitHubRepositoryProvider):
     def link_auth(self, user, organization, data):
         integration_id = data["integration_id"]
 
-        try:
-            integration = Integration.objects.get(provider=self.auth_provider, id=integration_id)
-        except Integration.DoesNotExist:
+        integration = integration_service.get_integration(
+            integration_id=integration_id, provider=self.auth_provider
+        )
+        if not integration:
             raise PluginError("Invalid integration id")
 
         # check that user actually has access to add
@@ -481,7 +485,9 @@ class GitHubAppsRepositoryProvider(GitHubRepositoryProvider):
         if int(integration.external_id) not in allowed_gh_installations:
             raise PluginError("You do not have access to that integration")
 
-        integration.add_organization(organization)
+        integration_service.add_organization(
+            integration_id=integration.id, org_ids=[organization.id]
+        )
 
         for repo in self.get_repositories(integration):
             # TODO(jess): figure out way to migrate from github --> github apps
@@ -511,8 +517,10 @@ class GitHubAppsRepositoryProvider(GitHubRepositoryProvider):
         integration_id = repo.integration_id
         if integration_id is None:
             raise NotImplementedError("GitHub apps requires an integration id to fetch commits")
-
-        client = GitHubAppsClient(Integration.objects.get(id=integration_id))
+        integration = integration_service.get_integration(
+            integration_id=integration_id, provider=self.auth_provider
+        )
+        client = GithubPluginAppsClient(integration=integration)
 
         # use config name because that is kept in sync via webhooks
         name = repo.config["name"]
@@ -531,23 +539,24 @@ class GitHubAppsRepositoryProvider(GitHubRepositoryProvider):
             else:
                 return self._format_commits(repo, res["commits"])
 
-    def get_installations(self, actor):
-        if not actor.is_authenticated:
+    def get_installations(self, user):
+        if not user.is_authenticated:
             raise PluginError(API_ERRORS[401])
-
-        auth = UserSocialAuth.objects.filter(user=actor, provider="github_apps").first()
+        auth = usersocialauth_service.get_one_or_none(
+            filter={"user_id": user.id, "provider": "github_apps"}
+        )
 
         if not auth:
             self.logger.warning("get_installations.no-linked-auth")
             return []
 
-        with GitHubClient(auth=auth) as client:
+        with GithubPluginClient(auth=auth) as client:
             res = client.get_installations()
 
         return [install["id"] for install in res["installations"]]
 
-    def get_repositories(self, integration):
-        client = GitHubAppsClient(integration)
+    def get_repositories(self, integration: RpcIntegration):
+        client = GithubPluginAppsClient(integration)
 
         res = client.get_repositories()
         return [

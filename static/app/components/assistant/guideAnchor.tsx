@@ -1,7 +1,7 @@
-import * as React from 'react';
+import {Component, Fragment, useEffect, useRef} from 'react';
 import styled from '@emotion/styled';
 import * as Sentry from '@sentry/react';
-import {Query} from 'history';
+import type {Query} from 'history';
 
 import {
   closeGuide,
@@ -10,57 +10,46 @@ import {
   recordFinish,
   registerAnchor,
   unregisterAnchor,
-} from 'app/actionCreators/guides';
-import {Guide} from 'app/components/assistant/types';
-import Button from 'app/components/button';
-import Hovercard, {Body as HovercardBody} from 'app/components/hovercard';
-import {t, tct} from 'app/locale';
-import GuideStore, {GuideStoreState} from 'app/stores/guideStore';
-import space from 'app/styles/space';
-import theme from 'app/utils/theme';
+} from 'sentry/actionCreators/guides';
+import type {Guide} from 'sentry/components/assistant/types';
+import {Button, LinkButton} from 'sentry/components/button';
+import {Hovercard} from 'sentry/components/hovercard';
+import {t, tct} from 'sentry/locale';
+import type {GuideStoreState} from 'sentry/stores/guideStore';
+import GuideStore from 'sentry/stores/guideStore';
+import {space} from 'sentry/styles/space';
+import type {Organization} from 'sentry/types/organization';
 
 type Props = {
-  target?: string; // Shouldn't target be mandatory?
+  target: string;
+  children?: React.ReactNode;
+  /**
+   * Hovercard renders the container
+   */
+  containerClassName?: string;
+  offset?: number;
+  /**
+   * Trigger when the guide is completed (all steps have been clicked through)
+   */
+  onFinish?: (e: React.MouseEvent) => void;
+  /**
+   * Triggered when any step is completed (including the last step)
+   */
+  onStepComplete?: (e: React.MouseEvent) => void;
   position?: React.ComponentProps<typeof Hovercard>['position'];
-  offset?: string;
   to?: {
     pathname: string;
     query: Query;
   };
-  onFinish?: () => void;
-  /** Hovercard renders the container */
-  containerClassName?: string;
 };
 
-type State = {
-  active: boolean;
-  orgId: string | null;
-  step: number;
-  currentGuide?: Guide;
-};
+function ScrollToGuide({children}: {children: React.ReactNode}) {
+  const containerElement = useRef<HTMLSpanElement>(null);
 
-/**
- * A GuideAnchor puts an informative hovercard around an element.
- * Guide anchors register with the GuideStore, which uses registrations
- * from one or more anchors on the page to determine which guides can
- * be shown on the page.
- */
-class GuideAnchor extends React.Component<Props, State> {
-  state: State = {
-    active: false,
-    step: 0,
-    orgId: null,
-  };
-
-  componentDidMount() {
-    const {target} = this.props;
-    target && registerAnchor(target);
-  }
-
-  componentDidUpdate(_prevProps, prevState) {
-    if (this.containerElement.current && !prevState.active && this.state.active) {
+  useEffect(() => {
+    if (containerElement.current) {
       try {
-        const {top} = this.containerElement.current.getBoundingClientRect();
+        const {top} = containerElement.current.getBoundingClientRect();
         const scrollTop = window.pageYOffset;
         const centerElement = top + scrollTop - window.innerHeight / 2;
         window.scrollTo({top: centerElement});
@@ -68,30 +57,59 @@ class GuideAnchor extends React.Component<Props, State> {
         Sentry.captureException(err);
       }
     }
+  }, [containerElement]);
+
+  return <span ref={containerElement}>{children}</span>;
+}
+
+type State = {
+  active: boolean;
+  org: Organization | null;
+  orgId: string | null;
+  orgSlug: string | null;
+  step: number;
+  currentGuide?: Guide;
+};
+
+class BaseGuideAnchor extends Component<Props, State> {
+  state: State = {
+    active: false,
+    step: 0,
+    orgId: null,
+    orgSlug: null,
+    org: null,
+  };
+
+  componentDidMount() {
+    const {target} = this.props;
+    registerAnchor(target);
+    this.unsubscribe = GuideStore.listen(
+      (data: GuideStoreState) => this.onGuideStateChange(data),
+      undefined
+    );
   }
 
   componentWillUnmount() {
     const {target} = this.props;
-    target && unregisterAnchor(target);
-    this.unsubscribe();
+    unregisterAnchor(target);
+    this.unsubscribe?.();
   }
 
-  unsubscribe = GuideStore.listen(
-    (data: GuideStoreState) => this.onGuideStateChange(data),
-    undefined
-  );
-
-  containerElement = React.createRef<HTMLSpanElement>();
+  // TODO(TS): Reflux returns "Function" instead of () => void
+  unsubscribe: Function | undefined;
 
   onGuideStateChange(data: GuideStoreState) {
     const active =
-      data.currentGuide?.steps[data.currentStep]?.target === this.props.target ?? false;
+      data.currentGuide?.steps[data.currentStep]?.target === this.props.target &&
+      !data.forceHide;
 
     this.setState({
       active,
       currentGuide: data.currentGuide ?? undefined,
       step: data.currentStep,
       orgId: data.orgId,
+      orgSlug: data.orgSlug,
+      org: data.organization,
     });
   }
 
@@ -104,19 +122,19 @@ class GuideAnchor extends React.Component<Props, State> {
    */
   handleFinish = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const {onFinish} = this.props;
-    if (onFinish) {
-      onFinish();
-    }
-    const {currentGuide, orgId} = this.state;
+    this.props.onStepComplete?.(e);
+    this.props.onFinish?.(e);
+
+    const {currentGuide, orgId, orgSlug, org} = this.state;
     if (currentGuide) {
-      recordFinish(currentGuide.guide, orgId);
+      recordFinish(currentGuide.guide, orgId, orgSlug, org);
     }
     closeGuide();
   };
 
   handleNextStep = (e: React.MouseEvent) => {
     e.stopPropagation();
+    this.props.onStepComplete?.(e);
     nextStep();
   };
 
@@ -137,7 +155,7 @@ class GuideAnchor extends React.Component<Props, State> {
 
     const totalStepCount = currentGuide.steps.length;
     const currentStepCount = step + 1;
-    const currentStep = currentGuide.steps[step];
+    const currentStep = currentGuide.steps[step]!;
     const lastStep = currentStepCount === totalStepCount;
     const hasManySteps = totalStepCount > 1;
 
@@ -146,7 +164,8 @@ class GuideAnchor extends React.Component<Props, State> {
 
     const dismissButton = (
       <DismissButton
-        size="small"
+        size="sm"
+        translucentBorder
         href={href}
         onClick={this.handleDismiss}
         priority="link"
@@ -156,7 +175,7 @@ class GuideAnchor extends React.Component<Props, State> {
     );
 
     return (
-      <GuideContainer>
+      <GuideContainer data-test-id="guide-container">
         <GuideContent>
           {currentStep.title && <GuideTitle>{currentStep.title}</GuideTitle>}
           <GuideDescription>{currentStep.description}</GuideDescription>
@@ -164,20 +183,30 @@ class GuideAnchor extends React.Component<Props, State> {
         <GuideAction>
           <div>
             {lastStep ? (
-              <React.Fragment>
-                <StyledButton size="small" to={to} onClick={this.handleFinish}>
+              <Fragment>
+                <StyledButton
+                  size="sm"
+                  translucentBorder
+                  to={to}
+                  onClick={this.handleFinish}
+                >
                   {currentStep.nextText ||
                     (hasManySteps ? t('Enough Already') : t('Got It'))}
                 </StyledButton>
                 {currentStep.hasNextGuide && dismissButton}
-              </React.Fragment>
+              </Fragment>
             ) : (
-              <React.Fragment>
-                <StyledButton size="small" onClick={this.handleNextStep} to={to}>
+              <Fragment>
+                <StyledButton
+                  size="sm"
+                  translucentBorder
+                  onClick={this.handleNextStep}
+                  to={to}
+                >
                   {currentStep.nextText || t('Next')}
                 </StyledButton>
                 {!currentStep.cantDismiss && dismissButton}
-              </React.Fragment>
+              </Fragment>
             )}
           </div>
 
@@ -204,52 +233,63 @@ class GuideAnchor extends React.Component<Props, State> {
 
     return (
       <StyledHovercard
-        show
+        forceVisible
         body={this.getHovercardBody()}
-        tipColor={theme.purple300}
+        tipColor="purple300"
         position={position}
         offset={offset}
         containerClassName={containerClassName}
       >
-        <span ref={this.containerElement}>{children}</span>
+        <ScrollToGuide>{children}</ScrollToGuide>
       </StyledHovercard>
     );
   }
 }
 
-export {GuideAnchor};
-
 /**
  * Wraps the GuideAnchor so we don't have to render it if it's disabled
  * Using a class so we automatically have children as a typed prop
  */
-type WrapperProps = {disabled?: boolean} & Props;
+type WrapperProps = Props & {
+  children?: React.ReactNode;
+  disabled?: boolean;
+};
 
-export default class GuideAnchorWrapper extends React.Component<WrapperProps> {
-  render() {
-    const {disabled, children, ...rest} = this.props;
-    if (disabled || window.localStorage.getItem('hide_anchors') === '1') {
-      return children || null;
-    }
-    return <GuideAnchor {...rest}>{children}</GuideAnchor>;
+/**
+ * A GuideAnchor puts an informative hovercard around an element. Guide anchors
+ * register with the GuideStore, which uses registrations from one or more
+ * anchors on the page to determine which guides can be shown on the page.
+ */
+function GuideAnchor({disabled, children, ...rest}: WrapperProps) {
+  if (disabled) {
+    return <Fragment>{children}</Fragment>;
   }
+  return <BaseGuideAnchor {...rest}>{children}</BaseGuideAnchor>;
 }
+
+export default GuideAnchor;
 
 const GuideContainer = styled('div')`
   display: grid;
   grid-template-rows: repeat(2, auto);
-  grid-gap: ${space(2)};
+  gap: ${space(2)};
   text-align: center;
   line-height: 1.5;
   background-color: ${p => p.theme.purple300};
   border-color: ${p => p.theme.purple300};
   color: ${p => p.theme.white};
+
+  a {
+    :hover {
+      color: ${p => p.theme.white};
+    }
+  }
 `;
 
 const GuideContent = styled('div')`
   display: grid;
   grid-template-rows: repeat(2, auto);
-  grid-gap: ${space(1)};
+  gap: ${space(1)};
 
   a {
     color: ${p => p.theme.white};
@@ -258,7 +298,7 @@ const GuideContent = styled('div')`
 `;
 
 const GuideTitle = styled('div')`
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
   font-size: ${p => p.theme.fontSizeExtraLarge};
 `;
 
@@ -269,7 +309,7 @@ const GuideDescription = styled('div')`
 const GuideAction = styled('div')`
   display: grid;
   grid-template-rows: repeat(2, auto);
-  grid-gap: ${space(1)};
+  gap: ${space(1)};
 `;
 
 const StyledButton = styled(Button)`
@@ -277,7 +317,9 @@ const StyledButton = styled(Button)`
   min-width: 40%;
 `;
 
-const DismissButton = styled(StyledButton)`
+const DismissButton = styled(LinkButton)`
+  font-size: ${p => p.theme.fontSizeMedium};
+  min-width: 40%;
   margin-left: ${space(1)};
 
   &:hover,
@@ -290,15 +332,10 @@ const DismissButton = styled(StyledButton)`
 
 const StepCount = styled('div')`
   font-size: ${p => p.theme.fontSizeSmall};
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
   text-transform: uppercase;
 `;
 
 const StyledHovercard = styled(Hovercard)`
-  ${HovercardBody} {
-    background-color: ${theme.purple300};
-    margin: -1px;
-    border-radius: ${theme.borderRadius};
-    width: 300px;
-  }
+  background-color: ${p => p.theme.purple300};
 `;

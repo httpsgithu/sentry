@@ -1,24 +1,25 @@
-import {Location, Query} from 'history';
+import type {Location, Query} from 'history';
 import cloneDeep from 'lodash/cloneDeep';
 import isEqual from 'lodash/isEqual';
-import isString from 'lodash/isString';
 import omit from 'lodash/omit';
 import pick from 'lodash/pick';
 import uniqBy from 'lodash/uniqBy';
-import moment from 'moment';
+import moment from 'moment-timezone';
 
-import {EventQuery} from 'app/actionCreators/events';
-import {COL_WIDTH_UNDEFINED} from 'app/components/gridEditable';
-import {getParams} from 'app/components/organizations/globalSelectionHeader/getParams';
-import {DEFAULT_PER_PAGE} from 'app/constants';
-import {URL_PARAM} from 'app/constants/globalSelectionHeader';
-import {t} from 'app/locale';
-import {GlobalSelection, NewQuery, SavedQuery, SelectValue, User} from 'app/types';
+import type {EventQuery} from 'sentry/actionCreators/events';
+import {COL_WIDTH_UNDEFINED} from 'sentry/components/gridEditable';
+import {normalizeDateTimeParams} from 'sentry/components/organizations/pageFilters/parse';
+import {DEFAULT_PER_PAGE} from 'sentry/constants';
+import {ALL_ACCESS_PROJECTS, URL_PARAM} from 'sentry/constants/pageFilters';
+import {t} from 'sentry/locale';
+import type {PageFilters, SelectValue} from 'sentry/types/core';
+import type {NewQuery, SavedQuery} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import type {User} from 'sentry/types/user';
+import toArray from 'sentry/utils/array/toArray';
+import type {Column, ColumnType, Field, Sort} from 'sentry/utils/discover/fields';
 import {
   aggregateOutputType,
-  Column,
-  ColumnType,
-  Field,
   generateFieldAsString,
   getAggregateAlias,
   getEquation,
@@ -26,43 +27,58 @@ import {
   isAggregateField,
   isEquation,
   isLegalYAxisType,
-  Sort,
-  WebVital,
-} from 'app/utils/discover/fields';
+} from 'sentry/utils/discover/fields';
 import {
   CHART_AXIS_OPTIONS,
+  DiscoverDatasets,
   DISPLAY_MODE_FALLBACK_OPTIONS,
   DISPLAY_MODE_OPTIONS,
   DisplayModes,
+  type SavedQueryDatasets,
   TOP_N,
-} from 'app/utils/discover/types';
-import {decodeList, decodeScalar} from 'app/utils/queryString';
-import {
-  FieldValueKind,
-  TableColumn,
-  TableColumnSort,
-} from 'app/views/eventsV2/table/types';
-import {decodeColumnOrder} from 'app/views/eventsV2/utils';
-import {SpanOperationBreakdownFilter} from 'app/views/performance/transactionSummary/filter';
-import {EventsDisplayFilterName} from 'app/views/performance/transactionSummary/transactionEvents/utils';
+} from 'sentry/utils/discover/types';
+import {statsPeriodToDays} from 'sentry/utils/duration/statsPeriodToDays';
+import {decodeList, decodeScalar, decodeSorts} from 'sentry/utils/queryString';
+import normalizeUrl from 'sentry/utils/url/normalizeUrl';
+import type {WidgetType} from 'sentry/views/dashboards/types';
+import {getSavedQueryDatasetFromLocationOrDataset} from 'sentry/views/discover/savedQuery/utils';
+import type {TableColumn, TableColumnSort} from 'sentry/views/discover/table/types';
+import {FieldValueKind} from 'sentry/views/discover/table/types';
+import {decodeColumnOrder} from 'sentry/views/discover/utils';
+import type {DomainView} from 'sentry/views/insights/pages/useFilters';
+import type {SpanOperationBreakdownFilter} from 'sentry/views/performance/transactionSummary/filter';
+import type {EventsDisplayFilterName} from 'sentry/views/performance/transactionSummary/transactionEvents/utils';
+import {getTransactionSummaryBaseUrl} from 'sentry/views/performance/transactionSummary/utils';
 
-import {statsPeriodToDays} from '../dates';
+import type {WebVital} from '../fields';
 import {MutableSearch} from '../tokenizeSearch';
 
 import {getSortField} from './fieldRenderers';
 
 // Metadata mapping for discover results.
-export type MetaType = Record<string, ColumnType>;
+export type MetaType = Record<string, any> & {
+  isMetricsData?: boolean;
+  isMetricsExtractedData?: boolean;
+  tips?: {columns: string; query: string};
+  units?: Record<string, string>;
+};
+export type EventsMetaType = {fields: Record<string, ColumnType>} & {
+  units: Record<string, string>;
+} & {
+  discoverSplitDecision?: WidgetType;
+  isMetricsData?: boolean;
+  isMetricsExtractedData?: boolean;
+};
 
 // Data in discover results.
 export type EventData = Record<string, any>;
 
 export type LocationQuery = {
-  start?: string | string[];
-  end?: string | string[];
-  utc?: string | string[];
-  statsPeriod?: string | string[];
-  cursor?: string | string[];
+  cursor?: string | string[] | null;
+  end?: string | string[] | null;
+  start?: string | string[] | null;
+  statsPeriod?: string | string[] | null;
+  utc?: string | string[] | null;
 };
 
 const DATETIME_QUERY_STRING_KEYS = ['start', 'end', 'utc', 'statsPeriod'] as const;
@@ -94,9 +110,10 @@ const isSortEqualToField = (
 const fieldToSort = (
   field: Field,
   tableMeta: MetaType | undefined,
-  kind?: 'desc' | 'asc'
+  kind?: 'desc' | 'asc',
+  useFunctionFormat?: boolean
 ): Sort | undefined => {
-  const sortKey = getSortKeyFromField(field, tableMeta);
+  const sortKey = getSortKeyFromField(field, tableMeta, useFunctionFormat);
 
   if (!sortKey) {
     return void 0;
@@ -108,13 +125,21 @@ const fieldToSort = (
   };
 };
 
-function getSortKeyFromField(field: Field, tableMeta?: MetaType): string | null {
-  const alias = getAggregateAlias(field.field);
-  return getSortField(alias, tableMeta);
+function getSortKeyFromField(
+  field: Field,
+  tableMeta?: MetaType,
+  useFunctionFormat?: boolean
+): string | null {
+  const fieldString = useFunctionFormat ? field.field : getAggregateAlias(field.field);
+  return getSortField(fieldString, tableMeta);
 }
 
-export function isFieldSortable(field: Field, tableMeta?: MetaType): boolean {
-  return !!getSortKeyFromField(field, tableMeta);
+export function isFieldSortable(
+  field: Field,
+  tableMeta?: MetaType,
+  useFunctionFormat?: boolean
+): boolean {
+  return !!getSortKeyFromField(field, tableMeta, useFunctionFormat);
 }
 
 const decodeFields = (location: Location): Array<Field> => {
@@ -137,51 +162,7 @@ const decodeFields = (location: Location): Array<Field> => {
   return parsed;
 };
 
-const parseSort = (sort: string): Sort => {
-  sort = sort.trim();
-
-  if (sort.startsWith('-')) {
-    return {
-      kind: 'desc',
-      field: sort.substring(1),
-    };
-  }
-
-  return {
-    kind: 'asc',
-    field: sort,
-  };
-};
-
-export const fromSorts = (sorts: string | string[] | undefined): Array<Sort> => {
-  if (sorts === undefined) {
-    return [];
-  }
-
-  sorts = isString(sorts) ? [sorts] : sorts;
-
-  // NOTE: sets are iterated in insertion order
-  const uniqueSorts = [...new Set(sorts)];
-
-  return uniqueSorts.reduce((acc: Array<Sort>, sort: string) => {
-    acc.push(parseSort(sort));
-    return acc;
-  }, []);
-};
-
-const decodeSorts = (location: Location): Array<Sort> => {
-  const {query} = location;
-
-  if (!query || !query.sort) {
-    return [];
-  }
-
-  const sorts = decodeList(query.sort);
-
-  return fromSorts(sorts);
-};
-
-const encodeSort = (sort: Sort): string => {
+export const encodeSort = (sort: Sort): string => {
   switch (sort.kind) {
     case 'desc': {
       return `-${sort.field}`;
@@ -198,6 +179,31 @@ const encodeSort = (sort: Sort): string => {
 const encodeSorts = (sorts: Readonly<Array<Sort>>): Array<string> =>
   sorts.map(encodeSort);
 
+// TODO(__SENTRY_USING_REACT_ROUTER_SIX): This is needed to translate query
+// objects that have non-string values and single-element arrays to match what
+// react-router 6 translates these objects into, so that the tests can work
+// between 3 and 6.
+//
+// Once we're fully on 6 we can likely remove these changes
+function stringifyQueryParams(
+  query: Record<string, string | number | string[] | number[] | undefined>
+) {
+  for (const field in query) {
+    if (Array.isArray(query[field])) {
+      query[field] = query[field].map((v: string | number) => v.toString());
+
+      if (query[field].length === 1) {
+        query[field] = query[field][0];
+      }
+      if (query[field]!.length === 0) {
+        query[field] = undefined;
+      }
+    } else {
+      query[field] = query[field]?.toString();
+    }
+  }
+}
+
 const collectQueryStringByKey = (query: Query, key: string): Array<string> => {
   const needle = query[key];
   const collection = decodeList(needle);
@@ -212,7 +218,7 @@ const collectQueryStringByKey = (query: Query, key: string): Array<string> => {
   }, []);
 };
 
-const decodeQuery = (location: Location): string => {
+export const decodeQuery = (location: Location): string => {
   if (!location.query || !location.query.query) {
     return '';
   }
@@ -234,16 +240,18 @@ const decodeTeams = (location: Location): ('myteams' | number)[] => {
     return [];
   }
   const value = location.query.team;
-  return Array.isArray(value) ? value.map(decodeTeam) : [decodeTeam(value)];
+  return toArray(value)
+    .map(decodeTeam)
+    .filter(team => team === 'myteams' || !isNaN(team));
 };
 
-const decodeProjects = (location: Location): number[] => {
+export const decodeProjects = (location: Location): number[] => {
   if (!location.query || !location.query.project) {
     return [];
   }
 
   const value = location.query.project;
-  return Array.isArray(value) ? value.map(i => parseInt(i, 10)) : [parseInt(value, 10)];
+  return toArray(value).map(i => parseInt(i, 10));
 };
 
 const queryStringFromSavedQuery = (saved: NewQuery | SavedQuery): string => {
@@ -257,6 +265,29 @@ function validateTableMeta(tableMeta: MetaType | undefined): MetaType | undefine
   return tableMeta && Object.keys(tableMeta).length > 0 ? tableMeta : undefined;
 }
 
+export type EventViewOptions = {
+  createdBy: User | undefined;
+  display: string | undefined;
+  end: string | undefined;
+  environment: Readonly<string[]>;
+  fields: Readonly<Field[]>;
+  id: string | undefined;
+  name: string | undefined;
+  project: Readonly<number[]>;
+  query: string;
+  sorts: Readonly<Sort[]>;
+  start: string | undefined;
+  statsPeriod: string | undefined;
+  team: Readonly<('myteams' | number)[]>;
+  topEvents: string | undefined;
+  additionalConditions?: MutableSearch;
+  dataset?: DiscoverDatasets;
+  expired?: boolean;
+  interval?: string;
+  utc?: string | boolean | undefined;
+  yAxis?: string | string[] | undefined;
+};
+
 class EventView {
   id: string | undefined;
   name: string | undefined;
@@ -268,35 +299,18 @@ class EventView {
   start: string | undefined;
   end: string | undefined;
   statsPeriod: string | undefined;
+  utc?: string | boolean | undefined;
   environment: Readonly<string[]>;
-  yAxis: string | undefined;
+  yAxis: string | string[] | undefined;
   display: string | undefined;
   topEvents: string | undefined;
   interval: string | undefined;
   expired?: boolean;
   createdBy: User | undefined;
-  additionalConditions: MutableSearch; // This allows views to always add additional conditins to the query to get specific data. It should not show up in the UI unless explicitly called.
+  additionalConditions: MutableSearch; // This allows views to always add additional conditions to the query to get specific data. It should not show up in the UI unless explicitly called.
+  dataset?: DiscoverDatasets;
 
-  constructor(props: {
-    id: string | undefined;
-    name: string | undefined;
-    fields: Readonly<Field[]>;
-    sorts: Readonly<Sort[]>;
-    query: string;
-    team: Readonly<('myteams' | number)[]>;
-    project: Readonly<number[]>;
-    start: string | undefined;
-    end: string | undefined;
-    statsPeriod: string | undefined;
-    environment: Readonly<string[]>;
-    yAxis: string | undefined;
-    display: string | undefined;
-    topEvents: string | undefined;
-    interval?: string;
-    expired?: boolean;
-    createdBy: User | undefined;
-    additionalConditions: MutableSearch;
-  }) {
+  constructor(props: EventViewOptions) {
     const fields: Field[] = Array.isArray(props.fields) ? props.fields : [];
     let sorts: Sort[] = Array.isArray(props.sorts) ? props.sorts : [];
     const team = Array.isArray(props.team) ? props.team : [];
@@ -305,19 +319,20 @@ class EventView {
 
     // only include sort keys that are included in the fields
     let equations = 0;
-    const sortKeys = fields
-      .map(field => {
-        if (field.field && isEquation(field.field)) {
-          const sortKey = getSortKeyFromField(
-            {field: `equation[${equations}]`},
-            undefined
-          );
-          equations += 1;
-          return sortKey;
+    const sortKeys: string[] = [];
+    fields.forEach(field => {
+      if (field.field && isEquation(field.field)) {
+        const sortKey = getSortKeyFromField({field: `equation[${equations}]`}, undefined);
+        equations += 1;
+        if (sortKey) {
+          sortKeys.push(sortKey);
         }
-        return getSortKeyFromField(field, undefined);
-      })
-      .filter((sortKey): sortKey is string => !!sortKey);
+      }
+      const sortKey = getSortKeyFromField(field, undefined);
+      if (sortKey) {
+        sortKeys.push(sortKey);
+      }
+    });
 
     const sort = sorts.find(currentSort => sortKeys.includes(currentSort.field));
     sorts = sort ? [sort] : [];
@@ -334,8 +349,10 @@ class EventView {
     this.start = props.start;
     this.end = props.end;
     this.statsPeriod = props.statsPeriod;
+    this.utc = props.utc;
     this.environment = environment;
     this.yAxis = props.yAxis;
+    this.dataset = props.dataset;
     this.display = props.display;
     this.topEvents = props.topEvents;
     this.interval = props.interval;
@@ -347,13 +364,13 @@ class EventView {
   }
 
   static fromLocation(location: Location): EventView {
-    const {start, end, statsPeriod} = getParams(location.query);
+    const {start, end, statsPeriod} = normalizeDateTimeParams(location.query);
 
     return new EventView({
       id: decodeScalar(location.query.id),
       name: decodeScalar(location.query.name),
       fields: decodeFields(location),
-      sorts: decodeSorts(location),
+      sorts: decodeSorts(location.query.sort),
       query: decodeQuery(location),
       team: decodeTeams(location),
       project: decodeProjects(location),
@@ -367,6 +384,7 @@ class EventView {
       interval: decodeScalar(location.query.interval),
       createdBy: undefined,
       additionalConditions: new MutableSearch([]),
+      dataset: decodeScalar(location.query.dataset) as DiscoverDatasets,
     });
   }
 
@@ -399,10 +417,21 @@ class EventView {
     return EventView.fromSavedQuery(saved);
   }
 
+  static fromNewQueryWithPageFilters(newQuery: NewQuery, pageFilters: PageFilters) {
+    return EventView.fromSavedQuery({
+      ...newQuery,
+      environment: newQuery.environment ?? pageFilters.environments,
+      projects: newQuery.projects ?? pageFilters.projects,
+      start: newQuery.start ?? pageFilters.datetime.start ?? undefined,
+      end: newQuery.end ?? pageFilters.datetime.end ?? undefined,
+      range: newQuery.range ?? pageFilters.datetime.period ?? undefined,
+      utc: newQuery.utc ?? pageFilters.datetime.utc ?? undefined,
+    });
+  }
+
   static getFields(saved: NewQuery | SavedQuery) {
     return saved.fields.map((field, i) => {
-      const width =
-        saved.widths && saved.widths[i] ? Number(saved.widths[i]) : COL_WIDTH_UNDEFINED;
+      const width = saved.widths?.[i] ? Number(saved.widths[i]) : COL_WIDTH_UNDEFINED;
 
       return {field, width};
     });
@@ -411,10 +440,11 @@ class EventView {
   static fromSavedQuery(saved: NewQuery | SavedQuery): EventView {
     const fields = EventView.getFields(saved);
     // normalize datetime selection
-    const {start, end, statsPeriod} = getParams({
+    const {start, end, statsPeriod, utc} = normalizeDateTimeParams({
       start: saved.start,
       end: saved.end,
       statsPeriod: saved.range,
+      utc: saved.utc,
     });
 
     return new EventView({
@@ -423,24 +453,29 @@ class EventView {
       fields,
       query: queryStringFromSavedQuery(saved),
       team: saved.teams ?? [],
-      project: saved.projects,
+      project: saved.projects ?? [],
       start: decodeScalar(start),
       end: decodeScalar(end),
       statsPeriod: decodeScalar(statsPeriod),
-      sorts: fromSorts(saved.orderby),
+      utc,
+      sorts: decodeSorts(saved.orderby),
       environment: collectQueryStringByKey(
         {
           environment: saved.environment as string[],
         },
         'environment'
       ),
-      // Workaround to only use the first yAxis since eventView yAxis doesn't accept string[]
-      yAxis: Array.isArray(saved.yAxis) ? saved.yAxis[0] : saved.yAxis,
+      yAxis:
+        Array.isArray(saved.yAxis) && saved.yAxis.length === 1
+          ? saved.yAxis[0]
+          : saved.yAxis,
       display: saved.display,
       topEvents: saved.topEvents ? saved.topEvents.toString() : undefined,
+      interval: saved.interval,
       createdBy: saved.createdBy,
       expired: saved.expired,
       additionalConditions: new MutableSearch([]),
+      dataset: saved.dataset,
     });
   }
 
@@ -449,17 +484,30 @@ class EventView {
     location: Location
   ): EventView {
     let fields = decodeFields(location);
-    const {start, end, statsPeriod} = getParams(location.query);
     const id = decodeScalar(location.query.id);
     const teams = decodeTeams(location);
     const projects = decodeProjects(location);
-    const sorts = decodeSorts(location);
+    const sorts = decodeSorts(location.query.sort);
     const environments = collectQueryStringByKey(location.query, 'environment');
 
     if (saved) {
       if (fields.length === 0) {
         fields = EventView.getFields(saved);
       }
+
+      const {start, end, statsPeriod, utc} = normalizeDateTimeParams(
+        location.query.start ||
+          location.query.end ||
+          location.query.statsPeriod ||
+          location.query.utc
+          ? location.query
+          : {
+              start: saved.start,
+              end: saved.end,
+              statsPeriod: saved.range,
+              utc: saved.utc,
+            }
+      );
       return new EventView({
         id: id || saved.id,
         name: decodeScalar(location.query.name) || saved.name,
@@ -468,7 +516,7 @@ class EventView {
           'query' in location.query
             ? decodeQuery(location)
             : queryStringFromSavedQuery(saved),
-        sorts: sorts.length === 0 ? fromSorts(saved.orderby) : sorts,
+        sorts: sorts.length === 0 ? decodeSorts(saved.orderby) : sorts,
         yAxis:
           decodeScalar(location.query.yAxis) ||
           // Workaround to only use the first yAxis since eventView yAxis doesn't accept string[]
@@ -479,7 +527,7 @@ class EventView {
           saved.topEvents ||
           TOP_N
         ).toString(),
-        interval: decodeScalar(location.query.interval),
+        interval: decodeScalar(location.query.interval) || saved.interval,
         createdBy: saved.createdBy,
         expired: saved.expired,
         additionalConditions: new MutableSearch([]),
@@ -493,28 +541,34 @@ class EventView {
         start: decodeScalar(start),
         end: decodeScalar(end),
         statsPeriod: decodeScalar(statsPeriod),
+        utc,
+        dataset:
+          (decodeScalar(location.query.dataset) as DiscoverDatasets) ?? saved.dataset,
       });
     }
     return EventView.fromLocation(location);
   }
 
-  isEqualTo(other: EventView): boolean {
-    const keys = [
-      'id',
-      'name',
-      'query',
-      'statsPeriod',
-      'fields',
-      'sorts',
-      'project',
-      'environment',
-      'display',
-      'topEvents',
-    ];
-
+  isEqualTo(other: EventView, omitList: string[] = []): boolean {
+    const defaults = {
+      id: undefined,
+      name: undefined,
+      query: undefined,
+      statsPeriod: undefined,
+      fields: undefined,
+      sorts: undefined,
+      project: undefined,
+      environment: undefined,
+      interval: undefined,
+      yAxis: 'count()',
+      display: DisplayModes.DEFAULT,
+      topEvents: '5',
+      dataset: DiscoverDatasets.DISCOVER,
+    };
+    const keys = Object.keys(defaults).filter(key => !omitList.includes(key));
     for (const key of keys) {
-      const currentValue = this[key];
-      const otherValue = other[key];
+      const currentValue = this[key] ?? defaults[key];
+      const otherValue = other[key] ?? defaults[key];
 
       if (!isEqual(currentValue, otherValue)) {
         return false;
@@ -531,20 +585,12 @@ class EventView {
 
       if (currentValue && otherValue) {
         const currentDateTime = moment.utc(currentValue);
-        const othereDateTime = moment.utc(otherValue);
+        const otherDateTime = moment.utc(otherValue);
 
-        if (!currentDateTime.isSame(othereDateTime)) {
+        if (!currentDateTime.isSame(otherDateTime)) {
           return false;
         }
       }
-    }
-
-    // compare yAxis selections
-    // undefined yAxis values default to count()
-    const currentYAxisValue = this.yAxis ?? 'count()';
-    const otherYAxisValue = other.yAxis ?? 'count()';
-    if (!isEqual(currentYAxisValue, otherYAxisValue)) {
-      return false;
     }
 
     return true;
@@ -566,9 +612,11 @@ class EventView {
       end: this.end,
       range: this.statsPeriod,
       environment: this.environment,
-      yAxis: this.yAxis ? [this.yAxis] : undefined,
+      yAxis: typeof this.yAxis === 'string' ? [this.yAxis] : this.yAxis,
+      dataset: this.dataset,
       display: this.display,
       topEvents: this.topEvents,
+      interval: this.interval,
     };
 
     if (!newQuery.query) {
@@ -577,31 +625,38 @@ class EventView {
       delete newQuery.query;
     }
 
+    if (this.dataset) {
+      newQuery.queryDataset = getSavedQueryDatasetFromLocationOrDataset(
+        undefined,
+        this.dataset
+      );
+    }
+
     return newQuery;
   }
 
-  getGlobalSelection(): GlobalSelection {
+  getPageFilters(): PageFilters {
     return {
       projects: this.project as number[],
       environments: this.environment as string[],
       datetime: {
         start: this.start ?? null,
         end: this.end ?? null,
-        period: this.statsPeriod ?? '',
-        // TODO(tony) Add support for the Use UTC option from
-        // the global headers, currently, that option is not
-        // supported and all times are assumed to be UTC
+        period: this.statsPeriod ?? null,
+        // TODO(tony) Add support for the Use UTC option from the global
+        // headers, currently, that option is not supported and all times are
+        // assumed to be UTC
         utc: true,
       },
     };
   }
 
-  getGlobalSelectionQuery(): Query {
+  getPageFiltersQuery(): Query {
     const {
       environments: environment,
       projects,
       datetime: {start, end, period, utc},
-    } = this.getGlobalSelection();
+    } = this.getPageFilters();
     return {
       project: projects.map(proj => proj.toString()),
       environment,
@@ -647,20 +702,23 @@ class EventView {
       field: this.getFields(),
       widths: this.getWidths(),
       sort: encodeSorts(this.sorts),
-      environment: this.environment,
-      project: this.project,
+      environment: [...this.environment],
+      project: [...this.project],
       query: this.query,
       yAxis: this.yAxis || this.getYAxis(),
+      dataset: this.dataset,
       display: this.display,
       topEvents: this.topEvents,
       interval: this.interval,
     };
 
     for (const field of EXTERNAL_QUERY_STRING_KEYS) {
-      if (this[field] && this[field].length) {
+      if (this[field]?.length) {
         output[field] = this[field];
       }
     }
+
+    stringifyQueryParams(output);
 
     return cloneDeep(output as any);
   }
@@ -741,6 +799,7 @@ class EventView {
       statsPeriod: this.statsPeriod,
       environment: this.environment,
       yAxis: this.yAxis,
+      dataset: this.dataset,
       display: this.display,
       topEvents: this.topEvents,
       interval: this.interval,
@@ -754,6 +813,12 @@ class EventView {
     const newEventView = this.clone();
     const fields = newEventView.fields.map(field => getAggregateAlias(field.field));
     newEventView.sorts = sorts.filter(sort => fields.includes(sort.field));
+
+    return newEventView;
+  }
+  withDataset(dataset?: DiscoverDatasets): EventView {
+    const newEventView = this.clone();
+    newEventView.dataset = dataset;
 
     return newEventView;
   }
@@ -842,7 +907,7 @@ class EventView {
     updatedColumn: Column,
     tableMeta: MetaType | undefined
   ): EventView {
-    const columnToBeUpdated = this.fields[columnIndex];
+    const columnToBeUpdated = this.fields[columnIndex]!;
     const fieldAsString = generateFieldAsString(updatedColumn);
 
     const updateField = columnToBeUpdated.field !== fieldAsString;
@@ -872,7 +937,7 @@ class EventView {
     );
 
     if (needleSortIndex >= 0) {
-      const needleSort = this.sorts[needleSortIndex];
+      const needleSort = this.sorts[needleSortIndex]!;
 
       const numOfColumns = this.fields.reduce((sum, currentField) => {
         if (isSortEqualToField(needleSort, currentField, tableMeta)) {
@@ -919,7 +984,7 @@ class EventView {
           );
           if (sortableFieldIndex >= 0) {
             const fieldToBeSorted = newEventView.fields[sortableFieldIndex];
-            const sort = fieldToSort(fieldToBeSorted, tableMeta)!;
+            const sort = fieldToSort(fieldToBeSorted!, tableMeta)!;
             newEventView.sorts = [sort];
           }
         }
@@ -950,21 +1015,21 @@ class EventView {
     // To ensure a well formed table results.
     const hasAutoIndex = fields.find(field => field.width === COL_WIDTH_UNDEFINED);
     if (!hasAutoIndex) {
-      newEventView.fields[0].width = COL_WIDTH_UNDEFINED;
+      newEventView.fields[0]!.width = COL_WIDTH_UNDEFINED;
     }
 
     // if the deleted column is one of the sorted columns, we need to remove
     // it from the list of sorts
     const columnToBeDeleted = this.fields[columnIndex];
     const needleSortIndex = this.sorts.findIndex(sort =>
-      isSortEqualToField(sort, columnToBeDeleted, tableMeta)
+      isSortEqualToField(sort, columnToBeDeleted!, tableMeta)
     );
 
     if (needleSortIndex >= 0) {
       const needleSort = this.sorts[needleSortIndex];
 
       const numOfColumns = this.fields.reduce((sum, field) => {
-        if (isSortEqualToField(needleSort, field, tableMeta)) {
+        if (isSortEqualToField(needleSort!, field, tableMeta)) {
           return sum + 1;
         }
 
@@ -985,7 +1050,7 @@ class EventView {
           );
 
           if (sortableFieldIndex >= 0) {
-            const fieldToBeSorted = newEventView.fields[sortableFieldIndex];
+            const fieldToBeSorted = newEventView.fields[sortableFieldIndex]!;
             const sort = fieldToSort(fieldToBeSorted, tableMeta)!;
             newEventView.sorts = [sort];
           }
@@ -1010,12 +1075,12 @@ class EventView {
         ({
           key: sort.field,
           order: sort.kind,
-        } as TableColumnSort<string>)
+        }) as TableColumnSort<string>
     );
   }
 
   // returns query input for the search
-  getQuery(inputQuery: string | string[] | null | undefined): string {
+  getQuery(inputQuery: string | string[] | null | undefined = undefined): string {
     const queryParts: string[] = [];
 
     if (this.query) {
@@ -1068,7 +1133,7 @@ class EventView {
   }
 
   normalizeDateSelection(location: Location) {
-    const query = (location && location.query) || {};
+    const query = location?.query || {};
 
     // pick only the query strings that we care about
     const picked = pickRelevantLocationQueryStrings(location);
@@ -1090,14 +1155,17 @@ class EventView {
         };
 
     // normalize datetime selection
-    return getParams({
+    return normalizeDateTimeParams({
       ...dateSelection,
       utc: decodeScalar(query.utc),
     });
   }
 
   // Takes an EventView instance and converts it into the format required for the events API
-  getEventsAPIPayload(location: Location): EventQuery & LocationQuery {
+  getEventsAPIPayload(
+    location: Location,
+    forceAppendRawQueryString?: string
+  ): EventQuery & LocationQuery {
     // pick only the query strings that we care about
     const picked = pickRelevantLocationQueryStrings(location);
 
@@ -1108,12 +1176,17 @@ class EventView {
       this.sorts.length <= 0
         ? undefined
         : this.sorts.length > 1
-        ? encodeSorts(this.sorts)
-        : encodeSort(this.sorts[0]);
+          ? encodeSorts(this.sorts)
+          : encodeSort(this.sorts[0]!);
     const fields = this.getFields();
     const team = this.team.map(proj => String(proj));
     const project = this.project.map(proj => String(proj));
     const environment = this.environment as string[];
+
+    let queryString = this.getQueryWithAdditionalConditions();
+    if (forceAppendRawQueryString) {
+      queryString += ' ' + forceAppendRawQueryString;
+    }
 
     // generate event query
     const eventQuery = Object.assign(
@@ -1126,9 +1199,18 @@ class EventView {
         field: [...new Set(fields)],
         sort,
         per_page: DEFAULT_PER_PAGE,
-        query: this.getQueryWithAdditionalConditions(),
+        query: queryString,
+        dataset:
+          this.dataset === DiscoverDatasets.SPANS_EAP_RPC
+            ? DiscoverDatasets.SPANS_EAP
+            : this.dataset,
+        useRpc: this.dataset === DiscoverDatasets.SPANS_EAP_RPC ? '1' : undefined,
       }
     ) as EventQuery & LocationQuery;
+
+    if (eventQuery.useRpc !== '1') {
+      delete eventQuery.useRpc;
+    }
 
     if (eventQuery.team && !eventQuery.team.length) {
       delete eventQuery.team;
@@ -1141,22 +1223,34 @@ class EventView {
     return eventQuery;
   }
 
-  getResultsViewUrlTarget(slug: string): {pathname: string; query: Query} {
+  getResultsViewUrlTarget(
+    slug: string,
+    isHomepage: boolean = false,
+    queryDataset?: SavedQueryDatasets
+  ): {pathname: string; query: Query} {
+    const target = isHomepage ? 'homepage' : 'results';
+    const query = this.generateQueryStringObject();
+    if (queryDataset) {
+      query.queryDataset = queryDataset;
+    }
     return {
-      pathname: `/organizations/${slug}/discover/results/`,
-      query: this.generateQueryStringObject(),
+      pathname: normalizeUrl(`/organizations/${slug}/discover/${target}/`),
+      query,
     };
   }
 
   getResultsViewShortUrlTarget(slug: string): {pathname: string; query: Query} {
-    const output = {id: this.id};
+    const output: any = {id: this.id};
     for (const field of [...Object.values(URL_PARAM), 'cursor']) {
-      if (this[field] && this[field].length) {
+      if (this[field]?.length) {
         output[field] = this[field];
       }
     }
+
+    stringifyQueryParams(output);
+
     return {
-      pathname: `/organizations/${slug}/discover/results/`,
+      pathname: normalizeUrl(`/organizations/${slug}/discover/results/`),
       query: cloneDeep(output as any),
     };
   }
@@ -1164,15 +1258,16 @@ class EventView {
   getPerformanceTransactionEventsViewUrlTarget(
     slug: string,
     options: {
-      showTransactions?: EventsDisplayFilterName;
       breakdown?: SpanOperationBreakdownFilter;
+      showTransactions?: EventsDisplayFilterName;
+      view?: DomainView;
       webVital?: WebVital;
     }
   ): {pathname: string; query: Query} {
     const {showTransactions, breakdown, webVital} = options;
     const output = {
       sort: encodeSorts(this.sorts),
-      project: this.project,
+      project: [...this.project],
       query: this.query,
       transaction: this.name,
       showTransactions,
@@ -1181,14 +1276,18 @@ class EventView {
     };
 
     for (const field of EXTERNAL_QUERY_STRING_KEYS) {
-      if (this[field] && this[field].length) {
+      if (this[field]?.length) {
         output[field] = this[field];
       }
     }
 
+    stringifyQueryParams(output);
+
     const query = cloneDeep(output as any);
     return {
-      pathname: `/organizations/${slug}/performance/summary/events/`,
+      pathname: normalizeUrl(
+        `${getTransactionSummaryBaseUrl(slug, options.view)}/events/`
+      ),
       query,
     };
   }
@@ -1200,7 +1299,12 @@ class EventView {
     return this.sorts.find(sort => isSortEqualToField(sort, field, tableMeta));
   }
 
-  sortOnField(field: Field, tableMeta: MetaType, kind?: 'desc' | 'asc'): EventView {
+  sortOnField(
+    field: Field,
+    tableMeta: MetaType,
+    kind?: 'desc' | 'asc',
+    useFunctionFormat?: boolean
+  ): EventView {
     // check if field can be sorted
     if (!isFieldSortable(field, tableMeta)) {
       return this;
@@ -1213,12 +1317,18 @@ class EventView {
     if (needleIndex >= 0) {
       const newEventView = this.clone();
 
-      const currentSort = this.sorts[needleIndex];
+      const currentSort = this.sorts[needleIndex]!;
 
       const sorts = [...newEventView.sorts];
       sorts[needleIndex] = kind
-        ? setSortOrder(currentSort, kind)
-        : reverseSort(currentSort);
+        ? setSortOrder(
+            {...currentSort, ...(useFunctionFormat ? {field: field.field} : {})},
+            kind
+          )
+        : reverseSort({
+            ...currentSort,
+            ...(useFunctionFormat ? {field: field.field} : {}),
+          });
 
       newEventView.sorts = sorts;
 
@@ -1229,7 +1339,7 @@ class EventView {
     const newEventView = this.clone();
 
     // invariant: this is not falsey, since sortKey exists
-    const sort = fieldToSort(field, tableMeta, kind)!;
+    const sort = fieldToSort(field, tableMeta, kind, useFunctionFormat)!;
 
     newEventView.sorts = [sort];
 
@@ -1259,7 +1369,7 @@ class EventView {
     const yAxisOptions = this.getYAxisOptions();
 
     const yAxis = this.yAxis;
-    const defaultOption = yAxisOptions[0].value;
+    const defaultOption = yAxisOptions[0]!.value;
 
     if (!yAxis) {
       return defaultOption;
@@ -1271,7 +1381,7 @@ class EventView {
     );
 
     if (result >= 0) {
-      return yAxis;
+      return typeof yAxis === 'string' ? yAxis : yAxis[0]!;
     }
 
     return defaultOption;
@@ -1351,11 +1461,33 @@ class EventView {
     });
     return conditions.formatString();
   }
+
+  /**
+   * Eventview usually just holds onto a project id for selected projects.
+   * Sometimes we need to iterate over the related project objects, this will give you the full projects if the Projects list is passed in.
+   * Also covers the 'My Projects' case which is sometimes missed, tries using the 'isMember' property of projects to pick the right list.
+   */
+  getFullSelectedProjects(fullProjectList: Project[]) {
+    const selectedProjectIds = this.project;
+    const isMyProjects = selectedProjectIds.length === 0;
+    if (isMyProjects) {
+      return fullProjectList.filter(p => p.isMember);
+    }
+    const isAllProjects =
+      selectedProjectIds.length === 1 && selectedProjectIds[0] === ALL_ACCESS_PROJECTS;
+    if (isAllProjects) {
+      return fullProjectList;
+    }
+
+    const projectMap = Object.fromEntries(fullProjectList.map(p => [String(p.id), p]));
+
+    return selectedProjectIds.map(id => projectMap[String(id)]);
+  }
 }
 
 export type ImmutableEventView = Readonly<Omit<EventView, 'additionalConditions'>>;
 
-const isFieldsSimilar = (
+export const isFieldsSimilar = (
   currentValue: Array<string>,
   otherValue: Array<string>
 ): boolean => {
@@ -1369,7 +1501,8 @@ const isFieldsSimilar = (
 
   if (!isEqual(currentEquations, otherEquations)) {
     return false;
-  } else if (!isEqual(currentFields, otherFields)) {
+  }
+  if (!isEqual(currentFields, otherFields)) {
     return false;
   }
   return true;

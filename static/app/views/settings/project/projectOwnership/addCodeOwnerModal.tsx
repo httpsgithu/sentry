@@ -1,55 +1,75 @@
-import {Component, Fragment} from 'react';
+import {Fragment} from 'react';
 import styled from '@emotion/styled';
 
-import {addErrorMessage} from 'app/actionCreators/indicator';
-import {ModalRenderProps} from 'app/actionCreators/modal';
-import {Client} from 'app/api';
-import Alert from 'app/components/alert';
-import Button from 'app/components/button';
-import Link from 'app/components/links/link';
-import LoadingIndicator from 'app/components/loadingIndicator';
-import {Panel, PanelBody} from 'app/components/panels';
-import {IconCheckmark, IconNot} from 'app/icons';
-import {t, tct} from 'app/locale';
-import space from 'app/styles/space';
-import {
+import {addErrorMessage} from 'sentry/actionCreators/indicator';
+import type {ModalRenderProps} from 'sentry/actionCreators/modal';
+import {Alert} from 'sentry/components/alert';
+import {Button, LinkButton} from 'sentry/components/button';
+import DeprecatedAsyncComponent from 'sentry/components/deprecatedAsyncComponent';
+import SelectField from 'sentry/components/forms/fields/selectField';
+import Form from 'sentry/components/forms/form';
+import Link from 'sentry/components/links/link';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import Panel from 'sentry/components/panels/panel';
+import PanelBody from 'sentry/components/panels/panelBody';
+import {IconCheckmark, IconNot} from 'sentry/icons';
+import {t, tct} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {
   CodeOwner,
   CodeownersFile,
   Integration,
-  Organization,
-  Project,
   RepositoryProjectPathConfig,
-} from 'app/types';
-import {getIntegrationIcon} from 'app/utils/integrationUtil';
-import withApi from 'app/utils/withApi';
-import Form from 'app/views/settings/components/forms/form';
-import SelectField from 'app/views/settings/components/forms/selectField';
+} from 'sentry/types/integrations';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import {getIntegrationIcon} from 'sentry/utils/integrationUtil';
 
 type Props = {
-  api: Client;
   organization: Organization;
   project: Project;
-  codeMappings: RepositoryProjectPathConfig[];
-  integrations: Integration[];
-  onSave: (data: CodeOwner) => void;
-} & ModalRenderProps;
+  onSave?: (data: CodeOwner) => void;
+} & ModalRenderProps &
+  DeprecatedAsyncComponent['props'];
 
 type State = {
-  codeownersFile: CodeownersFile | null;
   codeMappingId: string | null;
-  isLoading: boolean;
+  codeMappings: RepositoryProjectPathConfig[];
+  codeownersFile: CodeownersFile | null;
   error: boolean;
   errorJSON: {raw?: string} | null;
-};
+  integrations: Integration[];
+  isLoading: boolean;
+} & DeprecatedAsyncComponent['state'];
 
-class AddCodeOwnerModal extends Component<Props, State> {
-  state: State = {
-    codeownersFile: null,
-    codeMappingId: null,
-    isLoading: false,
-    error: false,
-    errorJSON: null,
-  };
+class AddCodeOwnerModal extends DeprecatedAsyncComponent<Props, State> {
+  getDefaultState() {
+    return {
+      ...super.getDefaultState(),
+      codeownersFile: null,
+      codeMappingId: null,
+      isLoading: false,
+      error: false,
+      errorJSON: null,
+    };
+  }
+
+  getEndpoints(): ReturnType<DeprecatedAsyncComponent['getEndpoints']> {
+    const {organization, project} = this.props;
+    const endpoints: ReturnType<DeprecatedAsyncComponent['getEndpoints']> = [
+      [
+        'codeMappings',
+        `/organizations/${organization.slug}/code-mappings/`,
+        {query: {project: project.id}},
+      ],
+      [
+        'integrations',
+        `/organizations/${organization.slug}/integrations/`,
+        {query: {features: ['codeowners']}},
+      ],
+    ];
+    return endpoints;
+  }
 
   fetchFile = async (codeMappingId: string) => {
     const {organization} = this.props;
@@ -61,7 +81,7 @@ class AddCodeOwnerModal extends Component<Props, State> {
       isLoading: true,
     });
     try {
-      const data: CodeownersFile = await this.props.api.requestPromise(
+      const data: CodeownersFile = await this.api.requestPromise(
         `/organizations/${organization.slug}/code-mappings/${codeMappingId}/codeowners/`,
         {
           method: 'GET',
@@ -74,8 +94,8 @@ class AddCodeOwnerModal extends Component<Props, State> {
   };
 
   addFile = async () => {
-    const {organization, project, codeMappings} = this.props;
-    const {codeownersFile, codeMappingId} = this.state;
+    const {organization, project} = this.props;
+    const {codeownersFile, codeMappingId, codeMappings} = this.state;
 
     if (codeownersFile) {
       const postData: {
@@ -87,29 +107,31 @@ class AddCodeOwnerModal extends Component<Props, State> {
       };
 
       try {
-        const data = await this.props.api.requestPromise(
+        const data = await this.api.requestPromise(
           `/projects/${organization.slug}/${project.slug}/codeowners/`,
           {
             method: 'POST',
             data: postData,
           }
         );
+
         const codeMapping = codeMappings.find(
           mapping => mapping.id === codeMappingId?.toString()
         );
+
         this.handleAddedFile({...data, codeMapping});
       } catch (err) {
         if (err.responseJSON.raw) {
           this.setState({error: true, errorJSON: err.responseJSON, isLoading: false});
         } else {
-          addErrorMessage(t(Object.values(err.responseJSON).flat().join(' ')));
+          addErrorMessage(Object.values(err.responseJSON).flat().join(' '));
         }
       }
     }
   };
 
   handleAddedFile(data: CodeOwner) {
-    this.props.onSave(data);
+    this.props.onSave?.(data);
     this.props.closeModal();
   }
 
@@ -119,22 +141,23 @@ class AddCodeOwnerModal extends Component<Props, State> {
         <SourceFileBody>
           <IconCheckmark size="md" isCircled color="green200" />
           {codeownersFile.filepath}
-          <Button size="small" href={codeownersFile.html_url} target="_blank">
+          <LinkButton size="sm" href={codeownersFile.html_url} external>
             {t('Preview File')}
-          </Button>
+          </LinkButton>
         </SourceFileBody>
       </Panel>
     );
   }
 
   errorMessage(baseUrl) {
-    const {errorJSON, codeMappingId} = this.state;
-    const {codeMappings} = this.props;
+    const {errorJSON, codeMappingId, codeMappings} = this.state;
     const codeMapping = codeMappings.find(mapping => mapping.id === codeMappingId);
     const {integrationId, provider} = codeMapping as RepositoryProjectPathConfig;
-    const errActors = errorJSON?.raw?.[0].split('\n').map((el, i) => <p key={i}>{el}</p>);
+    const errActors = errorJSON?.raw?.[0]!.split('\n').map((el, i) => (
+      <p key={i}>{el}</p>
+    ));
     return (
-      <Alert type="error" icon={<IconNot size="md" />}>
+      <Alert type="error" showIcon>
         {errActors}
         {codeMapping && (
           <p>
@@ -189,37 +212,49 @@ class AddCodeOwnerModal extends Component<Props, State> {
     );
   }
 
-  render() {
+  renderBody() {
     const {Header, Body, Footer} = this.props;
-    const {codeownersFile, error, errorJSON} = this.state;
-    const {codeMappings, integrations, organization} = this.props;
+    const {codeownersFile, error, errorJSON, codeMappings, integrations} = this.state;
+    const {organization} = this.props;
     const baseUrl = `/settings/${organization.slug}/integrations`;
 
     return (
       <Fragment>
         <Header closeButton>{t('Add Code Owner File')}</Header>
         <Body>
-          {!codeMappings.length && (
-            <Fragment>
-              <div>
-                {t(
-                  "Configure code mapping to add your CODEOWNERS file. Select the integration you'd like to use for mapping:"
-                )}
-              </div>
-              <IntegrationsList>
-                {integrations.map(integration => (
-                  <Button
-                    key={integration.id}
-                    type="button"
-                    to={`${baseUrl}/${integration.provider.key}/${integration.id}/?tab=codeMappings&referrer=add-codeowners`}
-                  >
-                    {getIntegrationIcon(integration.provider.key)}
-                    <IntegrationName>{integration.name}</IntegrationName>
-                  </Button>
-                ))}
-              </IntegrationsList>
-            </Fragment>
-          )}
+          {!codeMappings.length ? (
+            !integrations.length ? (
+              <Fragment>
+                <div>
+                  {t('Install a GitHub or GitLab integration to use this feature.')}
+                </div>
+                <Container style={{paddingTop: space(2)}}>
+                  <LinkButton priority="primary" size="sm" to={baseUrl}>
+                    Setup Integration
+                  </LinkButton>
+                </Container>
+              </Fragment>
+            ) : (
+              <Fragment>
+                <div>
+                  {t(
+                    "Configure code mapping to add your CODEOWNERS file. Select the integration you'd like to use for mapping:"
+                  )}
+                </div>
+                <IntegrationsList>
+                  {integrations.map(integration => (
+                    <LinkButton
+                      key={integration.id}
+                      to={`${baseUrl}/${integration.provider.key}/${integration.id}/?tab=codeMappings&referrer=add-codeowners`}
+                    >
+                      {getIntegrationIcon(integration.provider.key)}
+                      <IntegrationName>{integration.name}</IntegrationName>
+                    </LinkButton>
+                  ))}
+                </IntegrationsList>
+              </Fragment>
+            )
+          ) : null}
           {codeMappings.length > 0 && (
             <Form
               apiMethod="POST"
@@ -230,10 +265,10 @@ class AddCodeOwnerModal extends Component<Props, State> {
               <StyledSelectField
                 name="codeMappingId"
                 label={t('Apply an existing code mapping')}
-                choices={codeMappings.map((cm: RepositoryProjectPathConfig) => [
-                  cm.id,
-                  cm.repoName,
-                ])}
+                options={codeMappings.map((cm: RepositoryProjectPathConfig) => ({
+                  value: cm.id,
+                  label: `Repo Name: ${cm.repoName}, Stack Trace Root: ${cm.stackRoot}, Source Code Root: ${cm.sourceRoot}`,
+                }))}
                 onChange={this.fetchFile}
                 required
                 inline={false}
@@ -251,7 +286,7 @@ class AddCodeOwnerModal extends Component<Props, State> {
         <Footer>
           <Button
             disabled={codeownersFile ? false : true}
-            label={t('Add File')}
+            aria-label={t('Add File')}
             priority="primary"
             onClick={this.addFile}
           >
@@ -263,7 +298,7 @@ class AddCodeOwnerModal extends Component<Props, State> {
   }
 }
 
-export default withApi(AddCodeOwnerModal);
+export default AddCodeOwnerModal;
 export {AddCodeOwnerModal};
 
 const StyledSelectField = styled(SelectField)`
@@ -288,7 +323,7 @@ const SourceFileBody = styled(PanelBody)`
 
 const IntegrationsList = styled('div')`
   display: grid;
-  grid-gap: ${space(1)};
+  gap: ${space(1)};
   justify-items: center;
   margin-top: ${space(2)};
 `;

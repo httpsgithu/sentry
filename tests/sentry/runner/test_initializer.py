@@ -1,27 +1,31 @@
+import types
+
 import pytest
 
-from sentry.runner.importer import ConfigurationError
-from sentry.runner.initializer import apply_legacy_settings, bootstrap_options
+from sentry.runner.initializer import ConfigurationError, apply_legacy_settings, bootstrap_options
+from sentry.utils.warnings import DeprecatedSettingWarning
 
 
 @pytest.fixture
 def settings():
-    class Settings:
-        pass
-
-    s = Settings()
-    s.TIME_ZONE = "UTC"
-    s.ALLOWED_HOSTS = []
-    s.SENTRY_FEATURES = {}
-    s.SENTRY_OPTIONS = {}
-    s.SENTRY_DEFAULT_OPTIONS = {}
-    s.SENTRY_EMAIL_BACKEND_ALIASES = {"dummy": "alias-for-dummy"}
-    return s
+    return types.SimpleNamespace(
+        TIME_ZONE="UTC",
+        ALLOWED_HOSTS=[],
+        SENTRY_FEATURES={},
+        SENTRY_OPTIONS={},
+        SENTRY_DEFAULT_OPTIONS={},
+        SENTRY_EMAIL_BACKEND_ALIASES={"dummy": "alias-for-dummy"},
+    )
 
 
 @pytest.fixture
 def config_yml(tmpdir):
     return tmpdir.join("config.yml")
+
+
+def _assert_settings_warnings(warninfo, expected):
+    actual = {(w.message.setting, w.message.replacement) for w in warninfo}
+    assert actual == expected
 
 
 def test_bootstrap_options_simple(settings, config_yml):
@@ -105,7 +109,23 @@ def test_bootstrap_options_no_config(settings):
     settings.EMAIL_SUBJECT_PREFIX = "my-mail-subject-prefix"
     settings.FOO_BAR = "lol"
 
-    bootstrap_options(settings)
+    with pytest.warns(DeprecatedSettingWarning) as warninfo:
+        bootstrap_options(settings)
+    _assert_settings_warnings(
+        warninfo,
+        {
+            ("EMAIL_BACKEND", "SENTRY_OPTIONS['mail.backend']"),
+            ("EMAIL_HOST", "SENTRY_OPTIONS['mail.host']"),
+            ("EMAIL_HOST_PASSWORD", "SENTRY_OPTIONS['mail.password']"),
+            ("EMAIL_HOST_USER", "SENTRY_OPTIONS['mail.username']"),
+            ("EMAIL_PORT", "SENTRY_OPTIONS['mail.port']"),
+            ("EMAIL_SUBJECT_PREFIX", "SENTRY_OPTIONS['mail.subject-prefix']"),
+            ("EMAIL_USE_SSL", "SENTRY_OPTIONS['mail.use-ssl']"),
+            ("EMAIL_USE_TLS", "SENTRY_OPTIONS['mail.use-tls']"),
+            ("SECRET_KEY", "SENTRY_OPTIONS['system.secret-key']"),
+            ("SERVER_EMAIL", "SENTRY_OPTIONS['mail.from']"),
+        },
+    )
     assert settings.SENTRY_OPTIONS == {
         "system.secret-key": "my-system-secret-key",
         "mail.backend": "my-mail-backend",
@@ -170,7 +190,6 @@ def test_apply_legacy_settings(settings):
     settings.SENTRY_USE_QUEUE = True
     settings.SENTRY_ALLOW_REGISTRATION = True
     settings.SENTRY_ADMIN_EMAIL = "admin-email"
-    settings.SENTRY_URL_PREFIX = "http://url-prefix"
     settings.SENTRY_SYSTEM_MAX_EVENTS_PER_MINUTE = 10
     settings.SENTRY_REDIS_OPTIONS = {"foo": "bar"}
     settings.SENTRY_ENABLE_EMAIL_REPLIES = True
@@ -179,12 +198,15 @@ def test_apply_legacy_settings(settings):
     settings.SENTRY_OPTIONS = {"system.secret-key": "secret-key", "mail.from": "mail-from"}
     settings.SENTRY_FILESTORE = "some-filestore"
     settings.SENTRY_FILESTORE_OPTIONS = {"filestore-foo": "filestore-bar"}
-    apply_legacy_settings(settings)
+    settings.SENTRY_FILESTORE_RELOCATION = {"relocation-baz": "relocation-qux"}
+    settings.SENTRY_RELOCATION_BACKEND = "some-other-filestore"
+    settings.SENTRY_RELOCATION_OPTIONS = {"relocation-baz": "relocation-qux"}
+    with pytest.warns(DeprecatedSettingWarning) as warninfo:
+        apply_legacy_settings(settings)
     assert settings.CELERY_ALWAYS_EAGER is False
     assert settings.SENTRY_FEATURES["auth:register"] is True
     assert settings.SENTRY_OPTIONS == {
         "system.admin-email": "admin-email",
-        "system.url-prefix": "http://url-prefix",
         "system.rate-limit": 10,
         "system.secret-key": "secret-key",
         "redis.clusters": {"default": {"foo": "bar"}},
@@ -194,9 +216,32 @@ def test_apply_legacy_settings(settings):
         "mail.mailgun-api-key": "mailgun-api-key",
         "filestore.backend": "some-filestore",
         "filestore.options": {"filestore-foo": "filestore-bar"},
+        "filestore.relocation-backend": "some-other-filestore",
+        "filestore.relocation-options": {"relocation-baz": "relocation-qux"},
     }
     assert settings.DEFAULT_FROM_EMAIL == "mail-from"
     assert settings.ALLOWED_HOSTS == ["*"]
+
+    _assert_settings_warnings(
+        warninfo,
+        {
+            ("MAILGUN_API_KEY", "SENTRY_OPTIONS['mail.mailgun-api-key']"),
+            ("SENTRY_ADMIN_EMAIL", "SENTRY_OPTIONS['system.admin-email']"),
+            ("SENTRY_ALLOW_REGISTRATION", 'SENTRY_FEATURES["auth:register"]'),
+            ("SENTRY_ENABLE_EMAIL_REPLIES", "SENTRY_OPTIONS['mail.enable-replies']"),
+            ("SENTRY_FILESTORE", "SENTRY_OPTIONS['filestore.backend']"),
+            ("SENTRY_FILESTORE_OPTIONS", "SENTRY_OPTIONS['filestore.options']"),
+            ("SENTRY_RELOCATION_BACKEND", "SENTRY_OPTIONS['filestore.relocation-backend']"),
+            (
+                "SENTRY_RELOCATION_OPTIONS",
+                "SENTRY_OPTIONS['filestore.relocation-options']",
+            ),
+            ("SENTRY_REDIS_OPTIONS", 'SENTRY_OPTIONS["redis.clusters"]'),
+            ("SENTRY_SMTP_HOSTNAME", "SENTRY_OPTIONS['mail.reply-hostname']"),
+            ("SENTRY_SYSTEM_MAX_EVENTS_PER_MINUTE", "SENTRY_OPTIONS['system.rate-limit']"),
+            ("SENTRY_USE_QUEUE", "CELERY_ALWAYS_EAGER"),
+        },
+    )
 
 
 def test_initialize_app(settings):

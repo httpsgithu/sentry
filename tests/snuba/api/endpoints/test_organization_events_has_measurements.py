@@ -1,17 +1,18 @@
 from django.urls import reverse
 from rest_framework.exceptions import ErrorDetail
 
-from sentry.testutils import APITestCase, SnubaTestCase
-from sentry.testutils.helpers.datetime import before_now, iso_format
+from sentry.testutils.cases import APITestCase, SnubaTestCase
+from sentry.testutils.helpers.datetime import before_now
 from sentry.utils.samples import load_data
 
 
-class OrganizationEventsV2EndpointTest(APITestCase, SnubaTestCase):
+class OrganizationEventsHasMeasurementsTest(APITestCase, SnubaTestCase):
     def setUp(self):
         super().setUp()
-        self.min_ago = iso_format(before_now(minutes=1))
-        self.two_min_ago = iso_format(before_now(minutes=2))
+        self.min_ago = before_now(minutes=1)
+        self.two_min_ago = before_now(minutes=2)
         self.transaction_data = load_data("transaction", timestamp=before_now(minutes=1))
+        self.features = {}
 
     def do_request(self, query, features=None):
         if features is None:
@@ -19,10 +20,11 @@ class OrganizationEventsV2EndpointTest(APITestCase, SnubaTestCase):
                 "organizations:discover-basic": True,
                 "organizations:global-views": True,
             }
+        features.update(self.features)
         self.login_as(user=self.user)
         url = reverse(
             "sentry-api-0-organization-events-has-measurements",
-            kwargs={"organization_slug": self.organization.slug},
+            kwargs={"organization_id_or_slug": self.organization.slug},
         )
         with self.feature(features):
             return self.client.get(url, query, format="json")
@@ -106,7 +108,7 @@ class OrganizationEventsV2EndpointTest(APITestCase, SnubaTestCase):
         assert response.data == {"measurements": False}
 
     def test_has_event_but_no_web_measurements(self):
-        # make sure the transaction doesnt have measurements
+        # make sure the transaction doesn't have measurements
         self.transaction_data["measurements"] = {}
         self.store_event(self.transaction_data, self.project.id)
 

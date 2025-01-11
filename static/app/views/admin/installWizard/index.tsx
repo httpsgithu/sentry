@@ -1,35 +1,48 @@
-import DocumentTitle from 'react-document-title';
 import {css} from '@emotion/react';
 import styled from '@emotion/styled';
 
 import sentryPattern from 'sentry-images/pattern/sentry-pattern.png';
 
-import Alert from 'app/components/alert';
-import {ApiForm} from 'app/components/forms';
-import {IconWarning} from 'app/icons';
-import {t} from 'app/locale';
-import ConfigStore from 'app/stores/configStore';
-import space from 'app/styles/space';
-import AsyncView from 'app/views/asyncView';
+import {Alert} from 'sentry/components/alert';
+import DeprecatedAsyncComponent from 'sentry/components/deprecatedAsyncComponent';
+import ApiForm from 'sentry/components/forms/apiForm';
+import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
+import {t} from 'sentry/locale';
+import ConfigStore from 'sentry/stores/configStore';
+import {space} from 'sentry/styles/space';
 
+import type {Field} from '../options';
 import {getForm, getOptionDefault, getOptionField} from '../options';
 
-type Props = AsyncView['props'] & {
+export type InstallWizardProps = DeprecatedAsyncComponent['props'] & {
   onConfigured: () => void;
 };
 
-type State = AsyncView['state'];
+export type InstallWizardOptions = Record<
+  string,
+  {
+    field: Field;
+    value?: unknown;
+  }
+>;
 
-export default class InstallWizard extends AsyncView<Props, State> {
-  getEndpoints(): ReturnType<AsyncView['getEndpoints']> {
+type State = DeprecatedAsyncComponent['state'] & {
+  data: null | InstallWizardOptions;
+};
+
+export default class InstallWizard extends DeprecatedAsyncComponent<
+  InstallWizardProps,
+  State
+> {
+  getEndpoints(): ReturnType<DeprecatedAsyncComponent['getEndpoints']> {
     return [['data', '/internal/options/?query=is:required']];
   }
 
   renderFormFields() {
-    const options = this.state.data;
+    const options = this.state.data!;
 
     let missingOptions = new Set(
-      Object.keys(options).filter(option => !options[option].field.isSet)
+      Object.keys(options).filter(option => !options[option]!.field.isSet)
     );
     // This is to handle the initial installation case.
     // Even if all options are filled out, we want to prompt to confirm
@@ -41,10 +54,10 @@ export default class InstallWizard extends AsyncView<Props, State> {
     }
 
     // A mapping of option name to Field object
-    const fields = {};
+    const fields: Record<string, React.ReactNode> = {};
 
     for (const key of missingOptions) {
-      const option = options[key];
+      const option = options[key]!;
       if (option.field.disabled) {
         continue;
       }
@@ -55,10 +68,10 @@ export default class InstallWizard extends AsyncView<Props, State> {
   }
 
   getInitialData() {
-    const options = this.state.data;
+    const options = this.state.data!;
     const data = {};
     Object.keys(options).forEach(optionName => {
-      const option = options[optionName];
+      const option = options[optionName]!;
       if (option.field.disabled) {
         return;
       }
@@ -82,14 +95,10 @@ export default class InstallWizard extends AsyncView<Props, State> {
     return data;
   }
 
-  getTitle() {
-    return t('Setup Sentry');
-  }
-
   render() {
     const version = ConfigStore.get('version');
     return (
-      <DocumentTitle title={this.getTitle()}>
+      <SentryDocumentTitle noSuffix title={t('Setup Sentry')}>
         <Wrapper>
           <Pattern />
           <SetupWizard>
@@ -100,17 +109,17 @@ export default class InstallWizard extends AsyncView<Props, State> {
             {this.state.loading
               ? this.renderLoading()
               : this.state.error
-              ? this.renderError()
-              : this.renderBody()}
+                ? this.renderError()
+                : this.renderBody()}
           </SetupWizard>
         </Wrapper>
-      </DocumentTitle>
+      </SentryDocumentTitle>
     );
   }
 
   renderError() {
     return (
-      <Alert type="error" icon={<IconWarning />}>
+      <Alert type="error" showIcon>
         {t(
           'We were unable to load the required configuration from the Sentry server. Please take a look at the service logs.'
         )}
@@ -122,7 +131,7 @@ export default class InstallWizard extends AsyncView<Props, State> {
     return (
       <ApiForm
         apiMethod="PUT"
-        apiEndpoint={this.getEndpoints()[0][1]}
+        apiEndpoint={this.getEndpoints()[0]![1]!}
         submitLabel={t('Continue')}
         initialData={this.getInitialData()}
         onSubmitSuccess={this.props.onConfigured}
@@ -149,6 +158,8 @@ const fixedStyle = css`
 `;
 
 const Pattern = styled('div')`
+  z-index: -1;
+
   &::before {
     ${fixedStyle}
     content: '';
@@ -171,7 +182,7 @@ const Pattern = styled('div')`
 
 const Heading = styled('h1')`
   display: grid;
-  grid-gap: ${space(1)};
+  gap: ${space(1)};
   justify-content: space-between;
   grid-auto-flow: column;
   line-height: 36px;

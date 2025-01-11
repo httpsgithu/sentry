@@ -1,12 +1,13 @@
-import * as React from 'react';
+import {Component} from 'react';
 
-import HookStore from 'app/stores/hookStore';
-import {Organization} from 'app/types';
-import {HookName, Hooks} from 'app/types/hooks';
-import withOrganization from 'app/utils/withOrganization';
-import SettingsNavigation from 'app/views/settings/components/settingsNavigation';
-import navigationConfiguration from 'app/views/settings/organization/navigationConfiguration';
-import {NavigationSection} from 'app/views/settings/types';
+import ConfigStore from 'sentry/stores/configStore';
+import HookStore from 'sentry/stores/hookStore';
+import type {HookName, Hooks} from 'sentry/types/hooks';
+import type {Organization} from 'sentry/types/organization';
+import withOrganization from 'sentry/utils/withOrganization';
+import SettingsNavigation from 'sentry/views/settings/components/settingsNavigation';
+import navigationConfiguration from 'sentry/views/settings/organization/navigationConfiguration';
+import type {NavigationSection} from 'sentry/views/settings/types';
 
 type Props = {
   organization: Organization;
@@ -17,11 +18,10 @@ type State = {
   hooks: React.ReactElement[];
 };
 
-class OrganizationSettingsNavigation extends React.Component<Props, State> {
+class OrganizationSettingsNavigation extends Component<Props, State> {
   state: State = this.getHooks();
 
   componentDidMount() {
-    // eslint-disable-next-line react/no-did-mount-set-state
     this.setState(this.getHooks());
   }
 
@@ -71,7 +71,7 @@ class OrganizationSettingsNavigation extends React.Component<Props, State> {
     const {organization} = this.props as Props;
     const access = new Set(organization.access);
     const features = new Set(organization.features);
-
+    const isSelfHosted = ConfigStore.get('isSelfHosted');
     return (
       <SettingsNavigation
         navigationObjects={navigationConfiguration}
@@ -80,6 +80,7 @@ class OrganizationSettingsNavigation extends React.Component<Props, State> {
         organization={organization}
         hooks={hooks}
         hookConfigs={hookConfigs}
+        isSelfHosted={isSelfHosted}
       />
     );
   }

@@ -1,19 +1,19 @@
-import * as React from 'react';
 import styled from '@emotion/styled';
 
-import AutoSelectText from 'app/components/autoSelectText';
-import Link from 'app/components/links/link';
+import AutoSelectText from 'sentry/components/autoSelectText';
+import type {LinkProps} from 'sentry/components/links/link';
+import Link from 'sentry/components/links/link';
 
-type Props = {
+interface Props {
   shortId: string;
   avatar?: React.ReactNode;
+  className?: string;
   onClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
   /**
    * A router target destination
    */
-  to?: React.ComponentProps<typeof Link>['to'];
-  className?: string;
-};
+  to?: LinkProps['to'];
+}
 
 function ShortId({shortId, avatar, onClick, to, className}: Props) {
   if (!shortId) {
@@ -36,12 +36,12 @@ const StyledShortId = styled('div')`
   font-family: ${p => p.theme.text.familyMono};
   display: grid;
   grid-auto-flow: column;
-  grid-gap: 0.5em;
+  gap: 0.5em;
   align-items: center;
   justify-content: flex-end;
 `;
 
-const StyledAutoSelectText = styled(AutoSelectText)`
+export const StyledAutoSelectText = styled(AutoSelectText)`
   min-width: 0;
 
   a & {

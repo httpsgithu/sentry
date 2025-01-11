@@ -1,6 +1,6 @@
-import {LocationRange} from 'pegjs';
+import type {LocationRange} from 'peggy';
 
-import {t} from 'app/locale';
+import {t} from 'sentry/locale';
 
 import grammar from './grammar.pegjs';
 
@@ -10,8 +10,8 @@ const MAX_OPERATOR_MESSAGE = t('Maximum operators exceeded');
 
 type OperationOpts = {
   operator: Operator;
-  lhs?: Expression;
   rhs: Expression;
+  lhs?: Expression;
 };
 
 type Operator = 'plus' | 'minus' | 'multiply' | 'divide';
@@ -33,7 +33,7 @@ class Term {
   term: Expression;
   location: LocationRange;
 
-  constructor({term, location}: {term: Expression; location: LocationRange}) {
+  constructor({term, location}: {location: LocationRange; term: Expression}) {
     this.term = term;
     this.location = location;
   }
@@ -54,11 +54,10 @@ export class TokenConverter {
 
   tokenTerm = (maybeFactor: Expression, remainingAdds: Array<Operation>): Expression => {
     if (remainingAdds.length > 0) {
-      remainingAdds[0].lhs = maybeFactor;
+      remainingAdds[0]!.lhs = maybeFactor;
       return flatten(remainingAdds);
-    } else {
-      return maybeFactor;
     }
+    return maybeFactor;
   };
 
   tokenOperation = (operator: Operator, rhs: Expression): Operation => {
@@ -76,7 +75,7 @@ export class TokenConverter {
   };
 
   tokenFactor = (primary: Expression, remaining: Array<Operation>): Operation => {
-    remaining[0].lhs = primary;
+    remaining[0]!.lhs = primary;
     return flatten(remaining);
   };
 
@@ -111,13 +110,13 @@ function flatten(remaining: Array<Operation>): Operation {
   return term;
 }
 
-type parseResult = {
-  result: Expression;
+type ParseResult = {
   error: string | undefined;
+  result: Expression;
   tc: TokenConverter;
 };
 
-export function parseArithmetic(query: string): parseResult {
+export function parseArithmetic(query: string): ParseResult {
   const tc = new TokenConverter();
   try {
     const result = grammar.parse(query, {tc});

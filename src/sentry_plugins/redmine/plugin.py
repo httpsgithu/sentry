@@ -1,8 +1,9 @@
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
+from rest_framework.request import Request
 
 import sentry
 from sentry.exceptions import PluginError
-from sentry.integrations import FeatureDescription, IntegrationFeatures
+from sentry.integrations.base import FeatureDescription, IntegrationFeatures
 from sentry.plugins.bases.issue import IssuePlugin
 from sentry.utils import json
 from sentry.utils.http import absolute_uri
@@ -57,19 +58,19 @@ class RedminePlugin(CorePluginMixin, IssuePlugin):
     def has_project_conf(self):
         return True
 
-    def is_configured(self, project, **kwargs):
+    def is_configured(self, project) -> bool:
         return all(self.get_option(k, project) for k in ("host", "key", "project_id"))
 
     def get_new_issue_title(self, **kwargs):
         return "Create Redmine Task"
 
-    def get_initial_form_data(self, request, group, event, **kwargs):
+    def get_initial_form_data(self, request: Request, group, event, **kwargs):
         return {
             "description": self._get_group_description(request, group, event),
             "title": self._get_group_title(request, group, event),
         }
 
-    def _get_group_description(self, request, group, event):
+    def _get_group_description(self, request: Request, group, event):
         output = [absolute_uri(group.get_absolute_url())]
         body = self._get_group_body(request, group, event)
         if body:
@@ -81,7 +82,7 @@ class RedminePlugin(CorePluginMixin, IssuePlugin):
             host=self.get_option("host", project), key=self.get_option("key", project)
         )
 
-    def create_issue(self, group, form_data, **kwargs):
+    def create_issue(self, request, group, form_data):
         """
         Create a Redmine issue
         """
@@ -108,7 +109,7 @@ class RedminePlugin(CorePluginMixin, IssuePlugin):
         response = client.create_issue(issue_dict)
         return response["issue"]["id"]
 
-    def get_issue_url(self, group, issue_id, **kwargs):
+    def get_issue_url(self, group, issue_id: str) -> str:
         host = self.get_option("host", group.project)
         return "{}/issues/{}".format(host.rstrip("/"), issue_id)
 
@@ -179,13 +180,14 @@ class RedminePlugin(CorePluginMixin, IssuePlugin):
                 initial[field] = value
         return initial
 
-    def get_config(self, project, **kwargs):
+    def get_config(self, project, user=None, initial=None, add_additional_fields: bool = False):
         self.client_errors = []
         self.fields = self.build_config()
-        initial_args = kwargs.get("initial") or {}
+        initial_args = initial or {}
         initial = self.build_initial(initial_args, project)
 
         has_credentials = all(initial.get(k) for k in ("host", "key"))
+        client = None
         if has_credentials:
             client = RedmineClient(initial["host"], initial["key"])
             try:
@@ -202,7 +204,7 @@ class RedminePlugin(CorePluginMixin, IssuePlugin):
                 ]
                 self.add_choices("project_id", project_choices, choices_value)
 
-        if has_credentials:
+        if client is not None and has_credentials:
             try:
                 trackers = client.get_trackers()
             except Exception:
@@ -229,7 +231,7 @@ class RedminePlugin(CorePluginMixin, IssuePlugin):
 
         return self.fields
 
-    def validate_config(self, project, config, actor):
+    def validate_config(self, project, config, actor=None):
         super().validate_config(project, config, actor)
         self.client_errors = []
 

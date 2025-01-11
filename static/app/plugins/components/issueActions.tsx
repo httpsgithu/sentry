@@ -1,25 +1,28 @@
-import * as React from 'react';
-
-import GroupActions from 'app/actions/groupActions';
-import PluginComponentBase from 'app/components/bases/pluginComponentBase';
-import {Form, FormState} from 'app/components/forms';
-import LoadingError from 'app/components/loadingError';
-import LoadingIndicator from 'app/components/loadingIndicator';
-import {t} from 'app/locale';
-import {Group, Organization, Plugin, Project} from 'app/types';
+import Form from 'sentry/components/deprecatedforms/form';
+import FormState from 'sentry/components/forms/state';
+import LoadingError from 'sentry/components/loadingError';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import {t} from 'sentry/locale';
+import PluginComponentBase from 'sentry/plugins/pluginComponentBase';
+import GroupStore from 'sentry/stores/groupStore';
+import type {Group} from 'sentry/types/group';
+import type {Plugin} from 'sentry/types/integrations';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import {getAnalyticsDataForGroup} from 'sentry/utils/events';
 
 type Field = {
-  has_autocomplete?: boolean;
   depends?: string[];
+  has_autocomplete?: boolean;
 } & Parameters<typeof PluginComponentBase.prototype.renderField>[0]['config'];
 
 type ActionType = 'link' | 'create' | 'unlink';
-type FieldStateValue = typeof FormState[keyof typeof FormState];
+type FieldStateValue = (typeof FormState)[keyof typeof FormState];
 
 type Props = {
   actionType: ActionType;
   group: Group;
-  project: Project;
   organization: Organization;
   plugin: Plugin & {
     issue?: {
@@ -28,27 +31,28 @@ type Props = {
       url: string;
     };
   };
-  onSuccess?: (data: any) => void;
+  project: Project;
   onError?: (data: any) => void;
+  onSuccess?: (data: any) => void;
 };
 
 type State = {
   createFormData: Record<string, any>;
+  dependentFieldState: Record<string, FieldStateValue>;
   linkFormData: Record<string, any>;
   unlinkFormData: Record<string, any>;
   createFieldList?: Field[];
-  linkFieldList?: Field[];
-  unlinkFieldList?: Field[];
-  dependentFieldState: Record<string, FieldStateValue>;
   error?: {
     message: string;
-    error_type?: string;
     auth_url?: string;
+    error_type?: string;
+    errors?: Record<string, string>;
     has_auth_configured?: boolean;
     required_auth_settings?: string[];
-    errors?: Record<string, string>;
   };
+  linkFieldList?: Field[];
   loading?: boolean;
+  unlinkFieldList?: Field[];
 } & PluginComponentBase['state'];
 
 class IssueActions extends PluginComponentBase<Props, State> {
@@ -303,8 +307,19 @@ class IssueActions extends PluginComponentBase<Props, State> {
   }
 
   onSuccess(data) {
-    GroupActions.updateSuccess(null, [this.getGroup().id], {stale: true});
-    this.props.onSuccess && this.props.onSuccess(data);
+    // TODO(ts): This needs a better approach. We splice in this attribute to trigger
+    // a refetch in GroupDetails
+    type StaleGroup = Group & {stale?: boolean};
+
+    trackAnalytics('issue_details.external_issue_created', {
+      organization: this.props.organization,
+      ...getAnalyticsDataForGroup(this.props.group),
+      external_issue_provider: this.props.plugin.slug,
+      external_issue_type: 'plugin',
+    });
+
+    GroupStore.onUpdateSuccess('', [this.getGroup().id], {stale: true} as StaleGroup);
+    this.props.onSuccess?.(data);
   }
 
   createIssue() {
@@ -487,7 +502,8 @@ class IssueActions extends PluginComponentBase<Props, State> {
           </a>
         </div>
       );
-    } else if (error.error_type === 'config') {
+    }
+    if (error.error_type === 'config') {
       return (
         <div className="alert alert-block">
           {!error.has_auth_configured ? (
@@ -515,13 +531,15 @@ class IssueActions extends PluginComponentBase<Props, State> {
           )}
         </div>
       );
-    } else if (error.error_type === 'validation') {
+    }
+    if (error.error_type === 'validation') {
       const errors: React.ReactElement[] = [];
       for (const name in error.errors) {
         errors.push(<p key={name}>{error.errors[name]}</p>);
       }
       return <div className="alert alert-error alert-block">{errors}</div>;
-    } else if (error.message) {
+    }
+    if (error.message) {
       return (
         <div className="alert alert-error alert-block">
           <p>{error.message}</p>

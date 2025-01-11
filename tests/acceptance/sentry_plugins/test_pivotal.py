@@ -1,6 +1,8 @@
-from sentry.testutils import AcceptanceTestCase
+from sentry.testutils.cases import AcceptanceTestCase
+from sentry.testutils.silo import no_silo_test
 
 
+@no_silo_test
 class PivotalTest(AcceptanceTestCase):
     def setUp(self):
         super().setUp()
@@ -14,6 +16,5 @@ class PivotalTest(AcceptanceTestCase):
 
     def test_simple(self):
         self.browser.get(self.path)
-        self.browser.wait_until_not(".loading-indicator")
-        self.browser.snapshot("pivotal settings")
+        self.browser.wait_until_not('[data-test-id="loading-indicator"]')
         assert self.browser.element_exists(".ref-plugin-config-pivotal")

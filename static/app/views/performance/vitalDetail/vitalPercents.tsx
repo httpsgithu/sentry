@@ -1,22 +1,23 @@
 import styled from '@emotion/styled';
 
-import Tooltip from 'app/components/tooltip';
-import {t, tct} from 'app/locale';
-import space from 'app/styles/space';
-import {WebVital} from 'app/utils/discover/fields';
-import {formatPercentage} from 'app/utils/formatters';
+import {t, tct} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import {WebVital} from 'sentry/utils/fields';
+import {formatPercentage} from 'sentry/utils/number/formatPercentage';
 
 import {VitalState, vitalStateIcons, webVitalMeh, webVitalPoor} from './utils';
 
 type Percent = {
-  vitalState: VitalState;
   percent: number;
+  vitalState: VitalState;
 };
 
 type Props = {
-  vital: WebVital | WebVital[];
   percents: Percent[];
+  vital: WebVital | WebVital[];
+  hideTooltips?: boolean;
   showVitalPercentNames?: boolean;
+  showVitalThresholds?: boolean;
 };
 
 function getVitalStateText(vital: WebVital | WebVital[], vitalState) {
@@ -25,15 +26,15 @@ function getVitalStateText(vital: WebVital | WebVital[], vitalState) {
     case VitalState.POOR:
       return Array.isArray(vital)
         ? t('Poor')
-        : tct('Poor: >[threshold][unit]', {threshold: webVitalPoor[vital], unit});
+        : tct('(>[threshold][unit])', {threshold: webVitalPoor[vital], unit});
     case VitalState.MEH:
       return Array.isArray(vital)
         ? t('Meh')
-        : tct('Meh: >[threshold][unit]', {threshold: webVitalMeh[vital], unit});
+        : tct('(>[threshold][unit])', {threshold: webVitalMeh[vital], unit});
     case VitalState.GOOD:
       return Array.isArray(vital)
         ? t('Good')
-        : tct('Good: <[threshold][unit]', {threshold: webVitalMeh[vital], unit});
+        : tct('(<=[threshold][unit])', {threshold: webVitalMeh[vital], unit});
     default:
       return null;
   }
@@ -42,22 +43,14 @@ function getVitalStateText(vital: WebVital | WebVital[], vitalState) {
 export default function VitalPercents(props: Props) {
   return (
     <VitalSet>
-      {props.percents.map(pct => {
-        return (
-          <Tooltip
-            key={pct.vitalState}
-            title={getVitalStateText(props.vital, pct.vitalState)}
-          >
-            <VitalStatus>
-              {vitalStateIcons[pct.vitalState]}
-              <span>
-                {props.showVitalPercentNames && t(`${pct.vitalState}`)}{' '}
-                {formatPercentage(pct.percent, 0)}
-              </span>
-            </VitalStatus>
-          </Tooltip>
-        );
-      })}
+      {props.percents.map(pct => (
+        <VitalStatus data-test-id="vital-status" key={pct.vitalState}>
+          {vitalStateIcons[pct.vitalState]}
+          {props.showVitalPercentNames && pct.vitalState}{' '}
+          {formatPercentage(pct.percent, 0)}
+          {props.showVitalThresholds && getVitalStateText(props.vital, pct.vitalState)}
+        </VitalStatus>
+      ))}
     </VitalSet>
   );
 }

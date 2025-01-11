@@ -1,37 +1,42 @@
 import styled from '@emotion/styled';
 import isEqual from 'lodash/isEqual';
 
-import PluginComponentBase from 'app/components/bases/pluginComponentBase';
-import {Form, FormState} from 'app/components/forms';
-import LoadingIndicator from 'app/components/loadingIndicator';
-import {t, tct} from 'app/locale';
-import {Organization, Plugin, Project} from 'app/types';
-import {parseRepo} from 'app/utils';
-import {IntegrationAnalyticsKey} from 'app/utils/analytics/integrationAnalyticsEvents';
-import {trackIntegrationAnalytics} from 'app/utils/integrationUtil';
+import Alert from 'sentry/components/alert';
+import {LinkButton} from 'sentry/components/button';
+import Form from 'sentry/components/deprecatedforms/form';
+import FormState from 'sentry/components/forms/state';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import {t, tct} from 'sentry/locale';
+import PluginComponentBase from 'sentry/plugins/pluginComponentBase';
+import type {Plugin} from 'sentry/types/integrations';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import type {IntegrationAnalyticsKey} from 'sentry/utils/analytics/integrations';
+import {parseRepo} from 'sentry/utils/git/parseRepo';
+import {trackIntegrationAnalytics} from 'sentry/utils/integrationUtil';
 
 type Props = {
   organization: Organization;
-  project: Project;
   plugin: Plugin;
+  project: Project;
 } & PluginComponentBase['props'];
 
 type Field = Parameters<typeof PluginComponentBase.prototype.renderField>[0]['config'];
 
-type BackendField = Field & {value?: any; defaultValue?: any};
+type BackendField = Field & {defaultValue?: any; value?: any};
 
 type State = {
-  fieldList: Field[] | null;
-  initialData: Record<string, any> | null;
-  formData: Record<string, any>;
   errors: Record<string, any>;
+  fieldList: Field[] | null;
+  formData: Record<string, any>;
+  initialData: Record<string, any> | null;
   rawData: Record<string, any>;
   wasConfiguredOnPageLoad: boolean;
 } & PluginComponentBase['state'];
 
 class PluginSettings<
   P extends Props = Props,
-  S extends State = State
+  S extends State = State,
 > extends PluginComponentBase<P, S> {
   constructor(props: P, context: any) {
     super(props, context);
@@ -112,7 +117,7 @@ class PluginSettings<
       }),
       error: this.onSaveError.bind(this, error => {
         this.setState({
-          errors: (error.responseJSON || {}).errors || {},
+          errors: error.responseJSON?.errors || {},
         });
       }),
       complete: this.onSaveComplete,
@@ -173,21 +178,21 @@ class PluginSettings<
       }
       return (
         <div className="m-b-1">
-          <div className="alert alert-warning m-b-1">{data.config_error}</div>
-          <a className="btn btn-primary" href={authUrl}>
+          <Alert type="warning">{data.config_error}</Alert>
+          <LinkButton priority="primary" href={authUrl}>
             {t('Associate Identity')}
-          </a>
+          </LinkButton>
         </div>
       );
     }
 
     if (this.state.state === FormState.ERROR && !this.state.fieldList) {
       return (
-        <div className="alert alert-error m-b-1">
+        <Alert type="error">
           {tct('An unknown error occurred. Need help with this? [link:Contact support]', {
             link: <a href="https://sentry.io/support/" />,
           })}
-        </div>
+        </Alert>
       );
     }
 

@@ -3,8 +3,12 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from sentry import newsletter
-from sentry.api.bases.user import UserEndpoint
-from sentry.models import User, UserEmail
+from sentry.api.api_owners import ApiOwner
+from sentry.api.api_publish_status import ApiPublishStatus
+from sentry.api.base import control_silo_endpoint
+from sentry.users.api.bases.user import UserEndpoint
+from sentry.users.models.user import User
+from sentry.users.models.useremail import UserEmail
 
 
 class DefaultNewsletterValidator(serializers.Serializer):
@@ -16,8 +20,20 @@ class NewsletterValidator(serializers.Serializer):
     subscribed = serializers.BooleanField(required=True)
 
 
+from rest_framework.request import Request
+from rest_framework.response import Response
+
+
+@control_silo_endpoint
 class UserSubscriptionsEndpoint(UserEndpoint):
-    def get(self, request, user):
+    owner = ApiOwner.UNOWNED
+    publish_status = {
+        "GET": ApiPublishStatus.PRIVATE,
+        "PUT": ApiPublishStatus.PRIVATE,
+        "POST": ApiPublishStatus.PRIVATE,
+    }
+
+    def get(self, request: Request, user) -> Response:
         """
         Retrieve Account Subscriptions
         `````````````````````````````````````
@@ -48,7 +64,7 @@ class UserSubscriptionsEndpoint(UserEndpoint):
             ]
         )
 
-    def put(self, request, user):
+    def put(self, request: Request, user) -> Response:
         """
         Update Account Subscriptions
         ````````````````````````````
@@ -79,7 +95,7 @@ class UserSubscriptionsEndpoint(UserEndpoint):
         newsletter.create_or_update_subscription(user, **kwargs)
         return self.respond(status=204)
 
-    def post(self, request, user):
+    def post(self, request: Request, user) -> Response:
         """
         Configure Newsletter Subscription
         `````````````````````````````````

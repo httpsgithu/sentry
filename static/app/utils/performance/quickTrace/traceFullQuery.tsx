@@ -1,24 +1,24 @@
-import * as React from 'react';
+import {Fragment} from 'react';
 
-import GenericDiscoverQuery, {
-  DiscoverQueryProps,
-} from 'app/utils/discover/genericDiscoverQuery';
-import {
+import type {DiscoverQueryProps} from 'sentry/utils/discover/genericDiscoverQuery';
+import GenericDiscoverQuery from 'sentry/utils/discover/genericDiscoverQuery';
+import type {
   BaseTraceChildrenProps,
   FullQuickTrace,
   TraceFull,
   TraceFullDetailed,
   TraceRequestProps,
-} from 'app/utils/performance/quickTrace/types';
+  TraceSplitResults,
+} from 'sentry/utils/performance/quickTrace/types';
 import {
   getTraceRequestPayload,
   makeEventView,
-} from 'app/utils/performance/quickTrace/utils';
-import withApi from 'app/utils/withApi';
+} from 'sentry/utils/performance/quickTrace/utils';
 
 type AdditionalQueryProps = {
   eventId?: string;
-  detailed?: boolean;
+  limit?: number;
+  type?: 'detailed' | 'spans';
 };
 
 type TraceFullQueryChildrenProps<T> = BaseTraceChildrenProps &
@@ -36,28 +36,40 @@ type QueryProps<T> = Omit<TraceRequestProps, 'eventView'> &
   };
 
 function getTraceFullRequestPayload({
-  detailed,
+  type,
   eventId,
+  limit,
   ...props
 }: DiscoverQueryProps & AdditionalQueryProps) {
   const additionalApiPayload: any = getTraceRequestPayload(props);
-  additionalApiPayload.detailed = detailed ? '1' : '0';
+
+  if (type === 'spans') {
+    additionalApiPayload.useSpans = '1';
+  } else {
+    additionalApiPayload.detailed = '1';
+  }
+
   if (eventId) {
     additionalApiPayload.event_id = eventId;
   }
+
+  if (limit) {
+    additionalApiPayload.limit = limit;
+  }
+
   return additionalApiPayload;
 }
 
 function EmptyTrace<T>({children}: Pick<QueryProps<T>, 'children'>) {
   return (
-    <React.Fragment>
+    <Fragment>
       {children({
         isLoading: false,
         error: null,
         traces: null,
         type: 'full',
       })}
-    </React.Fragment>
+    </Fragment>
   );
 }
 
@@ -97,14 +109,14 @@ function GenericTraceFullQuery<T>({
   );
 }
 
-export const TraceFullQuery = withApi(
-  (props: Omit<QueryProps<TraceFull[]>, 'detailed'>) => (
-    <GenericTraceFullQuery<TraceFull[]> {...props} detailed={false} />
-  )
-);
+export function TraceFullQuery(
+  props: Omit<QueryProps<TraceSplitResults<TraceFull>>, 'detailed'>
+) {
+  return <GenericTraceFullQuery<TraceSplitResults<TraceFull>> {...props} />;
+}
 
-export const TraceFullDetailedQuery = withApi(
-  (props: Omit<QueryProps<TraceFullDetailed[]>, 'detailed'>) => (
-    <GenericTraceFullQuery<TraceFullDetailed[]> {...props} detailed />
-  )
-);
+export function TraceFullDetailedQuery(
+  props: QueryProps<TraceSplitResults<TraceFullDetailed>>
+) {
+  return <GenericTraceFullQuery<TraceSplitResults<TraceFullDetailed>> {...props} />;
+}

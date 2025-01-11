@@ -1,6 +1,10 @@
-from sentry.testutils import AcceptanceTestCase
+from selenium.webdriver.common.by import By
+
+from sentry.testutils.cases import AcceptanceTestCase
+from sentry.testutils.silo import no_silo_test
 
 
+@no_silo_test
 class OrganizationDeveloperSettingsNewAcceptanceTest(AcceptanceTestCase):
     """
     As a developer, I can create an integration, install it, and uninstall it
@@ -18,13 +22,14 @@ class OrganizationDeveloperSettingsNewAcceptanceTest(AcceptanceTestCase):
 
     def load_page(self, url):
         self.browser.get(url)
-        self.browser.wait_until_not(".loading-indicator")
+        self.browser.wait_until_not('[data-test-id="loading-indicator"]')
 
     def test_create_new_public_integration(self):
         self.load_page(self.org_developer_settings_path)
+        self.browser.click('[aria-label="Create New Integration"]')
 
-        self.browser.click('[aria-label="New Public Integration"]')
-
+        self.browser.click_when_visible('[data-test-id="public-integration"]')
+        self.browser.click('[aria-label="Next"]')
         self.browser.element('input[name="name"]').send_keys("Tesla")
         self.browser.element('input[name="author"]').send_keys("Elon Musk")
         self.browser.element('input[name="webhookUrl"]').send_keys("https://example.com/webhook")
@@ -35,8 +40,10 @@ class OrganizationDeveloperSettingsNewAcceptanceTest(AcceptanceTestCase):
 
     def test_create_new_internal_integration(self):
         self.load_page(self.org_developer_settings_path)
+        self.browser.click('[aria-label="Create New Integration"]')
 
-        self.browser.click('[aria-label="New Internal Integration"]')
+        self.browser.click_when_visible('[data-test-id="internal-integration"]')
+        self.browser.click('[aria-label="Next"]')
 
         self.browser.element('input[name="name"]').send_keys("Tesla")
 
@@ -45,6 +52,7 @@ class OrganizationDeveloperSettingsNewAcceptanceTest(AcceptanceTestCase):
         self.browser.wait_until(xpath="//button//span[contains(text(), 'New Token')]", timeout=3)
 
 
+@no_silo_test
 class OrganizationDeveloperSettingsEditAcceptanceTest(AcceptanceTestCase):
     """
     As a developer, I can edit an existing integration
@@ -69,7 +77,7 @@ class OrganizationDeveloperSettingsEditAcceptanceTest(AcceptanceTestCase):
 
     def load_page(self, url):
         self.browser.get(url)
-        self.browser.wait_until_not(".loading-indicator")
+        self.browser.wait_until_not('[data-test-id="loading-indicator"]')
 
     def test_edit_integration_schema(self):
         self.load_page(self.org_developer_settings_path)
@@ -82,25 +90,29 @@ class OrganizationDeveloperSettingsEditAcceptanceTest(AcceptanceTestCase):
 
         self.browser.wait_until(".ref-success")
 
-        link = self.browser.find_element_by_link_text("Tesla App")
+        self.browser.wait_until('[data-test-id="tesla-app"]')
+
+        link = self.browser.find_element(by=By.LINK_TEXT, value="Tesla App")
         link.click()
 
-        self.browser.wait_until_not(".loading-indicator")
+        self.browser.wait_until_not('[data-test-id="loading-indicator"]')
 
         schema = self.browser.element('textarea[name="schema"]')
         assert schema.text == ""
 
     def test_remove_tokens_internal_app(self):
         internal_app = self.create_internal_integration(name="Internal App", organization=self.org)
+        self.create_internal_integration_token(user=self.user, internal_integration=internal_app)
         url = f"/settings/{self.org.slug}/developer-settings/{internal_app.slug}"
 
         self.load_page(url)
 
         self.browser.click('[data-test-id="token-delete"]')
+        self.browser.click('[data-test-id="confirm-button"]')
         self.browser.wait_until(".ref-success")
 
-        assert self.browser.find_element_by_xpath(
-            "//div[contains(text(), 'No tokens created yet.')]"
+        assert self.browser.find_element(
+            by=By.XPATH, value="//div[contains(text(), 'No tokens created yet.')]"
         )
 
     def test_add_tokens_internal_app(self):
@@ -109,7 +121,9 @@ class OrganizationDeveloperSettingsEditAcceptanceTest(AcceptanceTestCase):
 
         self.load_page(url)
 
+        assert self.browser.element_exists('[aria-label="Generated token"]') is False
+
         self.browser.click('[data-test-id="token-add"]')
         self.browser.wait_until(".ref-success")
 
-        assert len(self.browser.elements('[data-test-id="token-delete"]')) == 2
+        assert len(self.browser.elements('[aria-label="Generated token"]')) == 1

@@ -1,13 +1,13 @@
 import omit from 'lodash/omit';
 import pick from 'lodash/pick';
 
-import {escapeDoubleQuotes} from 'app/utils';
-import GenericDiscoverQuery, {
+import {escapeDoubleQuotes} from 'sentry/utils';
+import type {
   DiscoverQueryProps,
   GenericChildrenProps,
-} from 'app/utils/discover/genericDiscoverQuery';
-import {escapeFilterValue} from 'app/utils/tokenizeSearch';
-import withApi from 'app/utils/withApi';
+} from 'sentry/utils/discover/genericDiscoverQuery';
+import GenericDiscoverQuery from 'sentry/utils/discover/genericDiscoverQuery';
+import {escapeFilterValue} from 'sentry/utils/tokenizeSearch';
 
 type HasMeasurementsProps = {
   transaction: string;
@@ -57,4 +57,4 @@ function HasMeasurementsQuery(props: Props) {
   );
 }
 
-export default withApi(HasMeasurementsQuery);
+export default HasMeasurementsQuery;

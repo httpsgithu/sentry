@@ -1,6 +1,10 @@
-import ExternalLink from 'app/components/links/externalLink';
-import {IconBitbucket, IconGithub, IconGitlab} from 'app/icons';
-import {PullRequest, Repository} from 'app/types';
+import styled from '@emotion/styled';
+
+import {LinkButton} from 'sentry/components/button';
+import ExternalLink from 'sentry/components/links/externalLink';
+import {IconBitbucket, IconGithub, IconGitlab} from 'sentry/icons';
+import {space} from 'sentry/styles/space';
+import type {PullRequest, Repository} from 'sentry/types/integrations';
 
 function renderIcon(repo: Repository) {
   if (!repo.provider) {
@@ -12,9 +16,9 @@ function renderIcon(repo: Repository) {
 
   switch (providerId) {
     case 'github':
-      return <IconGithub size="xs" />;
+      return <IconGithub size="xs" data-test-id="pull-request-github" />;
     case 'gitlab':
-      return <IconGitlab size="xs" />;
+      return <IconGitlab size="xs" data-test-id="pull-request-gitlab" />;
     case 'bitbucket':
       return <IconBitbucket size="xs" />;
     default:
@@ -28,21 +32,34 @@ type Props = {
   inline?: boolean;
 };
 
-const PullRequestLink = ({pullRequest, repository, inline}: Props) => {
+function PullRequestLink({pullRequest, repository, inline}: Props) {
   const displayId = `${repository.name} #${pullRequest.id}: ${pullRequest.title}`;
 
-  return pullRequest.externalUrl ? (
-    <ExternalLink
-      className={inline ? 'inline-commit' : 'btn btn-default btn-sm'}
+  if (!pullRequest.externalUrl) {
+    return <span>{displayId}</span>;
+  }
+
+  return !inline ? (
+    <LinkButton
+      external
       href={pullRequest.externalUrl}
+      size="sm"
+      icon={renderIcon(repository)}
     >
-      {renderIcon(repository)}
-      {inline ? '' : ' '}
       {displayId}
-    </ExternalLink>
+    </LinkButton>
   ) : (
-    <span>{displayId}</span>
+    <ExternalPullLink href={pullRequest.externalUrl}>
+      {renderIcon(repository)}
+      {displayId}
+    </ExternalPullLink>
   );
-};
+}
+
+const ExternalPullLink = styled(ExternalLink)`
+  display: inline-flex;
+  align-items: center;
+  gap: ${space(0.5)};
+`;
 
 export default PullRequestLink;

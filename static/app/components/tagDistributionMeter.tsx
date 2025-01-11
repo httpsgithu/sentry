@@ -1,53 +1,52 @@
-import * as React from 'react';
+import {Fragment} from 'react';
 import isPropValid from '@emotion/is-prop-valid';
 import styled from '@emotion/styled';
-import {LocationDescriptor} from 'history';
+import type {LocationDescriptor} from 'history';
 
-import {TagSegment} from 'app/actionCreators/events';
-import Link from 'app/components/links/link';
-import Tooltip from 'app/components/tooltip';
-import Version from 'app/components/version';
-import {t} from 'app/locale';
-import overflowEllipsis from 'app/styles/overflowEllipsis';
-import space from 'app/styles/space';
-import {percent} from 'app/utils';
+import type {TagSegment} from 'sentry/actionCreators/events';
+import Link from 'sentry/components/links/link';
+import {Tooltip} from 'sentry/components/tooltip';
+import Version from 'sentry/components/version';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import {percent} from 'sentry/utils';
 
-type DefaultProps = {
-  isLoading: boolean;
-  showReleasePackage: boolean;
-  hasError: boolean;
-  renderLoading: () => React.ReactNode;
-  renderEmpty: () => React.ReactNode;
-  renderError: () => React.ReactNode;
-};
-
-type Props = DefaultProps & {
-  title: string;
+type Props = {
   segments: TagSegment[];
+  title: string;
   totalValues: number;
+  colors?: string[];
+  hasError?: boolean;
+  isLoading?: boolean;
   onTagClick?: (title: string, value: TagSegment) => void;
+  renderEmpty?: () => React.ReactNode;
+  renderError?: () => React.ReactNode;
+  renderLoading?: () => React.ReactNode;
+  showReleasePackage?: boolean;
+  showTitle?: boolean;
 };
 
-type SegmentValue = {
-  to: LocationDescriptor;
-  onClick: () => void;
+export type SegmentValue = {
   index: number;
+  onClick: () => void;
+  to: LocationDescriptor;
 };
 
-export default class TagDistributionMeter extends React.Component<Props> {
-  static defaultProps: DefaultProps = {
-    isLoading: false,
-    hasError: false,
-    renderLoading: () => null,
-    renderEmpty: () => <p>{t('No recent data.')}</p>,
-    renderError: () => null,
-    showReleasePackage: false,
-  };
-
-  renderTitle() {
-    const {segments, totalValues, title, isLoading, hasError, showReleasePackage} =
-      this.props;
-
+function TagDistributionMeter({
+  colors = COLORS,
+  isLoading = false,
+  hasError = false,
+  renderLoading = () => null,
+  renderEmpty = () => <p>{t('No recent data.')}</p>,
+  renderError = () => null,
+  showReleasePackage = false,
+  showTitle = true,
+  segments,
+  title,
+  totalValues,
+  onTagClick,
+}: Props) {
+  function renderTitle() {
     if (!Array.isArray(segments) || segments.length <= 0) {
       return (
         <Title>
@@ -56,7 +55,7 @@ export default class TagDistributionMeter extends React.Component<Props> {
       );
     }
 
-    const largestSegment = segments[0];
+    const largestSegment = segments[0]!;
     const pct = percent(largestSegment.count, totalValues);
     const pctLabel = Math.floor(pct);
     const renderLabel = () => {
@@ -89,20 +88,7 @@ export default class TagDistributionMeter extends React.Component<Props> {
     );
   }
 
-  renderSegments() {
-    const {
-      segments,
-      onTagClick,
-      title,
-      isLoading,
-      hasError,
-      totalValues,
-      renderLoading,
-      renderError,
-      renderEmpty,
-      showReleasePackage,
-    } = this.props;
-
+  function renderSegments() {
     if (isLoading) {
       return renderLoading();
     }
@@ -136,26 +122,37 @@ export default class TagDistributionMeter extends React.Component<Props> {
           };
 
           const tooltipHtml = (
-            <React.Fragment>
+            <Fragment>
               <div className="truncate">{renderTooltipValue()}</div>
               {pctLabel}%
-            </React.Fragment>
+            </Fragment>
           );
 
           const segmentProps: SegmentValue = {
             index,
             to: value.url,
-            onClick: () => {
-              if (onTagClick) {
-                onTagClick(title, value);
-              }
-            },
+            onClick: () => onTagClick?.(title, value),
           };
 
           return (
             <div key={value.value} style={{width: pct + '%'}}>
               <Tooltip title={tooltipHtml} containerDisplayMode="block">
-                {value.isOther ? <OtherSegment /> : <Segment {...segmentProps} />}
+                {value.isOther ? (
+                  <OtherSegment
+                    aria-label={t('Other')}
+                    color={colors[colors.length - 1]!}
+                  />
+                ) : (
+                  <Segment
+                    aria-label={t(
+                      'Add the %s %s segment tag to the search query',
+                      title,
+                      value.value
+                    )}
+                    color={colors[index]!}
+                    {...segmentProps}
+                  />
+                )}
               </Tooltip>
             </div>
           );
@@ -164,30 +161,28 @@ export default class TagDistributionMeter extends React.Component<Props> {
     );
   }
 
-  render() {
-    const {segments, totalValues} = this.props;
+  const totalVisible = segments.reduce((sum, value) => sum + value.count, 0);
+  const hasOther = totalVisible < totalValues;
 
-    const totalVisible = segments.reduce((sum, value) => sum + value.count, 0);
-    const hasOther = totalVisible < totalValues;
-
-    if (hasOther) {
-      segments.push({
-        isOther: true,
-        name: t('Other'),
-        value: 'other',
-        count: totalValues - totalVisible,
-        url: '',
-      });
-    }
-
-    return (
-      <TagSummary>
-        {this.renderTitle()}
-        {this.renderSegments()}
-      </TagSummary>
-    );
+  if (hasOther) {
+    segments.push({
+      isOther: true,
+      name: t('Other'),
+      value: 'other',
+      count: totalValues - totalVisible,
+      url: '',
+    });
   }
+
+  return (
+    <TagSummary>
+      {showTitle && renderTitle()}
+      {renderSegments()}
+    </TagSummary>
+  );
 }
+
+export default TagDistributionMeter;
 
 const COLORS = [
   '#3A3387',
@@ -208,19 +203,21 @@ const TagSummary = styled('div')`
 const SegmentBar = styled('div')`
   display: flex;
   overflow: hidden;
-  border-radius: 2px;
+  border-radius: ${p => p.theme.borderRadius};
 `;
 
 const Title = styled('div')`
   display: flex;
   font-size: ${p => p.theme.fontSizeSmall};
   justify-content: space-between;
+  margin-bottom: ${space(0.25)};
+  line-height: 1.1;
 `;
 
 const TitleType = styled('div')`
   color: ${p => p.theme.textColor};
-  font-weight: bold;
-  ${overflowEllipsis};
+  font-weight: ${p => p.theme.fontWeightBold};
+  ${p => p.theme.overflowEllipsis};
 `;
 
 const TitleDescription = styled('div')`
@@ -230,31 +227,32 @@ const TitleDescription = styled('div')`
 `;
 
 const Label = styled('div')`
-  ${overflowEllipsis};
+  ${p => p.theme.overflowEllipsis};
   max-width: 150px;
 `;
 
 const Percent = styled('div')`
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
   font-variant-numeric: tabular-nums;
   padding-left: ${space(0.5)};
   color: ${p => p.theme.textColor};
 `;
 
-const OtherSegment = styled('span')`
+const OtherSegment = styled('span')<{color: string}>`
   display: block;
   width: 100%;
   height: 16px;
   color: inherit;
   outline: none;
-  background-color: ${COLORS[COLORS.length - 1]};
+  background-color: ${p => p.color};
 `;
 
-const Segment = styled(Link, {shouldForwardProp: isPropValid})<SegmentValue>`
+const Segment = styled(Link, {shouldForwardProp: isPropValid})<{color: string}>`
   display: block;
   width: 100%;
   height: 16px;
   color: inherit;
   outline: none;
-  background-color: ${p => COLORS[p.index]};
+  background-color: ${p => p.color};
+  border-radius: 0;
 `;

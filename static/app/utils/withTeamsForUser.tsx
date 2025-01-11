@@ -1,10 +1,11 @@
-import * as React from 'react';
+import {Component} from 'react';
 
-import {Client} from 'app/api';
-import ConfigStore from 'app/stores/configStore';
-import {Organization, Project, Team, TeamWithProjects} from 'app/types';
-import getDisplayName from 'app/utils/getDisplayName';
-import getProjectsByTeams from 'app/utils/getProjectsByTeams';
+import type {Client} from 'sentry/api';
+import ConfigStore from 'sentry/stores/configStore';
+import type {Organization, Team} from 'sentry/types/organization';
+import type {Project, TeamWithProjects} from 'sentry/types/project';
+import getDisplayName from 'sentry/utils/getDisplayName';
+import getProjectsByTeams from 'sentry/utils/getProjectsByTeams';
 
 import {metric} from './analytics';
 
@@ -15,15 +16,15 @@ type DependentProps = {
 };
 
 type InjectedTeamsProps = {
-  teams: TeamWithProjects[];
-  loadingTeams: boolean;
   error: Error | null;
+  loadingTeams: boolean;
+  teams: TeamWithProjects[];
 };
 
 const withTeamsForUser = <P extends InjectedTeamsProps>(
   WrappedComponent: React.ComponentType<P>
 ) =>
-  class extends React.Component<
+  class extends Component<
     Omit<P, keyof InjectedTeamsProps> & Partial<InjectedTeamsProps> & DependentProps,
     InjectedTeamsProps
   > {

@@ -1,27 +1,33 @@
-import * as React from 'react';
+import {Component, Fragment} from 'react';
 import styled from '@emotion/styled';
-import {Location} from 'history';
+import type {Location} from 'history';
 
-import Clipboard from 'app/components/clipboard';
-import DateTime from 'app/components/dateTime';
-import ProjectBadge from 'app/components/idBadge/projectBadge';
-import TimeSince from 'app/components/timeSince';
-import Tooltip from 'app/components/tooltip';
-import {IconCopy} from 'app/icons';
-import {t} from 'app/locale';
-import space from 'app/styles/space';
-import {OrganizationSummary} from 'app/types';
-import {Event} from 'app/types/event';
-import {getShortEventId} from 'app/utils/events';
-import {getDuration} from 'app/utils/formatters';
-import getDynamicText from 'app/utils/getDynamicText';
-import {
+import {LinkButton} from 'sentry/components/button';
+import {DateTime} from 'sentry/components/dateTime';
+import ContextIcon from 'sentry/components/events/contexts/contextIcon';
+import {generateIconName} from 'sentry/components/events/contexts/utils';
+import ProjectBadge from 'sentry/components/idBadge/projectBadge';
+import TimeSince from 'sentry/components/timeSince';
+import {Tooltip} from 'sentry/components/tooltip';
+import {backend} from 'sentry/data/platformCategories';
+import {IconCopy, IconPlay} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {Event, EventTransaction} from 'sentry/types/event';
+import type {OrganizationSummary} from 'sentry/types/organization';
+import getDuration from 'sentry/utils/duration/getDuration';
+import {getShortEventId} from 'sentry/utils/events';
+import getDynamicText from 'sentry/utils/getDynamicText';
+import type {
   QuickTraceQueryChildrenProps,
   TraceMeta,
-} from 'app/utils/performance/quickTrace/types';
-import {isTransaction} from 'app/utils/performance/quickTrace/utils';
-import Projects from 'app/utils/projects';
-import theme from 'app/utils/theme';
+} from 'sentry/utils/performance/quickTrace/types';
+import {isTransaction} from 'sentry/utils/performance/quickTrace/utils';
+import Projects from 'sentry/utils/projects';
+import {getReplayIdFromEvent} from 'sentry/utils/replays/getReplayIdFromEvent';
+import theme from 'sentry/utils/theme';
+import useCopyToClipboard from 'sentry/utils/useCopyToClipboard';
+import EventCreatedTooltip from 'sentry/views/issueDetails/eventCreatedTooltip';
 
 import QuickTraceMeta from './quickTraceMeta';
 import {MetaData} from './styles';
@@ -31,11 +37,11 @@ type Props = Pick<
   'errorDest' | 'transactionDest'
 > & {
   event: Event;
+  location: Location;
+  meta: TraceMeta | null;
   organization: OrganizationSummary;
   projectId: string;
-  location: Location;
   quickTrace: QuickTraceQueryChildrenProps | null;
-  meta: TraceMeta | null;
 };
 
 type State = {
@@ -45,22 +51,22 @@ type State = {
 /**
  * This should match the breakpoint chosen for the `EventDetailHeader` below
  */
-const BREAKPOINT_MEDIA_QUERY = `(min-width: ${theme.breakpoints[2]})`;
+const BREAKPOINT_MEDIA_QUERY = `(min-width: ${theme.breakpoints.large})`;
 
-class EventMetas extends React.Component<Props, State> {
+class EventMetas extends Component<Props, State> {
   state: State = {
     isLargeScreen: window.matchMedia?.(BREAKPOINT_MEDIA_QUERY)?.matches,
   };
 
   componentDidMount() {
     if (this.mq) {
-      this.mq.addListener(this.handleMediaQueryChange);
+      this.mq.addEventListener('change', this.handleMediaQueryChange);
     }
   }
 
   componentWillUnmount() {
     if (this.mq) {
-      this.mq.removeListener(this.handleMediaQueryChange);
+      this.mq.removeEventListener('change', this.handleMediaQueryChange);
     }
   }
 
@@ -85,20 +91,47 @@ class EventMetas extends React.Component<Props, State> {
     } = this.props;
     const {isLargeScreen} = this.state;
 
+    // Replay preview gets rendered as part of the breadcrumb section. We need
+    // to check for presence of both to show the replay link button here.
+    const hasReplay =
+      organization.features.includes('session-replay') &&
+      Boolean(event.entries.find(({type}) => type === 'breadcrumbs')) &&
+      Boolean(getReplayIdFromEvent(event));
+
     const type = isTransaction(event) ? 'transaction' : 'event';
 
     const timestamp = (
-      <TimeSince date={event.dateCreated || (event.endTimestamp || 0) * 1000} />
+      <TimeSince
+        tooltipBody={getDynamicText({
+          value: (
+            <EventCreatedTooltip
+              event={{
+                ...event,
+                dateCreated:
+                  event.dateCreated ||
+                  new Date((event.endTimestamp || 0) * 1000).toISOString(),
+              }}
+            />
+          ),
+          fixed: 'Event Created Tooltip',
+        })}
+        date={event.dateCreated || (event.endTimestamp || 0) * 1000}
+      />
     );
-
-    const httpStatus = <HttpStatus event={event} />;
 
     return (
       <Projects orgId={organization.slug} slugs={[projectId]}>
         {({projects}) => {
           const project = projects.find(p => p.slug === projectId);
+          const isBackendProject =
+            !!project?.platform && backend.includes(project.platform as any);
+
           return (
-            <EventDetailHeader type={type}>
+            <EventDetailHeader
+              type={type}
+              isBackendProject={isBackendProject}
+              hasReplay={hasReplay}
+            >
               <MetaData
                 headingText={t('Event ID')}
                 tooltipText={t('The unique ID assigned to this %s.', type)}
@@ -134,15 +167,33 @@ class EventMetas extends React.Component<Props, State> {
                   })}
                 />
               )}
-              {isTransaction(event) && (
+              {isTransaction(event) && isBackendProject && (
                 <MetaData
                   headingText={t('Status')}
                   tooltipText={t(
                     'The status of this transaction indicating if it succeeded or otherwise.'
                   )}
-                  bodyText={event.contexts?.trace?.status ?? '\u2014'}
-                  subtext={httpStatus}
+                  bodyText={getStatusBodyText(event)}
+                  subtext={<HttpStatus event={event} />}
                 />
+              )}
+              {isTransaction(event) &&
+                (event.contexts.browser ? (
+                  <MetaData
+                    headingText={t('Browser')}
+                    tooltipText={t('The browser used in this transaction.')}
+                    bodyText={<BrowserDisplay event={event} />}
+                    subtext={event.contexts.browser?.version}
+                  />
+                ) : (
+                  <span />
+                ))}
+              {hasReplay && (
+                <ReplayButtonContainer>
+                  <LinkButton href="#replay" size="sm" icon={<IconPlay />}>
+                    {t('Replay')}
+                  </LinkButton>
+                </ReplayButtonContainer>
               )}
               <QuickTraceContainer>
                 <QuickTraceMeta
@@ -164,31 +215,101 @@ class EventMetas extends React.Component<Props, State> {
   }
 }
 
-const EventDetailHeader = styled('div')<{type?: 'transaction' | 'event'}>`
+const BrowserCenter = styled('span')`
+  display: flex;
+  align-items: flex-start;
+  gap: ${space(1)};
+`;
+
+const IconContainer = styled('div')`
+  width: 20px;
+  height: 20px;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  margin-top: ${space(0.25)};
+`;
+
+export function BrowserDisplay({
+  event,
+  showVersion = false,
+}: {
+  event: Event;
+  showVersion?: boolean;
+}) {
+  const icon = generateIconName(
+    event.contexts.browser?.name,
+    event.contexts.browser?.version
+  );
+  return (
+    <BrowserCenter>
+      <IconContainer>
+        <ContextIcon name={icon} />
+      </IconContainer>
+      <span>
+        {event.contexts.browser?.name} {showVersion && event.contexts.browser?.version}
+      </span>
+    </BrowserCenter>
+  );
+}
+
+type EventDetailHeaderProps = {
+  hasReplay: boolean;
+  isBackendProject: boolean;
+  type?: 'transaction' | 'event';
+};
+
+export function getEventDetailHeaderCols({
+  hasReplay,
+  isBackendProject,
+  type,
+}: EventDetailHeaderProps): string {
+  return `grid-template-columns: ${[
+    'minmax(160px, 1fr)', // Event ID
+    type === 'transaction' ? 'minmax(160px, 1fr)' : 'minmax(200px, 1fr)', // Duration or Created Time
+    type === 'transaction' && isBackendProject && 'minmax(160px, 1fr)', // Status
+    type === 'transaction' && 'minmax(160px, 1fr) ', // Browser
+    hasReplay ? '5fr' : '6fr', // Replay
+    hasReplay && 'minmax(325px, 1fr)', // Quick Trace
+  ]
+    .filter(Boolean)
+    .join(' ')};`;
+}
+
+const EventDetailHeader = styled('div')<EventDetailHeaderProps>`
   display: grid;
   grid-template-columns: repeat(${p => (p.type === 'transaction' ? 3 : 2)}, 1fr);
   grid-template-rows: repeat(2, auto);
-  grid-gap: ${space(2)};
+  gap: ${space(2)};
   margin-bottom: ${space(2)};
 
-  @media (min-width: ${p => p.theme.breakpoints[1]}) {
+  @media (min-width: ${p => p.theme.breakpoints.medium}) {
     margin-bottom: 0;
   }
 
   /* This should match the breakpoint chosen for BREAKPOINT_MEDIA_QUERY above. */
-  @media (min-width: ${p => p.theme.breakpoints[2]}) {
-    ${p =>
-      p.type === 'transaction'
-        ? 'grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) minmax(160px, 1fr) 6fr;'
-        : 'grid-template-columns: minmax(160px, 1fr) minmax(200px, 1fr) 6fr;'};
+  @media (min-width: ${p => p.theme.breakpoints.large}) {
+    ${p => getEventDetailHeaderCols(p)};
     grid-row-gap: 0;
   }
 `;
 
-const QuickTraceContainer = styled('div')`
-  grid-column: 1/4;
+const ReplayButtonContainer = styled('div')`
+  order: 2;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  @media (min-width: ${p => p.theme.breakpoints.large}) {
+    order: 4;
+  }
+`;
 
-  @media (min-width: ${p => p.theme.breakpoints[2]}) {
+const QuickTraceContainer = styled('div')`
+  grid-column: 1 / -2;
+  order: 1;
+  @media (min-width: ${p => p.theme.breakpoints.large}) {
+    order: 5;
     justify-self: flex-end;
     min-width: 325px;
     grid-column: unset;
@@ -196,32 +317,45 @@ const QuickTraceContainer = styled('div')`
 `;
 
 function EventID({event}: {event: Event}) {
+  const {onClick} = useCopyToClipboard({text: event.eventID});
+
   return (
-    <Clipboard value={event.eventID}>
-      <EventIDContainer>
+    <EventIDContainer onClick={onClick}>
+      <Tooltip title={event.eventID} position="top">
         <EventIDWrapper>{getShortEventId(event.eventID)}</EventIDWrapper>
-        <Tooltip title={event.eventID} position="top">
-          <IconCopy color="subText" />
-        </Tooltip>
-      </EventIDContainer>
-    </Clipboard>
+        <IconCopy />
+      </Tooltip>
+    </EventIDContainer>
   );
 }
 
-const EventIDContainer = styled('div')`
+const EventIDContainer = styled('button')`
   display: flex;
   align-items: center;
-  cursor: pointer;
+
+  background: transparent;
+  border: none;
+  padding: 0;
+
+  &:hover {
+    color: ${p => p.theme.activeText};
+  }
+  svg {
+    color: ${p => p.theme.subText};
+  }
+  &:hover svg {
+    color: ${p => p.theme.textColor};
+  }
 `;
 
 const EventIDWrapper = styled('span')`
   margin-right: ${space(1)};
 `;
 
-function HttpStatus({event}: {event: Event}) {
+export function HttpStatus({event}: {event: Event}) {
   const {tags} = event;
 
-  const emptyStatus = <React.Fragment>{'\u2014'}</React.Fragment>;
+  const emptyStatus = <Fragment>{'\u2014'}</Fragment>;
 
   if (!Array.isArray(tags)) {
     return emptyStatus;
@@ -233,7 +367,11 @@ function HttpStatus({event}: {event: Event}) {
     return emptyStatus;
   }
 
-  return <React.Fragment>HTTP {tag.value}</React.Fragment>;
+  return <Fragment>HTTP {tag.value}</Fragment>;
+}
+
+export function getStatusBodyText(event: EventTransaction): string {
+  return event.contexts?.trace?.status ?? '\u2014';
 }
 
 export default EventMetas;

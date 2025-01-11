@@ -1,5 +1,6 @@
 from sentry.rules import rules
 
-from .notify_action import PagerDutyNotifyServiceAction
+from .actions import PagerDutyNotifyServiceAction
+from .analytics import *  # noqa: F401,F403
 
 rules.add(PagerDutyNotifyServiceAction)

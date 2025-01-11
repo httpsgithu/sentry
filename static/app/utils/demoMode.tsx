@@ -1,24 +1,61 @@
-import getCookie from 'app/utils/getCookie';
+import ConfigStore from 'sentry/stores/configStore';
+import {OnboardingTaskKey} from 'sentry/types/onboarding';
 
-// return email query parameter
-export function emailQueryParameter(): string {
-  const email = localStorage.getItem('email');
-  const queryParameter = email ? `?email=${email}` : '';
-  return queryParameter;
+import {demoSignupModal} from '../actionCreators/modal';
+
+const SIGN_UP_MODAL_DELAY = 20_000;
+
+export function extraQueryParameter(): URLSearchParams {
+  const extraQueryString = window.SandboxData?.extraQueryString || '';
+  const extraQuery = new URLSearchParams(extraQueryString);
+  return extraQuery;
 }
 
-// return extra query depending, depending on if used in getStartedUrl
-export function extraQueryParameter(getStarted: boolean): string {
+export function extraQueryParameterWithEmail(): URLSearchParams {
+  const params = extraQueryParameter();
   const email = localStorage.getItem('email');
-  const extraQueryString = getCookie('extra_query_string');
-  // cookies that have = sign are quotes so extra quotes need to be removed
-  const extraQuery = extraQueryString ? extraQueryString.replaceAll('"', '') : '';
-
-  if (getStarted) {
-    const emailSeparator = email ? '&' : '?';
-    const getStartedSeparator = extraQueryString ? emailSeparator : '';
-    return getStartedSeparator + extraQuery;
+  if (email) {
+    params.append('email', email);
   }
-  const extraSeparator = extraQueryString ? `?` : '';
-  return extraSeparator + extraQuery;
+  return params;
+}
+
+export function urlAttachQueryParams(url: string, params: URLSearchParams): string {
+  const queryString = params.toString();
+  if (queryString) {
+    return url + '?' + queryString;
+  }
+  return url;
+}
+
+export function isDemoModeEnabled(): boolean {
+  return ConfigStore.get('demoMode');
+}
+
+export function openDemoSignupModal() {
+  if (!isDemoModeEnabled()) {
+    return;
+  }
+
+  setTimeout(() => {
+    demoSignupModal();
+  }, SIGN_UP_MODAL_DELAY);
+}
+
+// Function to determine which tour has completed depending on the guide that is being passed in.
+export function getTourTask(
+  guide: string
+): {task: OnboardingTaskKey; tour: string} | undefined {
+  switch (guide) {
+    case 'sidebar_v2':
+      return {tour: 'tabs', task: OnboardingTaskKey.SIDEBAR_GUIDE};
+    case 'issues_v3':
+      return {tour: 'issues', task: OnboardingTaskKey.ISSUE_GUIDE};
+    case 'release-details_v2':
+      return {tour: 'releases', task: OnboardingTaskKey.RELEASE_GUIDE};
+    case 'transaction_details_v2':
+      return {tour: 'performance', task: OnboardingTaskKey.PERFORMANCE_GUIDE};
+    default:
+      return undefined;
+  }
 }

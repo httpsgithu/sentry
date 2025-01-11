@@ -1,13 +1,18 @@
+from __future__ import annotations
+
+from typing import Any
+
 from django import forms
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 
 from sentry.utils import json
+from sentry.utils.forms import set_field_choices
 
 from .client import RedmineClient
 
 
 class RedmineOptionsForm(forms.Form):
-    host = forms.URLField(help_text=_("e.g. http://bugs.redmine.org"))
+    host = forms.URLField(help_text=_("e.g. http://bugs.redmine.org"), assume_scheme="https")
     key = forms.CharField(
         widget=forms.TextInput(attrs={"class": "span9"}),
         help_text="Your API key is available on your account page after enabling the Rest API (Administration -> Settings -> Authentication)",
@@ -22,14 +27,15 @@ class RedmineOptionsForm(forms.Form):
         required=False,
     )
 
-    def __init__(self, data=None, *args, **kwargs):
-        super().__init__(data=data, *args, **kwargs)
+    def __init__(self, data=None, **kwargs):
+        super().__init__(data=data, **kwargs)
 
         initial = kwargs.get("initial") or {}
         for key, value in self.data.items():
             initial[key.lstrip(self.prefix or "")] = value
 
         has_credentials = all(initial.get(k) for k in ("host", "key"))
+        client = None
         if has_credentials:
             client = RedmineClient(initial["host"], initial["key"])
             try:
@@ -41,16 +47,16 @@ class RedmineOptionsForm(forms.Form):
                     (p["id"], "{} ({})".format(p["name"], p["identifier"]))
                     for p in projects["projects"]
                 ]
-                self.fields["project_id"].choices = project_choices
+                set_field_choices(self.fields["project_id"], project_choices)
 
-        if has_credentials:
+        if client is not None and has_credentials:
             try:
                 trackers = client.get_trackers()
             except Exception:
                 del self.fields["tracker_id"]
             else:
                 tracker_choices = [(p["id"], p["name"]) for p in trackers["trackers"]]
-                self.fields["tracker_id"].choices = tracker_choices
+                set_field_choices(self.fields["tracker_id"], tracker_choices)
 
             try:
                 priorities = client.get_priorities()
@@ -58,14 +64,14 @@ class RedmineOptionsForm(forms.Form):
                 del self.fields["default_priority"]
             else:
                 tracker_choices = [(p["id"], p["name"]) for p in priorities["issue_priorities"]]
-                self.fields["default_priority"].choices = tracker_choices
+                set_field_choices(self.fields["default_priority"], tracker_choices)
 
         if not has_credentials:
             del self.fields["project_id"]
             del self.fields["tracker_id"]
             del self.fields["default_priority"]
 
-    def clean(self):
+    def clean(self) -> dict[str, Any] | None:
         cd = self.cleaned_data
         if cd.get("host") and cd.get("key"):
             client = RedmineClient(cd["host"], cd["key"])
@@ -89,7 +95,7 @@ class RedmineOptionsForm(forms.Form):
         Ensure that the value provided is either a valid JSON dictionary,
         or the empty string.
         """
-        extra_fields_json = self.cleaned_data.get("extra_fields").strip()
+        extra_fields_json = self.cleaned_data["extra_fields"].strip()
         if not extra_fields_json:
             return ""
 
@@ -100,7 +106,7 @@ class RedmineOptionsForm(forms.Form):
 
         if not isinstance(extra_fields_dict, dict):
             raise forms.ValidationError("JSON dictionary must be specified")
-        return json.dumps(extra_fields_dict, indent=4)
+        return json.dumps(extra_fields_dict)
 
 
 class RedmineNewIssueForm(forms.Form):

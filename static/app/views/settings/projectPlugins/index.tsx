@@ -1,34 +1,38 @@
-import * as React from 'react';
-import {RouteComponentProps} from 'react-router';
+import {Component, Fragment} from 'react';
 
-import {disablePlugin, enablePlugin, fetchPlugins} from 'app/actionCreators/plugins';
-import SentryDocumentTitle from 'app/components/sentryDocumentTitle';
-import {t} from 'app/locale';
-import {Organization, Plugin, Project} from 'app/types';
-import {trackIntegrationAnalytics} from 'app/utils/integrationUtil';
-import withPlugins from 'app/utils/withPlugins';
-import SettingsPageHeader from 'app/views/settings/components/settingsPageHeader';
-import PermissionAlert from 'app/views/settings/project/permissionAlert';
+import {disablePlugin, enablePlugin, fetchPlugins} from 'sentry/actionCreators/plugins';
+import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
+import {t} from 'sentry/locale';
+import type {Plugin} from 'sentry/types/integrations';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import {trackIntegrationAnalytics} from 'sentry/utils/integrationUtil';
+import withPlugins from 'sentry/utils/withPlugins';
+import SettingsPageHeader from 'sentry/views/settings/components/settingsPageHeader';
+import PermissionAlert from 'sentry/views/settings/project/permissionAlert';
 
 import ProjectPlugins from './projectPlugins';
 
-type Props = RouteComponentProps<{orgId: string; projectId: string}, {}> & {
+type Props = RouteComponentProps<{projectId: string}, {}> & {
+  organization: Organization;
   plugins: {
-    plugins: Plugin[];
     error: React.ComponentProps<typeof ProjectPlugins>['error'];
     loading: boolean;
+    plugins: Plugin[];
   };
-  organization: Organization;
   project: Project;
 };
 
-class ProjectPluginsContainer extends React.Component<Props> {
+class ProjectPluginsContainer extends Component<Props> {
   componentDidMount() {
     this.fetchData();
   }
 
   fetchData = async () => {
-    const plugins = await fetchPlugins(this.props.params);
+    const {organization, params} = this.props;
+
+    const plugins = await fetchPlugins({...params, orgId: organization.slug});
     const installCount = plugins.filter(
       plugin => plugin.hasConfiguration && plugin.enabled
     ).length;
@@ -44,22 +48,23 @@ class ProjectPluginsContainer extends React.Component<Props> {
   };
 
   handleChange = (pluginId: string, shouldEnable: boolean) => {
-    const {projectId, orgId} = this.props.params;
+    const {organization, params} = this.props;
+
     const actionCreator = shouldEnable ? enablePlugin : disablePlugin;
-    actionCreator({projectId, orgId, pluginId});
+    actionCreator({projectId: params.projectId, orgId: organization.slug, pluginId});
   };
 
   render() {
     const {loading, error, plugins} = this.props.plugins || {};
-    const {orgId} = this.props.params;
+    const {organization, project} = this.props;
 
     const title = t('Legacy Integrations');
 
     return (
-      <React.Fragment>
-        <SentryDocumentTitle title={title} orgSlug={orgId} />
+      <Fragment>
+        <SentryDocumentTitle title={title} orgSlug={organization.slug} />
         <SettingsPageHeader title={title} />
-        <PermissionAlert />
+        <PermissionAlert project={project} />
 
         <ProjectPlugins
           {...this.props}
@@ -68,9 +73,11 @@ class ProjectPluginsContainer extends React.Component<Props> {
           error={error}
           plugins={plugins}
         />
-      </React.Fragment>
+      </Fragment>
     );
   }
 }
+
+export {ProjectPluginsContainer};
 
 export default withPlugins(ProjectPluginsContainer);

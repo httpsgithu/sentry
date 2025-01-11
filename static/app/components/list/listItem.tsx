@@ -1,23 +1,25 @@
-import * as React from 'react';
+import {forwardRef} from 'react';
 import styled from '@emotion/styled';
 
-import space from 'app/styles/space';
+import {space} from 'sentry/styles/space';
 
-type Props = {
-  children?: React.ReactNode;
+export interface ListItemProps extends React.HTMLAttributes<HTMLLIElement> {
+  padding?: string;
   symbol?: React.ReactElement;
-  onClick?: (event: React.MouseEvent) => void;
-  className?: string;
-};
+}
 
-const ListItem = styled(({children, className, symbol, onClick}: Props) => (
-  <li className={className} onClick={onClick}>
-    {symbol && <Symbol>{symbol}</Symbol>}
-    {children}
-  </li>
-))`
+const ListItem = styled(
+  forwardRef<HTMLLIElement, ListItemProps>(
+    ({symbol, children, padding: _padding, ...props}, ref) => (
+      <li ref={ref} role={props.onClick ? 'button' : undefined} {...props}>
+        {symbol && <Symbol>{symbol}</Symbol>}
+        {children}
+      </li>
+    )
+  )
+)`
   position: relative;
-  ${p => p.symbol && `padding-left: ${space(4)};`}
+  ${p => p.symbol && `padding-left: ${p.padding ?? space(4)};`}
 `;
 
 const Symbol = styled('div')`
