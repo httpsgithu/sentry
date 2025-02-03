@@ -1,13 +1,18 @@
+import abc
 import logging
+import secrets
+from collections.abc import Mapping
 from time import time
+from typing import Any
 from urllib.parse import parse_qsl, urlencode
-from uuid import uuid4
+
+import orjson
+from django.http import HttpRequest, HttpResponse
 
 from sentry.auth.exceptions import IdentityNotValid
 from sentry.auth.provider import Provider
 from sentry.auth.view import AuthView
 from sentry.http import safe_urlopen, safe_urlread
-from sentry.utils import json
 
 ERR_INVALID_STATE = "An error occurred while validating your request."
 
@@ -41,18 +46,20 @@ class OAuth2Login(AuthView):
             "redirect_uri": redirect_uri,
         }
 
-    def dispatch(self, request, helper):
+    def dispatch(self, request: HttpRequest, helper) -> HttpResponse:
         if "code" in request.GET:
             return helper.next_step()
 
-        state = uuid4().hex
+        state = secrets.token_hex()
 
         params = self.get_authorize_params(state=state, redirect_uri=helper.get_redirect_url())
-        redirect_uri = f"{self.get_authorize_url()}?{urlencode(params)}"
+        authorization_url = f"{self.get_authorize_url()}?{urlencode(params)}"
 
         helper.bind_state("state", state)
+        if request.subdomain:
+            helper.bind_state("subdomain", request.subdomain)
 
-        return self.redirect(redirect_uri)
+        return self.redirect(authorization_url)
 
 
 class OAuth2Callback(AuthView):
@@ -78,16 +85,16 @@ class OAuth2Callback(AuthView):
             "client_secret": self.client_secret,
         }
 
-    def exchange_token(self, request, helper, code):
+    def exchange_token(self, request: HttpRequest, helper, code):
         # TODO: this needs the auth yet
         data = self.get_token_params(code=code, redirect_uri=helper.get_redirect_url())
         req = safe_urlopen(self.access_token_url, data=data)
         body = safe_urlread(req)
         if req.headers["Content-Type"].startswith("application/x-www-form-urlencoded"):
             return dict(parse_qsl(body))
-        return json.loads(body)
+        return orjson.loads(body)
 
-    def dispatch(self, request, helper):
+    def dispatch(self, request: HttpRequest, helper) -> HttpResponse:
         error = request.GET.get("error")
         state = request.GET.get("state")
         code = request.GET.get("code")
@@ -115,15 +122,16 @@ class OAuth2Callback(AuthView):
         return helper.next_step()
 
 
-class OAuth2Provider(Provider):
-    client_id = None
-    client_secret = None
+class OAuth2Provider(Provider, abc.ABC):
+    is_partner = False
 
+    @abc.abstractmethod
     def get_client_id(self):
-        return self.client_id
+        raise NotImplementedError
 
+    @abc.abstractmethod
     def get_client_secret(self):
-        return self.client_secret
+        raise NotImplementedError
 
     def get_auth_pipeline(self):
         return [
@@ -131,7 +139,8 @@ class OAuth2Provider(Provider):
             OAuth2Callback(client_id=self.get_client_id(), client_secret=self.get_client_secret()),
         ]
 
-    def get_refresh_token_url(self):
+    @abc.abstractmethod
+    def get_refresh_token_url(self) -> str:
         raise NotImplementedError
 
     def get_refresh_token_params(self, refresh_token):
@@ -150,14 +159,18 @@ class OAuth2Provider(Provider):
             data["refresh_token"] = payload["refresh_token"]
         return data
 
-    def build_identity(self, state):
-        # data = state['data']
-        # return {
-        #     'id': '',
-        #     'email': '',
-        #     'name': '',
-        #     'data': self.get_oauth_data(data),
-        # }
+    @abc.abstractmethod
+    def build_identity(self, state: Mapping[str, Any]) -> Mapping[str, Any]:
+        """
+        Example implementation:
+        data = state['data']
+        return {
+            'id': '',
+            'email': '',
+            'name': '',
+            'data': self.get_oauth_data(data),
+        }
+        """
         raise NotImplementedError
 
     def update_identity(self, new_data, current_data):
@@ -178,7 +191,7 @@ class OAuth2Provider(Provider):
 
         try:
             body = safe_urlread(req)
-            payload = json.loads(body)
+            payload = orjson.loads(body)
         except Exception:
             payload = {}
 

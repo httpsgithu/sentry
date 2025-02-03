@@ -1,38 +1,42 @@
-import * as React from 'react';
+import {Fragment} from 'react';
 import styled from '@emotion/styled';
 
-import Access from 'app/components/acl/access';
-import AsyncComponent from 'app/components/asyncComponent';
-import Button from 'app/components/button';
-import CircleIndicator from 'app/components/circleIndicator';
-import Tag from 'app/components/tag';
-import {IconFlag} from 'app/icons';
-import {t, tct} from 'app/locale';
-import PluginIcon from 'app/plugins/components/pluginIcon';
-import space from 'app/styles/space';
-import {IntegrationFeature, Organization, SentryApp} from 'app/types';
-import {toPermissions} from 'app/utils/consolidatedScopes';
+import Access from 'sentry/components/acl/access';
+import Tag from 'sentry/components/badge/tag';
+import {Button} from 'sentry/components/button';
+import CircleIndicator from 'sentry/components/circleIndicator';
+import DeprecatedAsyncComponent from 'sentry/components/deprecatedAsyncComponent';
+import SentryAppIcon from 'sentry/components/sentryAppIcon';
+import {IconFlag} from 'sentry/icons';
+import {t, tct} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {IntegrationFeature, SentryApp} from 'sentry/types/integrations';
+import type {Organization} from 'sentry/types/organization';
+import {toPermissions} from 'sentry/utils/consolidatedScopes';
 import {
   getIntegrationFeatureGate,
   trackIntegrationAnalytics,
-} from 'app/utils/integrationUtil';
-import marked, {singleLineRenderer} from 'app/utils/marked';
-import {recordInteraction} from 'app/utils/recordSentryAppInteraction';
+} from 'sentry/utils/integrationUtil';
+import marked, {singleLineRenderer} from 'sentry/utils/marked';
+import {recordInteraction} from 'sentry/utils/recordSentryAppInteraction';
 
 type Props = {
   closeModal: () => void;
-  sentryApp: SentryApp;
   isInstalled: boolean;
   onInstall: () => Promise<void>;
   organization: Organization;
-} & AsyncComponent['props'];
+  sentryApp: SentryApp;
+} & DeprecatedAsyncComponent['props'];
 
 type State = {
   featureData: IntegrationFeature[];
-} & AsyncComponent['state'];
+} & DeprecatedAsyncComponent['state'];
 
 // No longer a modal anymore but yea :)
-export default class SentryAppDetailsModal extends AsyncComponent<Props, State> {
+export default class SentryAppDetailsModal extends DeprecatedAsyncComponent<
+  Props,
+  State
+> {
   componentDidUpdate(prevProps: Props) {
     // if the user changes org, count this as a fresh event to track
     if (this.props.organization.id !== prevProps.organization.id) {
@@ -41,6 +45,7 @@ export default class SentryAppDetailsModal extends AsyncComponent<Props, State> 
   }
 
   componentDidMount() {
+    super.componentDidMount();
     this.trackOpened();
   }
 
@@ -62,12 +67,12 @@ export default class SentryAppDetailsModal extends AsyncComponent<Props, State> 
     );
   }
 
-  getEndpoints(): ReturnType<AsyncComponent['getEndpoints']> {
+  getEndpoints(): ReturnType<DeprecatedAsyncComponent['getEndpoints']> {
     const {sentryApp} = this.props;
     return [['featureData', `/sentry-apps/${sentryApp.slug}/features/`]];
   }
 
-  featureTags(features: Pick<IntegrationFeature, 'featureGate'>[]) {
+  featureTags(features: Array<Pick<IntegrationFeature, 'featureGate'>>) {
     return features.map(feature => {
       const feat = feature.featureGate.replace(/integrations/g, '');
       return <StyledTag key={feat}>{feat.replace(/-/g, ' ')}</StyledTag>;
@@ -92,13 +97,14 @@ export default class SentryAppDetailsModal extends AsyncComponent<Props, State> 
   renderPermissions() {
     const permissions = this.permissions;
     if (
+      // @ts-expect-error TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
       Object.keys(permissions).filter(scope => permissions[scope].length > 0).length === 0
     ) {
       return null;
     }
 
     return (
-      <React.Fragment>
+      <Fragment>
         <Title>Permissions</Title>
         {permissions.read.length > 0 && (
           <Permission>
@@ -134,7 +140,7 @@ export default class SentryAppDetailsModal extends AsyncComponent<Props, State> 
             </Text>
           </Permission>
         )}
-      </React.Fragment>
+      </Fragment>
     );
   }
 
@@ -155,36 +161,33 @@ export default class SentryAppDetailsModal extends AsyncComponent<Props, State> 
     const featureProps = {organization, features};
 
     return (
-      <React.Fragment>
+      <Fragment>
         <Heading>
-          <PluginIcon pluginId={sentryApp.slug} size={50} />
-
+          <SentryAppIcon sentryApp={sentryApp} size={50} />
           <HeadingInfo>
             <Name>{sentryApp.name}</Name>
             {!!features.length && <Features>{this.featureTags(features)}</Features>}
           </HeadingInfo>
         </Heading>
-
         <Description dangerouslySetInnerHTML={{__html: marked(overview)}} />
         <FeatureList {...featureProps} provider={{...sentryApp, key: sentryApp.slug}} />
-
         <IntegrationFeatures {...featureProps}>
           {({disabled, disabledReason}) => (
-            <React.Fragment>
+            <Fragment>
               {!disabled && this.renderPermissions()}
               <Footer>
                 <Author>{t('Authored By %s', sentryApp.author)}</Author>
                 <div>
                   {disabled && <DisabledNotice reason={disabledReason} />}
-                  <Button size="small" onClick={closeModal}>
+                  <Button size="sm" onClick={closeModal}>
                     {t('Cancel')}
                   </Button>
 
-                  <Access organization={organization} access={['org:integrations']}>
+                  <Access access={['org:integrations']} organization={organization}>
                     {({hasAccess}) =>
                       hasAccess && (
                         <Button
-                          size="small"
+                          size="sm"
                           priority="primary"
                           disabled={isInstalled || disabled}
                           onClick={() => this.onInstall()}
@@ -198,10 +201,10 @@ export default class SentryAppDetailsModal extends AsyncComponent<Props, State> 
                   </Access>
                 </div>
               </Footer>
-            </React.Fragment>
+            </Fragment>
           )}
         </IntegrationFeatures>
-      </React.Fragment>
+      </Fragment>
     );
   }
 }
@@ -209,25 +212,24 @@ export default class SentryAppDetailsModal extends AsyncComponent<Props, State> 
 const Heading = styled('div')`
   display: grid;
   grid-template-columns: max-content 1fr;
-  grid-gap: ${space(1)};
+  gap: ${space(1)};
   align-items: center;
   margin-bottom: ${space(2)};
 `;
 
 const HeadingInfo = styled('div')`
-  display: grid;
-  grid-template-rows: max-content max-content;
+  display: flex;
+  flex-direction: column;
   align-items: start;
+  gap: ${space(0.75)};
 `;
 
 const Name = styled('div')`
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
   font-size: 1.4em;
 `;
 
 const Description = styled('div')`
-  font-size: 1.5rem;
-  line-height: 2.1rem;
   margin-bottom: ${space(2)};
 
   li {
@@ -241,7 +243,7 @@ const Author = styled('div')`
 
 const DisabledNotice = styled(({reason, ...p}: {reason: React.ReactNode}) => (
   <div {...p}>
-    <IconFlag color="red300" size="1.5em" />
+    <IconFlag color="errorText" size="md" />
     {reason}
   </div>
 ))`
@@ -249,7 +251,7 @@ const DisabledNotice = styled(({reason, ...p}: {reason: React.ReactNode}) => (
   align-items: center;
   flex: 1;
   grid-template-columns: max-content 1fr;
-  color: ${p => p.theme.red300};
+  color: ${p => p.theme.errorText};
   font-size: 0.9em;
 `;
 
@@ -263,6 +265,7 @@ const Permission = styled('div')`
 
 const Footer = styled('div')`
   display: flex;
+  align-items: center;
   padding: 20px 30px;
   border-top: 1px solid #e2dee6;
   margin: 20px -30px -30px;
@@ -271,10 +274,10 @@ const Footer = styled('div')`
 
 const Title = styled('p')`
   margin-bottom: ${space(1)};
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
 `;
 
-const Indicator = styled(p => <CircleIndicator size={7} {...p} />)`
+const Indicator = styled((p: any) => <CircleIndicator size={7} {...p} />)`
   margin-top: 7px;
   color: ${p => p.theme.success};
 `;

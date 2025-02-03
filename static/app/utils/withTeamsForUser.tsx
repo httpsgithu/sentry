@@ -1,12 +1,11 @@
-import * as React from 'react';
+import {Component} from 'react';
 
-import {Client} from 'app/api';
-import ConfigStore from 'app/stores/configStore';
-import {Organization, Project, Team, TeamWithProjects} from 'app/types';
-import getDisplayName from 'app/utils/getDisplayName';
-import getProjectsByTeams from 'app/utils/getProjectsByTeams';
-
-import {metric} from './analytics';
+import type {Client} from 'sentry/api';
+import ConfigStore from 'sentry/stores/configStore';
+import type {Organization, Team} from 'sentry/types/organization';
+import type {Project, TeamWithProjects} from 'sentry/types/project';
+import getDisplayName from 'sentry/utils/getDisplayName';
+import getProjectsByTeams from 'sentry/utils/getProjectsByTeams';
 
 // We require these props when using this HOC
 type DependentProps = {
@@ -15,15 +14,15 @@ type DependentProps = {
 };
 
 type InjectedTeamsProps = {
-  teams: TeamWithProjects[];
-  loadingTeams: boolean;
   error: Error | null;
+  loadingTeams: boolean;
+  teams: TeamWithProjects[];
 };
 
 const withTeamsForUser = <P extends InjectedTeamsProps>(
   WrappedComponent: React.ComponentType<P>
 ) =>
-  class extends React.Component<
+  class extends Component<
     Omit<P, keyof InjectedTeamsProps> & Partial<InjectedTeamsProps> & DependentProps,
     InjectedTeamsProps
   > {
@@ -45,27 +44,13 @@ const withTeamsForUser = <P extends InjectedTeamsProps>(
       });
 
       try {
-        metric.mark({name: 'user-teams-fetch-start'});
         const teamsWithProjects: TeamWithProjects[] = await this.props.api.requestPromise(
           this.getUsersTeamsEndpoint()
         );
-        this.setState(
-          {
-            teams: teamsWithProjects,
-            loadingTeams: false,
-          },
-          () => {
-            metric.measure({
-              name: 'app.component.perf',
-              start: 'user-teams-fetch-start',
-              data: {
-                name: 'user-teams',
-                route: '/organizations/:orgid/user-teams',
-                organization_id: parseInt(this.props.organization.id, 10),
-              },
-            });
-          }
-        );
+        this.setState({
+          teams: teamsWithProjects,
+          loadingTeams: false,
+        });
       } catch (error) {
         this.setState({
           error,

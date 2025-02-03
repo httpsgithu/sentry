@@ -1,7 +1,8 @@
+from django.http import HttpRequest, HttpResponse
 from django.views.generic import View
 
 from sentry.auth.providers.dummy import DummyProvider
-from sentry.models import Organization
+from sentry.models.organization import Organization
 
 from .mail import MailPreview
 
@@ -10,11 +11,11 @@ def get_context(request):
     org = Organization(name="My Company")
     provider = DummyProvider("dummy")
 
-    return {"organization": org, "actor": request.user, "provider": provider}
+    return {"organization": org, "actor_email": request.user.email, "provider": provider}
 
 
 class DebugSsoLinkedEmailView(View):
-    def get(self, request):
+    def get(self, request: HttpRequest) -> HttpResponse:
         context = get_context(request)
 
         return MailPreview(
@@ -25,7 +26,7 @@ class DebugSsoLinkedEmailView(View):
 
 
 class DebugSsoUnlinkedEmailView(View):
-    def get(self, request):
+    def get(self, request: HttpRequest) -> HttpResponse:
         context = get_context(request)
         context["has_password"] = True
 
@@ -37,7 +38,7 @@ class DebugSsoUnlinkedEmailView(View):
 
 
 class DebugSsoUnlinkedNoPasswordEmailView(View):
-    def get(self, request):
+    def get(self, request: HttpRequest) -> HttpResponse:
         context = get_context(request)
         context["has_password"] = False
 

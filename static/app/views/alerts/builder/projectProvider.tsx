@@ -1,63 +1,88 @@
-import * as React from 'react';
-import {RouteComponentProps} from 'react-router';
+import {cloneElement, Fragment, isValidElement, useEffect, useState} from 'react';
 
-import {fetchOrgMembers} from 'app/actionCreators/members';
-import {Client} from 'app/api';
-import Alert from 'app/components/alert';
-import LoadingIndicator from 'app/components/loadingIndicator';
-import {t} from 'app/locale';
-import {Organization, Project} from 'app/types';
-import Projects from 'app/utils/projects';
-import withApi from 'app/utils/withApi';
-import ScrollToTop from 'app/views/settings/components/scrollToTop';
+import {fetchOrgMembers} from 'sentry/actionCreators/members';
+import {navigateTo} from 'sentry/actionCreators/navigation';
+import {Alert} from 'sentry/components/alert';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import {t} from 'sentry/locale';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {Member, Organization} from 'sentry/types/organization';
+import useApi from 'sentry/utils/useApi';
+import {useIsMountedRef} from 'sentry/utils/useIsMountedRef';
+import useProjects from 'sentry/utils/useProjects';
+import useScrollToTop from 'sentry/utils/useScrollToTop';
 
 type Props = RouteComponentProps<RouteParams, {}> & {
-  organization: Organization;
-  api: Client;
-  children?: React.ReactNode;
   hasMetricAlerts: boolean;
+  organization: Organization;
+  children?: React.ReactNode;
 };
 
 type RouteParams = {
-  projectId: string;
+  projectId?: string;
 };
 
 function AlertBuilderProjectProvider(props: Props) {
-  const {children, params, organization, api, ...other} = props;
-  const {projectId} = params;
-  return (
-    <Projects orgId={organization.slug} allProjects>
-      {({projects, initiallyLoaded, isIncomplete}) => {
-        if (!initiallyLoaded) {
-          return <LoadingIndicator />;
-        }
-        const project = (projects as Project[]).find(({slug}) => slug === projectId);
-        // if loaded, but project fetching states incomplete or project can't be found, project doesn't exist
-        if (isIncomplete || !project) {
-          return (
-            <Alert type="warning">
-              {t('The project you were looking for was not found.')}
-            </Alert>
-          );
-        }
-        // fetch members list for mail action fields
-        fetchOrgMembers(api, organization.slug, [project.id]);
+  const api = useApi();
+  const isMountedRef = useIsMountedRef();
+  const [members, setMembers] = useState<Member[] | undefined>(undefined);
+  useScrollToTop({location: props.location});
 
-        return (
-          <ScrollToTop location={props.location} disable={() => false}>
-            {children && React.isValidElement(children)
-              ? React.cloneElement(children, {
-                  ...other,
-                  ...children.props,
-                  project,
-                  organization,
-                })
-              : children}
-          </ScrollToTop>
-        );
-      }}
-    </Projects>
+  const {children, params, organization, ...other} = props;
+  const projectId = params.projectId || props.location.query.project;
+  const useFirstProject = projectId === undefined;
+
+  const {projects, initiallyLoaded, fetching, fetchError} = useProjects();
+  const project = useFirstProject
+    ? projects.find(p => p.isMember) ?? (projects.length && projects[0])
+    : projects.find(({slug}) => slug === projectId);
+
+  useEffect(() => {
+    if (!project) {
+      return;
+    }
+
+    // fetch members list for mail action fields
+    fetchOrgMembers(api, organization.slug, [project.id]).then(mem => {
+      if (isMountedRef.current) {
+        setMembers(mem);
+      }
+    });
+  }, [api, organization, isMountedRef, project]);
+
+  if (!initiallyLoaded || fetching) {
+    return <LoadingIndicator />;
+  }
+
+  // If there's no project show the project selector modal
+  if (!project && !fetchError) {
+    navigateTo(
+      `/organizations/${organization.slug}/alerts/wizard/?referrer=${props.location.query.referrer}&project=:projectId`,
+      props.router
+    );
+  }
+
+  // if loaded, but project fetching states incomplete or project can't be found, project doesn't exist
+  if (!project || fetchError) {
+    return (
+      <Alert type="warning">{t('The project you were looking for was not found.')}</Alert>
+    );
+  }
+
+  return (
+    <Fragment>
+      {children && isValidElement(children)
+        ? cloneElement(children, {
+            ...other,
+            ...children.props,
+            project,
+            projectId: useFirstProject ? project.slug : projectId,
+            organization,
+            members,
+          })
+        : children}
+    </Fragment>
   );
 }
 
-export default withApi(AlertBuilderProjectProvider);
+export default AlertBuilderProjectProvider;

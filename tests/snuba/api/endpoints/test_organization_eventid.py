@@ -1,14 +1,15 @@
+import pytest
+from django.test import override_settings
 from django.urls import NoReverseMatch, reverse
 
-from sentry.testutils import APITestCase, SnubaTestCase
-from sentry.testutils.helpers.datetime import before_now, iso_format
-from sentry.utils.compat.mock import patch
+from sentry.testutils.cases import APITestCase, SnubaTestCase
+from sentry.testutils.helpers.datetime import before_now, freeze_time
 
 
 class EventIdLookupEndpointTest(APITestCase, SnubaTestCase):
     def setUp(self):
         super().setUp()
-        min_ago = iso_format(before_now(minutes=1))
+        min_ago = before_now(minutes=1).isoformat()
         self.org = self.create_organization(owner=self.user)
         self.project = self.create_project(organization=self.org)
 
@@ -28,7 +29,7 @@ class EventIdLookupEndpointTest(APITestCase, SnubaTestCase):
     def test_simple(self):
         url = reverse(
             "sentry-api-0-event-id-lookup",
-            kwargs={"organization_slug": self.org.slug, "event_id": self.event.event_id},
+            kwargs={"organization_id_or_slug": self.org.slug, "event_id": self.event.event_id},
         )
         response = self.client.get(url, format="json")
 
@@ -42,39 +43,37 @@ class EventIdLookupEndpointTest(APITestCase, SnubaTestCase):
     def test_missing_eventid(self):
         url = reverse(
             "sentry-api-0-event-id-lookup",
-            kwargs={"organization_slug": self.org.slug, "event_id": "c" * 32},
+            kwargs={"organization_id_or_slug": self.org.slug, "event_id": "c" * 32},
         )
         response = self.client.get(url, format="json")
 
         assert response.status_code == 404, response.content
 
-    @patch(
-        "sentry.api.helpers.group_index.ratelimiter.is_limited",
-        autospec=True,
-        return_value=True,
-    )
-    def test_ratelimit(self, is_limited):
+    @override_settings(SENTRY_SELF_HOSTED=False)
+    def test_ratelimit(self):
         url = reverse(
             "sentry-api-0-event-id-lookup",
-            kwargs={"organization_slug": self.org.slug, "event_id": self.event.event_id},
+            kwargs={"organization_id_or_slug": self.org.slug, "event_id": self.event.event_id},
         )
-        resp = self.client.get(url, format="json")
-
-        assert resp.status_code == 429
+        with freeze_time("2000-01-01"):
+            for i in range(10):
+                self.client.get(url, format="json")
+            resp = self.client.get(url, format="json")
+            assert resp.status_code == 429
 
     def test_invalid_event_id(self):
-        with self.assertRaises(NoReverseMatch):
+        with pytest.raises(NoReverseMatch):
             reverse(
                 "sentry-api-0-event-id-lookup",
                 kwargs={
-                    "organization_slug": self.org.slug,
+                    "organization_id_or_slug": self.org.slug,
                     "event_id": "not-an-event",
                 },
             )
 
         url = reverse(
             "sentry-api-0-event-id-lookup",
-            kwargs={"organization_slug": self.org.slug, "event_id": 123456},
+            kwargs={"organization_id_or_slug": self.org.slug, "event_id": 123456},
         )
         resp = self.client.get(url, format="json")
 

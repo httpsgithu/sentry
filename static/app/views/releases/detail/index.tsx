@@ -1,58 +1,53 @@
 import {createContext} from 'react';
-import {RouteComponentProps} from 'react-router';
 import styled from '@emotion/styled';
+import type {Location} from 'history';
+import isEqual from 'lodash/isEqual';
 import pick from 'lodash/pick';
-import moment from 'moment';
 
-import Alert from 'app/components/alert';
-import AsyncComponent from 'app/components/asyncComponent';
-import LoadingIndicator from 'app/components/loadingIndicator';
-import NoProjectMessage from 'app/components/noProjectMessage';
-import GlobalSelectionHeader from 'app/components/organizations/globalSelectionHeader';
-import {getParams} from 'app/components/organizations/globalSelectionHeader/getParams';
-import PickProjectToContinue from 'app/components/pickProjectToContinue';
-import {DEFAULT_STATS_PERIOD} from 'app/constants';
-import {URL_PARAM} from 'app/constants/globalSelectionHeader';
-import {IconInfo, IconWarning} from 'app/icons';
-import {t} from 'app/locale';
-import {PageContent} from 'app/styles/organization';
-import space from 'app/styles/space';
-import {
+import {Alert} from 'sentry/components/alert';
+import DeprecatedAsyncComponent from 'sentry/components/deprecatedAsyncComponent';
+import * as Layout from 'sentry/components/layouts/thirds';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import NoProjectMessage from 'sentry/components/noProjectMessage';
+import PageFiltersContainer from 'sentry/components/organizations/pageFilters/container';
+import {normalizeDateTimeParams} from 'sentry/components/organizations/pageFilters/parse';
+import PickProjectToContinue from 'sentry/components/pickProjectToContinue';
+import {PAGE_URL_PARAM, URL_PARAM} from 'sentry/constants/pageFilters';
+import {IconInfo} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {PageFilters} from 'sentry/types/core';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {Organization, SessionApiResponse} from 'sentry/types/organization';
+import {SessionFieldWithOperation} from 'sentry/types/organization';
+import type {
   Deploy,
-  GlobalSelection,
-  Organization,
   ReleaseMeta,
   ReleaseProject,
   ReleaseWithHealth,
-  SessionApiResponse,
-} from 'app/types';
-import {formatVersion} from 'app/utils/formatters';
-import routeTitleGen from 'app/utils/routeTitle';
-import withGlobalSelection from 'app/utils/withGlobalSelection';
-import withOrganization from 'app/utils/withOrganization';
-import AsyncView from 'app/views/asyncView';
+} from 'sentry/types/release';
+import type {WithRouteAnalyticsProps} from 'sentry/utils/routeAnalytics/withRouteAnalytics';
+import withRouteAnalytics from 'sentry/utils/routeAnalytics/withRouteAnalytics';
+import routeTitleGen from 'sentry/utils/routeTitle';
+import {getCount} from 'sentry/utils/sessions';
+import {formatVersion} from 'sentry/utils/versions/formatVersion';
+import withOrganization from 'sentry/utils/withOrganization';
+import withPageFilters from 'sentry/utils/withPageFilters';
+import DeprecatedAsyncView from 'sentry/views/deprecatedAsyncView';
 
-import {DisplayOption} from '../list/utils';
-import {getReleaseBounds, ReleaseBounds} from '../utils';
-import ReleaseHealthRequest, {
-  ReleaseHealthRequestRenderProps,
-} from '../utils/releaseHealthRequest';
+import type {ReleaseBounds} from '../utils';
+import {getReleaseBounds, searchReleaseVersion} from '../utils';
 
-import ReleaseHeader from './releaseHeader';
-
-const DEFAULT_FRESH_RELEASE_STATS_PERIOD = '24h';
+import ReleaseHeader from './header/releaseHeader';
 
 type ReleaseContextType = {
-  release: ReleaseWithHealth;
-  project: Required<ReleaseProject>;
   deploys: Deploy[];
-  releaseMeta: ReleaseMeta;
-  refetchData: () => void;
-  defaultStatsPeriod: string;
-  getHealthData: ReleaseHealthRequestRenderProps['getHealthData'];
-  isHealthLoading: ReleaseHealthRequestRenderProps['isHealthLoading'];
   hasHealthData: boolean;
+  project: Required<ReleaseProject>;
+  refetchData: () => void;
+  release: ReleaseWithHealth;
   releaseBounds: ReleaseBounds;
+  releaseMeta: ReleaseMeta;
 };
 const ReleaseContext = createContext<ReleaseContextType>({} as ReleaseContextType);
 
@@ -61,22 +56,21 @@ type RouteParams = {
   release: string;
 };
 
-type Props = RouteComponentProps<RouteParams, {}> & {
-  organization: Organization;
-  selection: GlobalSelection;
-  releaseMeta: ReleaseMeta;
-  defaultStatsPeriod: string;
-  getHealthData: ReleaseHealthRequestRenderProps['getHealthData'];
-  isHealthLoading: ReleaseHealthRequestRenderProps['isHealthLoading'];
-};
+type Props = RouteComponentProps<RouteParams, {}> &
+  WithRouteAnalyticsProps & {
+    children: React.ReactNode;
+    organization: Organization;
+    releaseMeta: ReleaseMeta;
+    selection: PageFilters;
+  };
 
 type State = {
-  release: ReleaseWithHealth;
   deploys: Deploy[];
+  release: ReleaseWithHealth;
   sessions: SessionApiResponse | null;
-} & AsyncView['state'];
+} & DeprecatedAsyncView['state'];
 
-class ReleasesDetail extends AsyncView<Props, State> {
+class ReleasesDetail extends DeprecatedAsyncView<Props, State> {
   shouldReload = true;
 
   getTitle() {
@@ -102,30 +96,51 @@ class ReleasesDetail extends AsyncView<Props, State> {
     };
   }
 
-  getEndpoints(): ReturnType<AsyncComponent['getEndpoints']> {
-    const {organization, location, params, releaseMeta, defaultStatsPeriod} = this.props;
+  componentDidUpdate(prevProps: Props, prevState: State) {
+    const {organization, params, location} = this.props;
+
+    if (
+      prevProps.params.release !== params.release ||
+      prevProps.organization.slug !== organization.slug ||
+      !isEqual(
+        this.pickLocationQuery(prevProps.location),
+        this.pickLocationQuery(location)
+      )
+    ) {
+      super.componentDidUpdate(prevProps, prevState);
+    }
+  }
+
+  getEndpoints(): ReturnType<DeprecatedAsyncComponent['getEndpoints']> {
+    const {organization, location, params, releaseMeta} = this.props;
 
     const basePath = `/organizations/${organization.slug}/releases/${encodeURIComponent(
       params.release
     )}/`;
 
-    const endpoints: ReturnType<AsyncView['getEndpoints']> = [
+    const endpoints: ReturnType<DeprecatedAsyncView['getEndpoints']> = [
       [
         'release',
         basePath,
         {
           query: {
             adoptionStages: 1,
-            ...getParams(pick(location.query, [...Object.values(URL_PARAM)]), {
-              defaultStatsPeriod,
-            }),
+            ...normalizeDateTimeParams(this.pickLocationQuery(location)),
           },
         },
       ],
     ];
 
     if (releaseMeta.deployCount > 0) {
-      endpoints.push(['deploys', `${basePath}deploys/`]);
+      endpoints.push([
+        'deploys',
+        `${basePath}deploys/`,
+        {
+          query: {
+            project: location.query.project,
+          },
+        },
+      ]);
     }
 
     // Used to figure out if the release has any health data
@@ -136,29 +151,39 @@ class ReleasesDetail extends AsyncView<Props, State> {
         query: {
           project: location.query.project,
           environment: location.query.environment ?? [],
-          query: `release:"${params.release}"`,
+          query: searchReleaseVersion(params.release),
           field: 'sum(session)',
           statsPeriod: '90d',
           interval: '1d',
         },
+      },
+      {
+        allowError: (error: any) => error.status === 400,
       },
     ]);
 
     return endpoints;
   }
 
-  renderError(...args) {
+  pickLocationQuery(location: Location) {
+    return pick(location.query, [
+      ...Object.values(URL_PARAM),
+      ...Object.values(PAGE_URL_PARAM),
+    ]);
+  }
+
+  renderError(...args: any[]) {
     const possiblyWrongProject = Object.values(this.state.errors).find(
       e => e?.status === 404 || e?.status === 403
     );
 
     if (possiblyWrongProject) {
       return (
-        <PageContent>
-          <Alert type="error" icon={<IconWarning />}>
+        <Layout.Page>
+          <Alert type="error" showIcon>
             {t('This release may not be in your selected project.')}
           </Alert>
-        </PageContent>
+        </Layout.Page>
       );
     }
 
@@ -167,22 +192,14 @@ class ReleasesDetail extends AsyncView<Props, State> {
 
   renderLoading() {
     return (
-      <PageContent>
+      <Layout.Page>
         <LoadingIndicator />
-      </PageContent>
+      </Layout.Page>
     );
   }
 
   renderBody() {
-    const {
-      organization,
-      location,
-      selection,
-      releaseMeta,
-      defaultStatsPeriod,
-      getHealthData,
-      isHealthLoading,
-    } = this.props;
+    const {organization, location, selection, releaseMeta} = this.props;
     const {release, deploys, sessions, reloading} = this.state;
     const project = release?.projects.find(p => p.id === selection.projects[0]);
     const releaseBounds = getReleaseBounds(release);
@@ -196,8 +213,8 @@ class ReleasesDetail extends AsyncView<Props, State> {
     }
 
     return (
-      <NoProjectMessage organization={organization}>
-        <StyledPageContent>
+      <Layout.Page>
+        <NoProjectMessage organization={organization}>
           <ReleaseHeader
             location={location}
             organization={organization}
@@ -213,28 +230,34 @@ class ReleasesDetail extends AsyncView<Props, State> {
               deploys,
               releaseMeta,
               refetchData: this.fetchData,
-              defaultStatsPeriod,
-              getHealthData,
-              isHealthLoading,
-              hasHealthData: !!sessions?.groups[0].totals['sum(session)'],
+              hasHealthData:
+                getCount(sessions?.groups, SessionFieldWithOperation.SESSIONS) > 0,
               releaseBounds,
             }}
           >
             {this.props.children}
           </ReleaseContext.Provider>
-        </StyledPageContent>
-      </NoProjectMessage>
+        </NoProjectMessage>
+      </Layout.Page>
     );
   }
 }
 
-class ReleasesDetailContainer extends AsyncComponent<
-  Omit<Props, 'releaseMeta' | 'getHealthData' | 'isHealthLoading'>,
-  {releaseMeta: ReleaseMeta | null} & AsyncComponent['state']
+// ========================================================================
+// RELEASE DETAIL CONTAINER
+// ========================================================================
+
+type ReleasesDetailContainerProps = Omit<Props, 'releaseMeta'>;
+type ReleasesDetailContainerState = {
+  releaseMeta: ReleaseMeta | null;
+} & DeprecatedAsyncComponent['state'];
+class ReleasesDetailContainer extends DeprecatedAsyncComponent<
+  ReleasesDetailContainerProps,
+  ReleasesDetailContainerState
 > {
   shouldReload = true;
 
-  getEndpoints(): ReturnType<AsyncComponent['getEndpoints']> {
+  getEndpoints(): ReturnType<DeprecatedAsyncComponent['getEndpoints']> {
     const {organization, params} = this.props;
     // fetch projects this release belongs to
     return [
@@ -247,26 +270,31 @@ class ReleasesDetailContainer extends AsyncComponent<
     ];
   }
 
-  get hasReleaseComparison() {
-    return this.props.organization.features.includes('release-comparison');
-  }
-
   componentDidMount() {
+    super.componentDidMount();
     this.removeGlobalDateTimeFromUrl();
+    this.props.setRouteAnalyticsParams({release: this.props.params.release});
   }
 
-  componentDidUpdate(prevProps, prevContext: Record<string, any>) {
-    super.componentDidUpdate(prevProps, prevContext);
+  componentDidUpdate(
+    prevProps: ReleasesDetailContainerProps,
+    prevState: ReleasesDetailContainerState
+  ) {
+    const {organization, params} = this.props;
+
     this.removeGlobalDateTimeFromUrl();
+    if (
+      prevProps.params.release !== params.release ||
+      prevProps.organization.slug !== organization.slug
+    ) {
+      this.props.setRouteAnalyticsParams({release: this.props.params.release});
+      super.componentDidUpdate(prevProps, prevState);
+    }
   }
 
   removeGlobalDateTimeFromUrl() {
     const {router, location} = this.props;
     const {start, end, statsPeriod, utc, ...restQuery} = location.query;
-
-    if (!this.hasReleaseComparison) {
-      return;
-    }
 
     if (start || end || statsPeriod || utc) {
       router.replace({
@@ -276,17 +304,17 @@ class ReleasesDetailContainer extends AsyncComponent<
     }
   }
 
-  renderError(...args) {
+  renderError(...args: any[]) {
     const has404Errors = Object.values(this.state.errors).find(e => e?.status === 404);
 
     if (has404Errors) {
       // This catches a 404 coming from the release endpoint and displays a custom error message.
       return (
-        <PageContent>
-          <Alert type="error" icon={<IconWarning />}>
+        <Layout.Page withPadding>
+          <Alert type="error" showIcon>
             {t('This release could not be found.')}
           </Alert>
-        </PageContent>
+        </Layout.Page>
       );
     }
 
@@ -301,9 +329,9 @@ class ReleasesDetailContainer extends AsyncComponent<
 
   renderLoading() {
     return (
-      <PageContent>
+      <Layout.Page>
         <LoadingIndicator />
-      </PageContent>
+      </Layout.Page>
     );
   }
 
@@ -316,7 +344,7 @@ class ReleasesDetailContainer extends AsyncComponent<
   }
 
   renderBody() {
-    const {organization, params, router, location, selection} = this.props;
+    const {organization, params, router} = this.props;
     const {releaseMeta} = this.state;
 
     if (!releaseMeta) {
@@ -324,12 +352,6 @@ class ReleasesDetailContainer extends AsyncComponent<
     }
 
     const {projects} = releaseMeta;
-    const isFreshRelease = moment(releaseMeta.released).isAfter(
-      moment().subtract(24, 'hours')
-    );
-    const defaultStatsPeriod = isFreshRelease
-      ? DEFAULT_FRESH_RELEASE_STATS_PERIOD
-      : DEFAULT_STATS_PERIOD;
 
     if (this.isProjectMissingInUrl()) {
       return (
@@ -350,60 +372,29 @@ class ReleasesDetailContainer extends AsyncComponent<
     }
 
     return (
-      <GlobalSelectionHeader
-        lockedMessageSubject={t('release')}
+      <PageFiltersContainer
         shouldForceProject={projects.length === 1}
         forceProject={
-          projects.length === 1 ? {...projects[0], id: String(projects[0].id)} : undefined
+          projects.length === 1
+            ? {...projects[0]!, id: String(projects[0]!.id)}
+            : undefined
         }
         specificProjectSlugs={projects.map(p => p.slug)}
-        disableMultipleProjectSelection
-        showProjectSettingsLink
-        projectsFooterMessage={this.renderProjectsFooterMessage()}
-        defaultSelection={{
-          datetime: {
-            start: null,
-            end: null,
-            utc: false,
-            period: defaultStatsPeriod,
-          },
-        }}
-        showDateSelector={!this.hasReleaseComparison}
       >
-        <ReleaseHealthRequest
-          releases={[params.release]}
-          organization={organization}
-          selection={selection}
-          location={location}
-          display={[DisplayOption.SESSIONS, DisplayOption.USERS]}
-          defaultStatsPeriod={defaultStatsPeriod}
-          disable={this.hasReleaseComparison}
-        >
-          {({isHealthLoading, getHealthData}) => (
-            <ReleasesDetail
-              {...this.props}
-              releaseMeta={releaseMeta}
-              defaultStatsPeriod={defaultStatsPeriod}
-              getHealthData={getHealthData}
-              isHealthLoading={isHealthLoading}
-            />
-          )}
-        </ReleaseHealthRequest>
-      </GlobalSelectionHeader>
+        <ReleasesDetail {...this.props} releaseMeta={releaseMeta} />
+      </PageFiltersContainer>
     );
   }
 }
-
-const StyledPageContent = styled(PageContent)`
-  padding: 0;
-`;
 
 const ProjectsFooterMessage = styled('div')`
   display: grid;
   align-items: center;
   grid-template-columns: min-content 1fr;
-  grid-gap: ${space(1)};
+  gap: ${space(1)};
 `;
 
 export {ReleaseContext, ReleasesDetailContainer};
-export default withGlobalSelection(withOrganization(ReleasesDetailContainer));
+export default withRouteAnalytics(
+  withPageFilters(withOrganization(ReleasesDetailContainer))
+);

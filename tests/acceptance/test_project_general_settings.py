@@ -1,6 +1,8 @@
-from sentry.testutils import AcceptanceTestCase
+from sentry.testutils.cases import AcceptanceTestCase
+from sentry.testutils.silo import no_silo_test
 
 
+@no_silo_test
 class ProjectGeneralSettingsTest(AcceptanceTestCase):
     def setUp(self):
         super().setUp()
@@ -15,8 +17,7 @@ class ProjectGeneralSettingsTest(AcceptanceTestCase):
     def test_saved_searches(self):
         path = f"/{self.org.slug}/{self.project.slug}/settings/"
         self.browser.get(path)
-        self.browser.wait_until_not(".loading-indicator")
-        self.browser.snapshot("project settings - general settings")
+        self.browser.wait_until_not('[data-test-id="loading-indicator"]')
 
     def test_mobile_menu(self):
         """
@@ -26,8 +27,7 @@ class ProjectGeneralSettingsTest(AcceptanceTestCase):
 
         with self.browser.mobile_viewport():
             self.browser.get(path)
-            self.browser.wait_until_not(".loading-indicator")
+            self.browser.wait_until_not('[data-test-id="loading-indicator"]')
 
             self.browser.click('[aria-label="Open the menu"]')
             self.browser.wait_until("body.scroll-lock")
-            self.browser.snapshot("project settings - mobile menu", mobile_only=True)

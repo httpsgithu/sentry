@@ -1,29 +1,21 @@
-import * as React from 'react';
+import {Component, Fragment} from 'react';
 
-import {fetchOrganizationDetails} from 'app/actionCreators/organizations';
-import SentryTypes from 'app/sentryTypes';
-import {Organization} from 'app/types';
-import withLatestContext from 'app/utils/withLatestContext';
-import AccountSettingsNavigation from 'app/views/settings/account/accountSettingsNavigation';
-import SettingsLayout from 'app/views/settings/components/settingsLayout';
+import {fetchOrganizationDetails} from 'sentry/actionCreators/organizations';
+import type {Client} from 'sentry/api';
+import type {Organization} from 'sentry/types/organization';
+import withApi from 'sentry/utils/withApi';
+import withLatestContext from 'sentry/utils/withLatestContext';
+import AccountSettingsNavigation from 'sentry/views/settings/account/accountSettingsNavigation';
+import SettingsLayout from 'sentry/views/settings/components/settingsLayout';
 
 type Props = React.ComponentProps<typeof SettingsLayout> & {
+  api: Client;
   organization: Organization;
 };
 
-class AccountSettingsLayout extends React.Component<Props> {
-  static childContextTypes = {
-    organization: SentryTypes.Organization,
-  };
-
-  getChildContext() {
-    return {
-      organization: this.props.organization,
-    };
-  }
-
+class AccountSettingsLayout extends Component<Props> {
   componentDidUpdate(prevProps: Props) {
-    const {organization} = this.props;
+    const {api, organization} = this.props;
     if (prevProps.organization === organization) {
       return;
     }
@@ -32,7 +24,7 @@ class AccountSettingsLayout extends React.Component<Props> {
     // (which queries the org index endpoint instead of org details)
     // and does not have `access` info
     if (organization && typeof organization.access === 'undefined') {
-      fetchOrganizationDetails(organization.slug, {
+      fetchOrganizationDetails(api, organization.slug, {
         setActive: true,
         loadProjects: true,
       });
@@ -41,6 +33,17 @@ class AccountSettingsLayout extends React.Component<Props> {
 
   render() {
     const {organization} = this.props;
+
+    const hasNavigationV2 = organization?.features.includes('navigation-sidebar-v2');
+
+    if (hasNavigationV2) {
+      return (
+        <Fragment>
+          <AccountSettingsNavigation organization={organization} />
+          <SettingsLayout {...this.props}>{this.props.children}</SettingsLayout>
+        </Fragment>
+      );
+    }
 
     return (
       <SettingsLayout
@@ -53,4 +56,4 @@ class AccountSettingsLayout extends React.Component<Props> {
   }
 }
 
-export default withLatestContext(AccountSettingsLayout);
+export default withLatestContext(withApi(AccountSettingsLayout));

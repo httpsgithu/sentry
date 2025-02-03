@@ -1,9 +1,10 @@
 import styled from '@emotion/styled';
 
-import TimeSince from 'app/components/timeSince';
-import {IconClock} from 'app/icons';
-import {t} from 'app/locale';
-import getDynamicText from 'app/utils/getDynamicText';
+import TimeSince from 'sentry/components/timeSince';
+import {IconClock} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import getDynamicText from 'sentry/utils/getDynamicText';
 
 /**
  * Used in new inbox
@@ -12,11 +13,11 @@ import getDynamicText from 'app/utils/getDynamicText';
  */
 
 type Props = {
-  lastSeen: string;
   firstSeen: string;
+  lastSeen: string;
 };
 
-const TimesTag = ({lastSeen, firstSeen}: Props) => {
+function TimesTag({lastSeen, firstSeen}: Props) {
   return (
     <Wrapper>
       <StyledIconClock size="xs" color="gray300" />
@@ -24,10 +25,10 @@ const TimesTag = ({lastSeen, firstSeen}: Props) => {
         getDynamicText({
           value: (
             <TimeSince
-              tooltipTitle={t('Last Seen')}
+              tooltipPrefix={t('Last Seen')}
               date={lastSeen}
               suffix={t('ago')}
-              shorten
+              unitStyle="short"
             />
           ),
           fixed: '10s ago',
@@ -39,18 +40,18 @@ const TimesTag = ({lastSeen, firstSeen}: Props) => {
         getDynamicText({
           value: (
             <TimeSince
-              tooltipTitle={t('First Seen')}
+              tooltipPrefix={t('First Seen')}
               date={firstSeen}
               suffix={t('old')}
               className="hidden-xs hidden-sm"
-              shorten
+              unitStyle="short"
             />
           ),
           fixed: '10s old',
         })}
     </Wrapper>
   );
-};
+}
 
 const Wrapper = styled('div')`
   display: flex;
@@ -63,7 +64,7 @@ const Separator = styled('span')`
 `;
 
 const StyledIconClock = styled(IconClock)`
-  margin-right: 2px;
+  margin-right: ${space(0.5)};
 `;
 
 export default TimesTag;

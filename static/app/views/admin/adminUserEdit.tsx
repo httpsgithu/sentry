@@ -1,19 +1,21 @@
 import {Component, Fragment} from 'react';
-import {browserHistory, RouteComponentProps} from 'react-router';
 import styled from '@emotion/styled';
 
-import {addErrorMessage, addSuccessMessage} from 'app/actionCreators/indicator';
-import {ModalRenderProps, openModal} from 'app/actionCreators/modal';
-import Button from 'app/components/button';
-import {t} from 'app/locale';
-import space from 'app/styles/space';
-import {User} from 'app/types';
-import AsyncView from 'app/views/asyncView';
-import RadioGroup from 'app/views/settings/components/forms/controls/radioGroup';
-import Form from 'app/views/settings/components/forms/form';
-import JsonForm from 'app/views/settings/components/forms/jsonForm';
-import FormModel from 'app/views/settings/components/forms/model';
-import {JsonFormObject} from 'app/views/settings/components/forms/type';
+import {addErrorMessage, addSuccessMessage} from 'sentry/actionCreators/indicator';
+import type {ModalRenderProps} from 'sentry/actionCreators/modal';
+import {openModal} from 'sentry/actionCreators/modal';
+import {Button} from 'sentry/components/button';
+import DeprecatedAsyncComponent from 'sentry/components/deprecatedAsyncComponent';
+import RadioGroup from 'sentry/components/forms/controls/radioGroup';
+import Form from 'sentry/components/forms/form';
+import JsonForm from 'sentry/components/forms/jsonForm';
+import FormModel from 'sentry/components/forms/model';
+import type {JsonFormObject} from 'sentry/components/forms/types';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {User} from 'sentry/types/user';
+import {browserHistory} from 'sentry/utils/browserHistory';
 
 const userEditForm: JsonFormObject = {
   title: 'User details',
@@ -74,8 +76,8 @@ const REMOVE_BUTTON_LABEL = {
 type DeleteType = 'disable' | 'delete';
 
 type RemoveModalProps = ModalRenderProps & {
-  user: User;
   onRemove: (type: DeleteType) => void;
+  user: User;
 };
 
 type RemoveModalState = {
@@ -118,19 +120,19 @@ class RemoveUserModal extends Component<RemoveModalProps, RemoveModalState> {
   }
 }
 
-type Props = AsyncView['props'] & RouteComponentProps<{id: string}, {}>;
+type Props = DeprecatedAsyncComponent['props'] & RouteComponentProps<{id: string}, {}>;
 
-type State = AsyncView['state'] & {
+type State = DeprecatedAsyncComponent['state'] & {
   user: User | null;
 };
 
-class AdminUserEdit extends AsyncView<Props, State> {
+class AdminUserEdit extends DeprecatedAsyncComponent<Props, State> {
   get userEndpoint() {
     const {params} = this.props;
     return `/users/${params.id}/`;
   }
 
-  getEndpoints(): ReturnType<AsyncView['getEndpoints']> {
+  getEndpoints(): ReturnType<DeprecatedAsyncComponent['getEndpoints']> {
     return [['user', this.userEndpoint]];
   }
 
@@ -182,14 +184,15 @@ class AdminUserEdit extends AsyncView<Props, State> {
           apiMethod="PUT"
           apiEndpoint={this.userEndpoint}
           requireChanges
-          onSubmitError={addErrorMessage}
+          onSubmitError={err => {
+            addErrorMessage(err?.responseJSON?.detail);
+          }}
           onSubmitSuccess={data => {
             this.setState({user: data});
-            addSuccessMessage('User account updated.');
+            addSuccessMessage(t('User account updated.'));
           }}
           extraButton={
             <Button
-              type="button"
               onClick={openDeleteModal}
               style={{marginLeft: space(1)}}
               priority="danger"
@@ -208,7 +211,7 @@ class AdminUserEdit extends AsyncView<Props, State> {
 const ModalFooter = styled('div')`
   display: grid;
   grid-auto-flow: column;
-  grid-gap: ${space(1)};
+  gap: ${space(1)};
   justify-content: end;
   padding: 20px 30px;
   margin: 20px -30px -30px;

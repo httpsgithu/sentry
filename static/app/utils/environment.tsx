@@ -1,4 +1,4 @@
-import {Environment} from 'app/types';
+import type {Environment} from 'sentry/types/project';
 
 const DEFAULT_EMPTY_ROUTING_NAME = 'none';
 const DEFAULT_EMPTY_ENV_NAME = '(No Environment)';

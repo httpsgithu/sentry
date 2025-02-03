@@ -1,19 +1,18 @@
 import {Fragment} from 'react';
 import styled from '@emotion/styled';
 
-import ExternalLink from 'app/components/links/externalLink';
-import List from 'app/components/list';
-import ListItem from 'app/components/list/listItem';
-import {t, tct} from 'app/locale';
-import space from 'app/styles/space';
-import {UpdateSdkSuggestion} from 'app/types';
-import {Event} from 'app/types/event';
+import ExternalLink from 'sentry/components/links/externalLink';
+import List from 'sentry/components/list';
+import ListItem from 'sentry/components/list/listItem';
+import {t, tct} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {Event, UpdateSdkSuggestion} from 'sentry/types/event';
 
 type Props = {
   sdk: Event['sdk'];
   suggestion: NonNullable<Event['sdkUpdates']>[0];
-  shortStyle?: boolean;
   capitalized?: boolean;
+  shortStyle?: boolean;
 };
 
 function getSdkUpdateSuggestion({
@@ -80,10 +79,10 @@ function getSdkUpdateSuggestion({
         return {
           href: suggestion?.integrationUrl,
           content: capitalized
-            ? tct('Enable to [recommended-integration-name]', {
+            ? tct('Enable the [recommended-integration-name]', {
                 'recommended-integration-name': suggestion.integrationName,
               })
-            : tct('enable to the integration [recommended-integration-name]', {
+            : tct('enable the [recommended-integration-name] integration', {
                 'recommended-integration-name': suggestion.integrationName,
               }),
         };
@@ -115,16 +114,13 @@ function getSdkUpdateSuggestion({
   }
 
   const alertContent = suggestion.enables
-    .map((subSuggestion, index) => {
+    .map(subSuggestion => {
       const subSuggestionContent = getSdkUpdateSuggestion({
         suggestion: subSuggestion,
         sdk,
         capitalized,
       });
-      if (!subSuggestionContent) {
-        return null;
-      }
-      return <ListItem key={index}>{subSuggestionContent}</ListItem>;
+      return subSuggestionContent || null;
     })
     .filter(content => !!content);
 
@@ -135,7 +131,11 @@ function getSdkUpdateSuggestion({
   return (
     <span>
       {tct('[title] so you can:', {title})}
-      <StyledList symbol="bullet">{alertContent}</StyledList>
+      <StyledList symbol="bullet">
+        {alertContent.map((content, index) => (
+          <ListItem key={index}>{content}</ListItem>
+        ))}
+      </StyledList>
     </span>
   );
 }

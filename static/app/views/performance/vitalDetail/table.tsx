@@ -1,38 +1,42 @@
-import * as React from 'react';
-import {browserHistory} from 'react-router';
+import {Component, Fragment} from 'react';
 import styled from '@emotion/styled';
-import {Location, LocationDescriptorObject} from 'history';
+import type {Location, LocationDescriptorObject} from 'history';
 
-import GridEditable, {COL_WIDTH_UNDEFINED, GridColumn} from 'app/components/gridEditable';
-import SortLink from 'app/components/gridEditable/sortLink';
-import Link from 'app/components/links/link';
-import Pagination from 'app/components/pagination';
-import Tag from 'app/components/tag';
-import {IconStar} from 'app/icons';
-import {t} from 'app/locale';
-import {Organization, Project} from 'app/types';
-import {trackAnalyticsEvent} from 'app/utils/analytics';
-import EventView, {EventData, isFieldSortable} from 'app/utils/discover/eventView';
-import {getFieldRenderer} from 'app/utils/discover/fieldRenderers';
-import {
-  fieldAlignment,
-  getAggregateAlias,
-  Sort,
-  WebVital,
-} from 'app/utils/discover/fields';
-import VitalsDetailsTableQuery, {
+import Tag from 'sentry/components/badge/tag';
+import type {GridColumn} from 'sentry/components/gridEditable';
+import GridEditable, {COL_WIDTH_UNDEFINED} from 'sentry/components/gridEditable';
+import SortLink from 'sentry/components/gridEditable/sortLink';
+import Link from 'sentry/components/links/link';
+import Pagination from 'sentry/components/pagination';
+import {IconStar} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import {browserHistory} from 'sentry/utils/browserHistory';
+import type {EventsMetaType} from 'sentry/utils/discover/eventView';
+import type EventView from 'sentry/utils/discover/eventView';
+import {isFieldSortable} from 'sentry/utils/discover/eventView';
+import {getFieldRenderer} from 'sentry/utils/discover/fieldRenderers';
+import type {Sort} from 'sentry/utils/discover/fields';
+import {fieldAlignment, getAggregateAlias} from 'sentry/utils/discover/fields';
+import type {WebVital} from 'sentry/utils/fields';
+import type {
   TableData,
   TableDataRow,
-} from 'app/utils/performance/vitals/vitalsDetailsTableQuery';
-import {MutableSearch} from 'app/utils/tokenizeSearch';
-import CellAction, {Actions, updateQuery} from 'app/views/eventsV2/table/cellAction';
-import {TableColumn} from 'app/views/eventsV2/table/types';
-
-import {DisplayModes} from '../transactionSummary/transactionOverview/charts';
+} from 'sentry/utils/performance/vitals/vitalsDetailsTableQuery';
+import VitalsDetailsTableQuery from 'sentry/utils/performance/vitals/vitalsDetailsTableQuery';
+import {MutableSearch} from 'sentry/utils/tokenizeSearch';
+import CellAction, {Actions, updateQuery} from 'sentry/views/discover/table/cellAction';
+import type {TableColumn} from 'sentry/views/discover/table/types';
 import {
+  DisplayModes,
+  normalizeSearchConditionsWithTransactionName,
   TransactionFilterOptions,
   transactionSummaryRouteWithQuery,
-} from '../transactionSummary/utils';
+} from 'sentry/views/performance/transactionSummary/utils';
+
+import {getProjectID, getSelectedProjectPlatforms} from '../utils';
 
 import {
   getVitalDetailTableMehStatusFunction,
@@ -57,40 +61,21 @@ const getTableColumnTitle = (index: number, vitalName: WebVital) => {
   return titles[index];
 };
 
-export function getProjectID(
-  eventData: EventData,
-  projects: Project[]
-): string | undefined {
-  const projectSlug = (eventData?.project as string) || undefined;
-
-  if (typeof projectSlug === undefined) {
-    return undefined;
-  }
-
-  const project = projects.find(currentProject => currentProject.slug === projectSlug);
-
-  if (!project) {
-    return undefined;
-  }
-
-  return project.id;
-}
-
 type Props = {
   eventView: EventView;
-  organization: Organization;
   location: Location;
-  setError: (msg: string | undefined) => void;
-  summaryConditions: string;
-
+  organization: Organization;
   projects: Project[];
+  setError: (msg: string | undefined) => void;
+
+  summaryConditions: string;
 };
 
 type State = {
   widths: number[];
 };
 
-class Table extends React.Component<Props, State> {
+class Table extends Component<Props, State> {
   state: State = {
     widths: [],
   };
@@ -99,17 +84,14 @@ class Table extends React.Component<Props, State> {
     return (action: Actions, value: React.ReactText) => {
       const {eventView, location, organization} = this.props;
 
-      trackAnalyticsEvent({
-        eventKey: 'performance_views.overview.cellaction',
-        eventName: 'Performance Views: Cell Action Clicked',
-        organization_id: parseInt(organization.id, 10),
+      trackAnalytics('performance_views.overview.cellaction', {
+        organization,
         action,
       });
 
-      const searchConditions = new MutableSearch(eventView.query);
-
-      // remove any event.type queries since it is implied to apply to only transactions
-      searchConditions.removeFilter('event.type');
+      const searchConditions = normalizeSearchConditionsWithTransactionName(
+        eventView.query
+      );
 
       updateQuery(searchConditions, action, column, value);
 
@@ -132,38 +114,36 @@ class Table extends React.Component<Props, State> {
   ): React.ReactNode {
     const {eventView, organization, projects, location, summaryConditions} = this.props;
 
-    if (!tableData || !tableData.meta) {
+    if (!tableData || !tableData.meta?.fields) {
       return dataRow[column.key];
     }
-    const tableMeta = tableData.meta;
+    const tableMeta = tableData.meta?.fields;
 
     const field = String(column.key);
 
     if (field === getVitalDetailTablePoorStatusFunction(vitalName)) {
-      if (dataRow[getAggregateAlias(field)]) {
+      if (dataRow[field]) {
         return (
           <UniqueTagCell>
             <PoorTag>{t('Poor')}</PoorTag>
           </UniqueTagCell>
         );
-      } else if (
-        dataRow[getAggregateAlias(getVitalDetailTableMehStatusFunction(vitalName))]
-      ) {
+      }
+      if (dataRow[getVitalDetailTableMehStatusFunction(vitalName)]) {
         return (
           <UniqueTagCell>
             <MehTag>{t('Meh')}</MehTag>
           </UniqueTagCell>
         );
-      } else {
-        return (
-          <UniqueTagCell>
-            <GoodTag>{t('Good')}</GoodTag>
-          </UniqueTagCell>
-        );
       }
+      return (
+        <UniqueTagCell>
+          <GoodTag>{t('Good')}</GoodTag>
+        </UniqueTagCell>
+      );
     }
 
-    const fieldRenderer = getFieldRenderer(field, tableMeta);
+    const fieldRenderer = getFieldRenderer(field, tableMeta, false);
     const rendered = fieldRenderer(dataRow, {organization, location});
 
     const allowActions = [
@@ -180,9 +160,11 @@ class Table extends React.Component<Props, State> {
       conditions.addFilterValues('has', [`${vitalName}`]);
       summaryView.query = conditions.formatString();
 
+      const transaction = String(dataRow.transaction) || '';
+
       const target = transactionSummaryRouteWithQuery({
-        orgSlug: organization.slug,
-        transaction: String(dataRow.transaction) || '',
+        organization,
+        transaction,
         query: summaryView.generateQueryStringObject(),
         projectID,
         showTransactions: TransactionFilterOptions.RECENT,
@@ -196,7 +178,11 @@ class Table extends React.Component<Props, State> {
           handleCellAction={this.handleCellAction(column)}
           allowActions={allowActions}
         >
-          <Link to={target} onClick={this.handleSummaryClick}>
+          <Link
+            to={target}
+            aria-label={t('See transaction summary of the transaction %s', transaction)}
+            onClick={this.handleSummaryClick}
+          >
             {rendered}
           </Link>
         </CellAction>
@@ -227,20 +213,32 @@ class Table extends React.Component<Props, State> {
   };
 
   renderHeadCell(
-    tableMeta: TableData['meta'],
     column: TableColumn<keyof TableDataRow>,
-    title: React.ReactNode
+    title: React.ReactNode,
+    tableMeta?: EventsMetaType['fields']
   ): React.ReactNode {
     const {eventView, location} = this.props;
-    const align = fieldAlignment(column.name, column.type, tableMeta);
+    // TODO: Need to map table meta keys to aggregate alias since eventView sorting still expects
+    // aggregate aliases for now. We'll need to refactor event view to get rid of all aggregate
+    // alias references and then we can remove this.
+    const aggregateAliasTableMeta: EventsMetaType['fields'] | undefined = tableMeta
+      ? {}
+      : undefined;
+    if (tableMeta) {
+      Object.keys(tableMeta).forEach(key => {
+        aggregateAliasTableMeta![getAggregateAlias(key)] = tableMeta[key]!;
+      });
+    }
+
+    const align = fieldAlignment(column.name, column.type, aggregateAliasTableMeta);
     const field = {field: column.name, width: column.width};
 
     function generateSortLink(): LocationDescriptorObject | undefined {
-      if (!tableMeta) {
+      if (!aggregateAliasTableMeta) {
         return undefined;
       }
 
-      const nextEventView = eventView.sortOnField(field, tableMeta);
+      const nextEventView = eventView.sortOnField(field, aggregateAliasTableMeta);
       const queryStringObject = nextEventView.generateQueryStringObject();
 
       return {
@@ -248,8 +246,8 @@ class Table extends React.Component<Props, State> {
         query: {...location.query, sort: queryStringObject.sort},
       };
     }
-    const currentSort = eventView.sortForField(field, tableMeta);
-    const canSort = isFieldSortable(field, tableMeta);
+    const currentSort = eventView.sortForField(field, aggregateAliasTableMeta);
+    const canSort = isFieldSortable(field, aggregateAliasTableMeta);
 
     return (
       <SortLink
@@ -262,9 +260,12 @@ class Table extends React.Component<Props, State> {
     );
   }
 
-  renderHeadCellWithMeta = (tableMeta: TableData['meta'], vitalName: WebVital) => {
+  renderHeadCellWithMeta = (
+    vitalName: WebVital,
+    tableMeta?: EventsMetaType['fields']
+  ) => {
     return (column: TableColumn<keyof TableDataRow>, index: number): React.ReactNode =>
-      this.renderHeadCell(tableMeta, column, getTableColumnTitle(index, vitalName));
+      this.renderHeadCell(column, getTableColumnTitle(index, vitalName), tableMeta);
   };
 
   renderPrependCellWithData = (tableData: TableData | null, vitalName: WebVital) => {
@@ -283,23 +284,24 @@ class Table extends React.Component<Props, State> {
               data-test-id="key-transaction-header"
             />
           );
-          return [this.renderHeadCell(tableData?.meta, teamKeyTransactionColumn, star)];
-        } else {
           return [
-            this.renderBodyCell(tableData, teamKeyTransactionColumn, dataRow, vitalName),
+            this.renderHeadCell(teamKeyTransactionColumn, star, tableData?.meta?.fields),
           ];
         }
+        return [
+          this.renderBodyCell(tableData, teamKeyTransactionColumn, dataRow, vitalName),
+        ];
       }
       return [];
     };
   };
 
   handleSummaryClick = () => {
-    const {organization} = this.props;
-    trackAnalyticsEvent({
-      eventKey: 'performance_views.overview.navigate.summary',
-      eventName: 'Performance Views: Overview view summary',
-      organization_id: parseInt(organization.id, 10),
+    const {organization, projects, location} = this.props;
+
+    trackAnalytics('performance_views.overview.navigate.summary', {
+      organization,
+      project_platforms: getSelectedProjectPlatforms(location, projects),
     });
   };
 
@@ -378,7 +380,7 @@ class Table extends React.Component<Props, State> {
           referrer="api.performance.vital-detail"
         >
           {({pageLinks, isLoading, tableData}) => (
-            <React.Fragment>
+            <Fragment>
               <GridEditable
                 isLoading={isLoading}
                 data={tableData ? tableData.data : []}
@@ -387,8 +389,8 @@ class Table extends React.Component<Props, State> {
                 grid={{
                   onResizeColumn: this.handleResizeColumn,
                   renderHeadCell: this.renderHeadCellWithMeta(
-                    tableData?.meta,
-                    vitalName
+                    vitalName,
+                    tableData?.meta?.fields
                   ) as any,
                   renderBodyCell: this.renderBodyCellWithData(
                     tableData,
@@ -400,10 +402,9 @@ class Table extends React.Component<Props, State> {
                   ) as any,
                   prependColumnWidths: ['max-content'],
                 }}
-                location={location}
               />
               <Pagination pageLinks={pageLinks} />
-            </React.Fragment>
+            </Fragment>
           )}
         </VitalsDetailsTableQuery>
       </div>
@@ -413,6 +414,8 @@ class Table extends React.Component<Props, State> {
 
 const UniqueTagCell = styled('div')`
   text-align: right;
+  justify-self: flex-end;
+  flex-grow: 1;
 `;
 
 const GoodTag = styled(Tag)`

@@ -1,21 +1,16 @@
 import styled from '@emotion/styled';
 
-import overflowEllipsis from 'app/styles/overflowEllipsis';
-import space from 'app/styles/space';
+import {space} from 'sentry/styles/space';
 
-const Grid = styled('div')`
+export const ThreadSelectorGrid = styled('div')<{hasThreadStates: boolean}>`
   font-size: ${p => p.theme.fontSizeSmall};
   display: grid;
-  grid-gap: ${space(1)};
+  gap: ${space(0.5)};
   align-items: center;
-  grid-template-columns: 30px 2.5fr 4fr 0fr 40px;
-  @media (min-width: ${p => p.theme.breakpoints[0]}) {
-    grid-template-columns: 40px 2.5fr 3.5fr 105px 40px;
-  }
+  grid-template-columns: 16px 0.5fr repeat(${p => (p.hasThreadStates ? '2' : '1')}, 1fr) 1fr;
+  min-height: 18px;
 `;
 
-const GridCell = styled('div')`
-  ${overflowEllipsis};
+export const ThreadSelectorGridCell = styled('div')`
+  ${p => p.theme.overflowEllipsis};
 `;
-
-export {Grid, GridCell};

@@ -1,29 +1,27 @@
-import {ReactNode} from 'react';
 import {css} from '@emotion/react';
 import styled from '@emotion/styled';
 
-import Button from 'app/components/button';
-import NotAvailable from 'app/components/notAvailable';
-import Placeholder from 'app/components/placeholder';
-import Radio from 'app/components/radio';
-import {IconChevron} from 'app/icons';
-import {t} from 'app/locale';
-import overflowEllipsis from 'app/styles/overflowEllipsis';
-import space from 'app/styles/space';
-import {ReleaseComparisonChartType} from 'app/types';
-import {defined} from 'app/utils';
+import {Button} from 'sentry/components/button';
+import NotAvailable from 'sentry/components/notAvailable';
+import Placeholder from 'sentry/components/placeholder';
+import Radio from 'sentry/components/radio';
+import {IconChevron} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {ReleaseComparisonChartType} from 'sentry/types/release';
+import {defined} from 'sentry/utils';
 
 import {releaseComparisonChartLabels} from '../../utils';
 
-import {ReleaseComparisonRow} from '.';
+import type {ReleaseComparisonRow} from '.';
 
 type Props = Omit<ReleaseComparisonRow, 'diffDirection' | 'diffColor'> & {
-  showPlaceholders: boolean;
   activeChart: ReleaseComparisonChartType;
-  onChartChange: (type: ReleaseComparisonChartType) => void;
-  chartDiff: ReactNode;
-  onExpanderToggle: (type: ReleaseComparisonChartType) => void;
+  chartDiff: React.ReactNode;
   expanded: boolean;
+  onChartChange: (type: ReleaseComparisonChartType) => void;
+  onExpanderToggle: (type: ReleaseComparisonChartType) => void;
+  showPlaceholders: boolean;
   withExpanders: boolean;
 };
 
@@ -96,7 +94,7 @@ function ReleaseComparisonChartRow({
               borderless
               size="zero"
               icon={<IconChevron direction={expanded ? 'up' : 'down'} />}
-              label={t('Toggle chart group')}
+              aria-label={t('Toggle chart group')}
             />
           )}
         </ExpanderCell>
@@ -108,7 +106,8 @@ function ReleaseComparisonChartRow({
 const Cell = styled('div')`
   text-align: right;
   color: ${p => p.theme.subText};
-  ${overflowEllipsis}
+  ${p => p.theme.overflowEllipsis}
+  font-size: ${p => p.theme.fontSizeMedium};
 `;
 
 const NumericCell = styled(Cell)`
@@ -153,13 +152,13 @@ const TitleWrapper = styled('div')`
 `;
 
 const ChartTableRow = styled('label')<{
-  isActive: boolean;
-  role: ReleaseComparisonRow['role'];
   expanded: boolean;
+  isActive: boolean;
   isLoading: boolean;
+  role: ReleaseComparisonRow['role'];
 }>`
   display: contents;
-  font-weight: 400;
+  font-weight: ${p => p.theme.fontWeightNormal};
   margin-bottom: 0;
 
   > * {
@@ -177,9 +176,7 @@ const ChartTableRow = styled('label')<{
 
   &:hover {
     cursor: pointer;
-    ${/* sc-selector */ Cell}, ${/* sc-selector */ NumericCell}, ${
-      /* sc-selector */ DescriptionCell
-    },${/* sc-selector */ ExpanderCell}, ${/* sc-selector */ TitleWrapper} {
+    ${Cell}, ${NumericCell}, ${DescriptionCell}, ${ExpanderCell}, ${TitleWrapper} {
       ${p => !p.isLoading && `background-color: ${p.theme.bodyBackground}`}
     }
   }

@@ -1,19 +1,14 @@
-import * as React from 'react';
-import {withRouter, WithRouterProps} from 'react-router';
+import {Fragment} from 'react';
 
-import {ModalRenderProps} from 'app/actionCreators/modal';
-import {Client} from 'app/api';
-import Link from 'app/components/links/link';
-import {t, tct} from 'app/locale';
-import withApi from 'app/utils/withApi';
-import {EmailAddresses} from 'app/views/settings/account/accountEmails';
-import TextBlock from 'app/views/settings/components/text/textBlock';
+import type {ModalRenderProps} from 'sentry/actionCreators/modal';
+import Link from 'sentry/components/links/link';
+import {t, tct} from 'sentry/locale';
+import {EmailAddresses} from 'sentry/views/settings/account/accountEmails';
+import TextBlock from 'sentry/views/settings/components/text/textBlock';
 
-type Props = WithRouterProps &
-  Pick<ModalRenderProps, 'Body' | 'Header'> & {
-    api: Client;
-    actionMessage?: string;
-  };
+type Props = Pick<ModalRenderProps, 'Body' | 'Header'> & {
+  actionMessage?: string;
+};
 
 function EmailVerificationModal({
   Header,
@@ -21,7 +16,7 @@ function EmailVerificationModal({
   actionMessage = 'taking this action',
 }: Props) {
   return (
-    <React.Fragment>
+    <Fragment>
       <Header closeButton>{t('Action Required')}</Header>
       <Body>
         <TextBlock>
@@ -36,9 +31,9 @@ function EmailVerificationModal({
         </TextBlock>
         <EmailAddresses />
       </Body>
-    </React.Fragment>
+    </Fragment>
   );
 }
 
-export default withRouter(withApi(EmailVerificationModal));
+export default EmailVerificationModal;
 export {EmailVerificationModal};

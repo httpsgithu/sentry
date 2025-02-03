@@ -1,17 +1,16 @@
-import {Location} from 'history';
+import type {Location} from 'history';
 
-import {t} from 'app/locale';
-import {Organization, Project} from 'app/types';
-import EventView from 'app/utils/discover/eventView';
-import {decodeScalar} from 'app/utils/queryString';
-import {MutableSearch} from 'app/utils/tokenizeSearch';
-import withOrganization from 'app/utils/withOrganization';
-import withProjects from 'app/utils/withProjects';
+import {t} from 'sentry/locale';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import withOrganization from 'sentry/utils/withOrganization';
+import withProjects from 'sentry/utils/withProjects';
 
 import PageLayout from '../pageLayout';
 import Tab from '../tabs';
 
 import SpansContent from './content';
+import {generateSpansEventView} from './utils';
 
 type Props = {
   location: Location;
@@ -27,32 +26,11 @@ function TransactionSpans(props: Props) {
       location={location}
       organization={organization}
       projects={projects}
-      tab={Tab.Spans}
+      tab={Tab.SPANS}
       getDocumentTitle={getDocumentTitle}
-      generateEventView={generateEventView}
+      generateEventView={generateSpansEventView}
       childComponent={SpansContent}
     />
-  );
-}
-
-function generateEventView(location: Location, transactionName: string): EventView {
-  const query = decodeScalar(location.query.query, '');
-  const conditions = new MutableSearch(query);
-  // TODO: what should this event type be?
-  conditions
-    .setFilterValues('event.type', ['transaction'])
-    .setFilterValues('transaction', [transactionName]);
-
-  return EventView.fromNewQueryWithLocation(
-    {
-      id: undefined,
-      version: 2,
-      name: transactionName,
-      fields: ['count()'],
-      query: conditions.formatString(),
-      projects: [],
-    },
-    location
   );
 }
 

@@ -1,22 +1,22 @@
 import {Component, Fragment} from 'react';
-import {InjectedRouter} from 'react-router';
-import {Location} from 'history';
+import type {Location} from 'history';
 
-import {Client} from 'app/api';
-import EventsRequest from 'app/components/charts/eventsRequest';
-import LoadingPanel from 'app/components/charts/loadingPanel';
-import {HeaderTitle} from 'app/components/charts/styles';
-import {getInterval} from 'app/components/charts/utils';
-import {getParams} from 'app/components/organizations/globalSelectionHeader/getParams';
-import {Panel} from 'app/components/panels';
-import Placeholder from 'app/components/placeholder';
-import QuestionTooltip from 'app/components/questionTooltip';
-import {IconWarning} from 'app/icons';
-import {Organization} from 'app/types';
-import {getUtcToLocalDateObject} from 'app/utils/dates';
-import EventView from 'app/utils/discover/eventView';
-import getDynamicText from 'app/utils/getDynamicText';
-import withApi from 'app/utils/withApi';
+import type {Client} from 'sentry/api';
+import EventsRequest from 'sentry/components/charts/eventsRequest';
+import LoadingPanel from 'sentry/components/charts/loadingPanel';
+import {HeaderTitle} from 'sentry/components/charts/styles';
+import {getInterval} from 'sentry/components/charts/utils';
+import {normalizeDateTimeParams} from 'sentry/components/organizations/pageFilters/parse';
+import Panel from 'sentry/components/panels/panel';
+import Placeholder from 'sentry/components/placeholder';
+import QuestionTooltip from 'sentry/components/questionTooltip';
+import {IconWarning} from 'sentry/icons';
+import type {InjectedRouter} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import {getUtcToLocalDateObject} from 'sentry/utils/dates';
+import type EventView from 'sentry/utils/discover/eventView';
+import getDynamicText from 'sentry/utils/getDynamicText';
+import withApi from 'sentry/utils/withApi';
 
 import {getAxisOptions} from '../data';
 import {DoubleHeaderContainer, ErrorPanel} from '../styles';
@@ -27,8 +27,8 @@ import Footer from './footer';
 type Props = {
   api: Client;
   eventView: EventView;
-  organization: Organization;
   location: Location;
+  organization: Organization;
   router: InjectedRouter;
 };
 
@@ -43,10 +43,10 @@ class Container extends Component<Props> {
   }
 
   render() {
-    const {api, organization, location, eventView, router} = this.props;
+    const {api, organization, location, eventView} = this.props;
 
     // construct request parameters for fetching chart data
-    const globalSelection = eventView.getGlobalSelection();
+    const globalSelection = eventView.getPageFilters();
     const start = globalSelection.datetime.start
       ? getUtcToLocalDateObject(globalSelection.datetime.start)
       : null;
@@ -54,7 +54,7 @@ class Container extends Component<Props> {
       ? getUtcToLocalDateObject(globalSelection.datetime.end)
       : null;
 
-    const {utc} = getParams(location.query);
+    const {utc} = normalizeDateTimeParams(location.query);
     const axisOptions = this.getChartParameters();
 
     const apiPayload = eventView.getEventsAPIPayload(location);
@@ -81,7 +81,7 @@ class Container extends Component<Props> {
           showLoading={false}
           query={apiPayload.query}
           includePrevious={false}
-          yAxis={axisOptions.map(opt => opt.value)}
+          yAxis={axisOptions.map(opt => opt!.value)}
           partial
         >
           {({loading, reloading, errored, results}) => {
@@ -97,13 +97,13 @@ class Container extends Component<Props> {
               <Fragment>
                 <DoubleHeaderContainer>
                   {axisOptions.map((option, i) => (
-                    <div key={`${option.label}:${i}`}>
+                    <div key={`${option!.label}:${i}`}>
                       <HeaderTitle>
-                        {option.label}
+                        {option!.label}
                         <QuestionTooltip
                           position="top"
                           size="sm"
-                          title={option.tooltip}
+                          title={option!.tooltip}
                         />
                       </HeaderTitle>
                     </div>
@@ -115,7 +115,6 @@ class Container extends Component<Props> {
                       <Chart
                         data={results}
                         loading={loading || reloading}
-                        router={router}
                         statsPeriod={globalSelection.datetime.period}
                         start={start}
                         end={end}
@@ -133,8 +132,8 @@ class Container extends Component<Props> {
         </EventsRequest>
         <Footer
           api={api}
-          leftAxis={axisOptions[0].value}
-          rightAxis={axisOptions[1].value}
+          leftAxis={axisOptions[0]!.value}
+          rightAxis={axisOptions[1]!.value}
           organization={organization}
           eventView={eventView}
           location={location}

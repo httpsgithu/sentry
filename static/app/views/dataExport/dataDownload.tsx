@@ -1,83 +1,99 @@
-import * as React from 'react';
-import {browserHistory, RouteComponentProps} from 'react-router';
+import {Fragment} from 'react';
 import styled from '@emotion/styled';
 
-import Button from 'app/components/button';
-import {ExportQueryType} from 'app/components/dataExport';
-import DateTime from 'app/components/dateTime';
-import {IconDownload} from 'app/icons';
-import {t, tct} from 'app/locale';
-import space from 'app/styles/space';
-import AsyncView from 'app/views/asyncView';
-import Layout from 'app/views/auth/layout';
+import {Button, LinkButton} from 'sentry/components/button';
+import {ExportQueryType} from 'sentry/components/dataExport';
+import {DateTime} from 'sentry/components/dateTime';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
+import {IconDownload} from 'sentry/icons';
+import {t, tct} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import {useApiQuery} from 'sentry/utils/queryClient';
+import normalizeUrl from 'sentry/utils/url/normalizeUrl';
+import {useNavigate} from 'sentry/utils/useNavigate';
+import Layout from 'sentry/views/auth/layout';
 
 export enum DownloadStatus {
-  Early = 'EARLY',
-  Valid = 'VALID',
-  Expired = 'EXPIRED',
+  EARLY = 'EARLY',
+  VALID = 'VALID',
+  EXPIRED = 'EXPIRED',
 }
 
 type RouteParams = {
-  orgId: string;
   dataExportId: string;
+  orgId: string;
 };
 
 type Download = {
-  id: number;
-  user: {
-    id: number;
-    email: string;
-    username: string;
-  };
+  checksum: string;
   dateCreated: string;
-  dateFinished?: string;
-  dateExpired?: string;
+  id: number;
   query: {
-    type: ExportQueryType;
     info: object;
+    type: ExportQueryType;
   };
   status: DownloadStatus;
-  checksum: string;
+  user: {
+    email: string;
+    id: number;
+    username: string;
+  };
+  dateExpired?: string;
+  dateFinished?: string;
 };
 
 type Props = {} & RouteComponentProps<RouteParams, {}>;
 
-type State = {
-  download: Download;
-  errors: {
-    download: {
-      status: number;
-      statusText: string;
-      responseJSON: {
-        detail: string;
-      };
-    };
-  };
-} & AsyncView['state'];
+function DataDownload({params: {orgId, dataExportId}}: Props) {
+  const {
+    data: download,
+    isPending,
+    isError,
+    error,
+  } = useApiQuery<Download>([`/organizations/${orgId}/data-export/${dataExportId}/`], {
+    staleTime: 0,
+  });
 
-class DataDownload extends AsyncView<Props, State> {
-  getTitle(): string {
-    return t('Download Center');
+  const navigate = useNavigate();
+
+  if (isError) {
+    const errDetail = error?.responseJSON?.detail;
+    return (
+      <Layout>
+        <main>
+          <Header>
+            <h3>
+              {error.status} - {error.statusText}
+            </h3>
+          </Header>
+          {errDetail && (
+            <Body>
+              <p>{errDetail as string}</p>
+            </Body>
+          )}
+        </main>
+      </Layout>
+    );
   }
 
-  getEndpoints(): ReturnType<AsyncView['getEndpoints']> {
-    const {orgId, dataExportId} = this.props.params;
-    return [['download', `/organizations/${orgId}/data-export/${dataExportId}/`]];
+  if (isPending) {
+    return <LoadingIndicator />;
   }
 
-  getActionLink(queryType): string {
-    const {orgId} = this.props.params;
+  const getActionLink = (queryType: any): string => {
     switch (queryType) {
-      case ExportQueryType.IssuesByTag:
+      case ExportQueryType.ISSUES_BY_TAG:
         return `/organizations/${orgId}/issues/`;
-      case ExportQueryType.Discover:
+      case ExportQueryType.DISCOVER:
         return `/organizations/${orgId}/discover/queries/`;
       default:
         return '/';
     }
-  }
+  };
 
-  renderDate(date: string | undefined): React.ReactNode {
+  const renderDate = (date: string | undefined): React.ReactNode => {
     if (!date) {
       return null;
     }
@@ -87,11 +103,11 @@ class DataDownload extends AsyncView<Props, State> {
         <DateTime date={d} />
       </strong>
     );
-  }
+  };
 
-  renderEarly(): React.ReactNode {
+  const renderEarly = (): React.ReactNode => {
     return (
-      <React.Fragment>
+      <Fragment>
         <Header>
           <h3>
             {t('What are')}
@@ -107,15 +123,15 @@ class DataDownload extends AsyncView<Props, State> {
           </p>
           <p>{t("Close this window and we'll email you when your download is ready.")}</p>
         </Body>
-      </React.Fragment>
+      </Fragment>
     );
-  }
+  };
 
-  renderExpired(): React.ReactNode {
-    const {query} = this.state.download;
-    const actionLink = this.getActionLink(query.type);
+  const renderExpired = (): React.ReactNode => {
+    const {query} = download;
+    const actionLink = getActionLink(query.type);
     return (
-      <React.Fragment>
+      <Fragment>
         <Header>
           <h3>{t('This is awkward.')}</h3>
         </Header>
@@ -134,77 +150,69 @@ class DataDownload extends AsyncView<Props, State> {
             {t('Start a New Download')}
           </DownloadButton>
         </Body>
-      </React.Fragment>
+      </Fragment>
     );
-  }
+  };
 
-  openInDiscover() {
+  const openInDiscover = () => {
     const {
-      download: {
-        query: {info},
-      },
-    } = this.state;
-    const {orgId} = this.props.params;
+      query: {info},
+    } = download;
 
     const to = {
       pathname: `/organizations/${orgId}/discover/results/`,
       query: info,
     };
 
-    browserHistory.push(to);
-  }
+    navigate(normalizeUrl(to));
+  };
 
-  renderOpenInDiscover() {
+  const renderOpenInDiscover = () => {
     const {
-      download: {
-        query = {
-          type: ExportQueryType.IssuesByTag,
-          info: {},
-        },
+      query = {
+        type: ExportQueryType.ISSUES_BY_TAG,
+        info: {},
       },
-    } = this.state;
+    } = download;
 
     // default to IssuesByTag because we don't want to
     // display this unless we're sure its a discover query
-    const {type = ExportQueryType.IssuesByTag} = query;
+    const {type = ExportQueryType.ISSUES_BY_TAG} = query;
 
     return type === 'Discover' ? (
-      <React.Fragment>
+      <Fragment>
         <p>{t('Need to make changes?')}</p>
-        <Button priority="primary" onClick={() => this.openInDiscover()}>
+        <Button priority="primary" onClick={() => openInDiscover()}>
           {t('Open in Discover')}
         </Button>
         <br />
-      </React.Fragment>
+      </Fragment>
     ) : null;
-  }
+  };
 
-  renderValid(): React.ReactNode {
-    const {
-      download: {dateExpired, checksum},
-    } = this.state;
-    const {orgId, dataExportId} = this.props.params;
+  const renderValid = (): React.ReactNode => {
+    const {dateExpired, checksum} = download;
 
     return (
-      <React.Fragment>
+      <Fragment>
         <Header>
           <h3>{t('All done.')}</h3>
         </Header>
         <Body>
           <p>{t("See, that wasn't so bad. Your data is all ready for download.")}</p>
-          <Button
+          <LinkButton
             priority="primary"
             icon={<IconDownload />}
             href={`/api/0/organizations/${orgId}/data-export/${dataExportId}/?download=true`}
           >
             {t('Download CSV')}
-          </Button>
+          </LinkButton>
           <p>
             {t("That link won't last forever — it expires:")}
             <br />
-            {this.renderDate(dateExpired)}
+            {renderDate(dateExpired)}
           </p>
-          {this.renderOpenInDiscover()}
+          {renderOpenInDiscover()}
           <p>
             <small>
               <strong>SHA1:{checksum}</strong>
@@ -223,52 +231,28 @@ class DataDownload extends AsyncView<Props, State> {
             })}
           </p>
         </Body>
-      </React.Fragment>
+      </Fragment>
     );
-  }
+  };
 
-  renderError(): React.ReactNode {
-    const {
-      errors: {download: err},
-    } = this.state;
-    const errDetail = err?.responseJSON?.detail;
-    return (
-      <Layout>
-        <main>
-          <Header>
-            <h3>
-              {err.status} - {err.statusText}
-            </h3>
-          </Header>
-          {errDetail && (
-            <Body>
-              <p>{errDetail}</p>
-            </Body>
-          )}
-        </main>
-      </Layout>
-    );
-  }
-
-  renderContent(): React.ReactNode {
-    const {download} = this.state;
+  const renderContent = () => {
     switch (download.status) {
-      case DownloadStatus.Early:
-        return this.renderEarly();
-      case DownloadStatus.Expired:
-        return this.renderExpired();
+      case DownloadStatus.EARLY:
+        return renderEarly();
+      case DownloadStatus.EXPIRED:
+        return renderExpired();
       default:
-        return this.renderValid();
+        return renderValid();
     }
-  }
+  };
 
-  renderBody() {
-    return (
+  return (
+    <SentryDocumentTitle title={t('Download Center')}>
       <Layout>
-        <main>{this.renderContent()}</main>
+        <main>{renderContent()}</main>
       </Layout>
-    );
-  }
+    </SentryDocumentTitle>
+  );
 }
 
 const Header = styled('header')`
@@ -288,7 +272,7 @@ const Body = styled('div')`
   }
 `;
 
-const DownloadButton = styled(Button)`
+const DownloadButton = styled(LinkButton)`
   margin-bottom: ${space(1.5)};
 `;
 

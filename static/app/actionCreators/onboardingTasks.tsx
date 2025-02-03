@@ -1,7 +1,10 @@
-import OrganizationActions from 'app/actions/organizationActions';
-import {Client} from 'app/api';
-import ConfigStore from 'app/stores/configStore';
-import {OnboardingTask, Organization} from 'app/types';
+import type {Client} from 'sentry/api';
+import ConfigStore from 'sentry/stores/configStore';
+import OrganizationStore from 'sentry/stores/organizationStore';
+import type {OnboardingTaskStatus, UpdatedTask} from 'sentry/types/onboarding';
+import type {Organization} from 'sentry/types/organization';
+import {isDemoModeEnabled} from 'sentry/utils/demoMode';
+import {updateDemoWalkthroughTask} from 'sentry/utils/demoMode/guides';
 
 /**
  * Update an onboarding task.
@@ -9,18 +12,15 @@ import {OnboardingTask, Organization} from 'app/types';
  * If no API client is provided the task will not be updated on the server side
  * and will only update in the organization store.
  */
-export async function updateOnboardingTask(
+export function updateOnboardingTask(
   api: Client | null,
   organization: Organization,
-  updatedTask: Partial<Pick<OnboardingTask, 'status' | 'data'>> & {
-    task: OnboardingTask['task'];
-    /**
-     * Marks completion seen. This differs from the OnboardingTask
-     * completionSeen type as that returns the date completion was seen.
-     */
-    completionSeen?: boolean;
-  }
+  updatedTask: UpdatedTask
 ) {
+  if (isDemoModeEnabled()) {
+    updateDemoWalkthroughTask(updatedTask);
+    return;
+  }
   if (api !== null) {
     api.requestPromise(`/organizations/${organization.slug}/onboarding-tasks/`, {
       method: 'POST',
@@ -37,7 +37,7 @@ export async function updateOnboardingTask(
     ? organization.onboardingTasks.map(task =>
         task.task === updatedTask.task ? {...task, ...updatedTask} : task
       )
-    : [...organization.onboardingTasks, {...updatedTask, user}];
+    : [...organization.onboardingTasks, {...updatedTask, user} as OnboardingTaskStatus];
 
-  OrganizationActions.update({onboardingTasks});
+  OrganizationStore.onUpdate({onboardingTasks});
 }

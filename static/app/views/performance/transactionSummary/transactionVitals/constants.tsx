@@ -1,7 +1,7 @@
-import {WebVital} from 'app/utils/discover/fields';
-import {WEB_VITAL_DETAILS} from 'app/utils/performance/vitals/constants';
-import {VitalGroup} from 'app/utils/performance/vitals/types';
-import theme from 'app/utils/theme';
+import {WebVital} from 'sentry/utils/fields';
+import {WEB_VITAL_DETAILS} from 'sentry/utils/performance/vitals/constants';
+import type {VitalGroup} from 'sentry/utils/performance/vitals/types';
+import theme from 'sentry/utils/theme';
 
 export const NUM_BUCKETS = 100;
 
@@ -30,9 +30,11 @@ const _VITAL_GROUPS = [
 ];
 
 const _COLORS = [
-  ...theme.charts.getColorPalette(
-    _VITAL_GROUPS.reduce((count, {vitals}) => count + vitals.length, 0) - 1
-  ),
+  ...((theme.charts
+    .getColorPalette(
+      _VITAL_GROUPS.reduce((count, {vitals}) => count + vitals.length, 0) - 1
+    )
+    ?.slice() as string[] | undefined) ?? []),
 ].reverse();
 
 export const VITAL_GROUPS: VitalGroup[] = _VITAL_GROUPS.map(group => ({

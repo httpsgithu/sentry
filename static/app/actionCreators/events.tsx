@@ -1,38 +1,67 @@
-import {LocationDescriptor} from 'history';
+import type {LocationDescriptor} from 'history';
 import pick from 'lodash/pick';
 
-import {Client} from 'app/api';
-import {canIncludePreviousPeriod} from 'app/components/charts/utils';
-import {
-  DateString,
+import {addErrorMessage} from 'sentry/actionCreators/indicator';
+import type {ApiResult, Client, ResponseMeta} from 'sentry/api';
+import {canIncludePreviousPeriod} from 'sentry/components/charts/utils';
+import {t} from 'sentry/locale';
+import type {DateString} from 'sentry/types/core';
+import type {IssueAttachment} from 'sentry/types/group';
+import type {
   EventsStats,
   MultiSeriesEventsStats,
   OrganizationSummary,
-} from 'app/types';
-import {LocationQuery} from 'app/utils/discover/eventView';
-import {getPeriod} from 'app/utils/getPeriod';
-import {PERFORMANCE_URL_PARAM} from 'app/utils/performance/constants';
+} from 'sentry/types/organization';
+import type {LocationQuery} from 'sentry/utils/discover/eventView';
+import type {DiscoverDatasets} from 'sentry/utils/discover/types';
+import {getPeriod} from 'sentry/utils/duration/getPeriod';
+import {PERFORMANCE_URL_PARAM} from 'sentry/utils/performance/constants';
+import type {QueryBatching} from 'sentry/utils/performance/contexts/genericQueryBatcher';
+import type {
+  ApiQueryKey,
+  UseApiQueryOptions,
+  UseMutationOptions,
+} from 'sentry/utils/queryClient';
+import {
+  getApiQueryData,
+  setApiQueryData,
+  useApiQuery,
+  useMutation,
+  useQueryClient,
+} from 'sentry/utils/queryClient';
+import type RequestError from 'sentry/utils/requestError/requestError';
+import useApi from 'sentry/utils/useApi';
+import useOrganization from 'sentry/utils/useOrganization';
 
 type Options = {
   organization: OrganizationSummary;
-  project?: Readonly<number[]>;
-  environment?: Readonly<string[]>;
-  team?: Readonly<string | string[]>;
-  period?: string;
-  start?: DateString;
-  end?: DateString;
-  interval?: string;
-  includePrevious?: boolean;
-  limit?: number;
-  query?: string;
-  yAxis?: string | string[];
-  field?: string[];
-  topEvents?: number;
-  orderby?: string;
   partial: boolean;
-  withoutZerofill?: boolean;
+  comparisonDelta?: number;
+  dataset?: DiscoverDatasets;
+  end?: DateString;
+  environment?: readonly string[];
+  excludeOther?: boolean;
+  field?: string[];
+  generatePathname?: (org: OrganizationSummary) => string;
+  includePrevious?: boolean;
+  interval?: string;
+  limit?: number;
+  orderby?: string;
+  period?: string | null;
+  project?: readonly number[];
+  query?: string;
+  queryBatching?: QueryBatching;
+  queryExtras?: Record<string, string | boolean | number>;
   referrer?: string;
+  start?: DateString;
+  team?: Readonly<string | string[]>;
+  topEvents?: number;
+  useRpc?: boolean;
+  withoutZerofill?: boolean;
+  yAxis?: string | string[];
 };
+
+export type EventsStatsOptions<T extends boolean> = {includeAllArgs?: T} & Options;
 
 /**
  * Make requests to `events-stats` endpoint
@@ -42,14 +71,19 @@ type Options = {
  * @param {Object} options.organization Organization object
  * @param {Number[]} options.project List of project ids
  * @param {String[]} options.environment List of environments to query for
+ * @param {Boolean} options.excludeOther Exclude the "Other" series when making a topEvents query
  * @param {String[]} options.team List of teams to query for
  * @param {String} options.period Time period to query for, in the format: <integer><units> where units are "d" or "h"
  * @param {String} options.interval Time interval to group results in, in the format: <integer><units> where units are "d", "h", "m", "s"
+ * @param {Number} options.comparisonDelta Comparison delta for change alert event stats to include comparison stats
  * @param {Boolean} options.includePrevious Should request also return reqsults for previous period?
  * @param {Number} options.limit The number of rows to return
  * @param {String} options.query Search query
+ * @param {QueryBatching} options.queryBatching A container for batching functions from a provider
+ * @param {Record<string, string>} options.queryExtras A list of extra query parameters
+ * @param {(org: OrganizationSummary) => string} options.generatePathname A function that returns an override for the pathname
  */
-export const doEventsRequest = (
+export const doEventsRequest = <IncludeAllArgsType extends boolean = false>(
   api: Client,
   {
     organization,
@@ -60,6 +94,7 @@ export const doEventsRequest = (
     start,
     end,
     interval,
+    comparisonDelta,
     includePrevious,
     query,
     yAxis,
@@ -69,12 +104,28 @@ export const doEventsRequest = (
     partial,
     withoutZerofill,
     referrer,
-  }: Options
-): Promise<EventsStats | MultiSeriesEventsStats> => {
+    queryBatching,
+    generatePathname,
+    queryExtras,
+    excludeOther,
+    includeAllArgs,
+    dataset,
+    useRpc,
+  }: EventsStatsOptions<IncludeAllArgsType>
+): IncludeAllArgsType extends true
+  ? Promise<
+      [EventsStats | MultiSeriesEventsStats, string | undefined, ResponseMeta | undefined]
+    >
+  : Promise<EventsStats | MultiSeriesEventsStats> => {
+  const pathname =
+    generatePathname?.(organization) ??
+    `/organizations/${organization.slug}/events-stats/`;
+
   const shouldDoublePeriod = canIncludePreviousPeriod(includePrevious, period);
   const urlQuery = Object.fromEntries(
     Object.entries({
       interval,
+      comparisonDelta,
       project,
       environment,
       team,
@@ -86,6 +137,9 @@ export const doEventsRequest = (
       partial: partial ? '1' : undefined,
       withoutZerofill: withoutZerofill ? '1' : undefined,
       referrer: referrer ? referrer : 'api.organization-event-stats',
+      excludeOther: excludeOther ? '1' : undefined,
+      dataset,
+      useRpc: useRpc ? '1' : undefined,
     }).filter(([, value]) => typeof value !== 'undefined')
   );
 
@@ -94,64 +148,77 @@ export const doEventsRequest = (
   // the tradeoff for now.
   const periodObj = getPeriod({period, start, end}, {shouldDoublePeriod});
 
-  return api.requestPromise(`/organizations/${organization.slug}/events-stats/`, {
+  const queryObject = {
+    includeAllArgs,
     query: {
       ...urlQuery,
       ...periodObj,
+      ...queryExtras,
     },
-  });
+  };
+
+  if (queryBatching?.batchRequest) {
+    return queryBatching.batchRequest(api, pathname, queryObject);
+  }
+
+  return api.requestPromise<IncludeAllArgsType>(pathname, queryObject);
 };
 
 export type EventQuery = {
   field: string[];
-  equation?: string[];
-  team?: string | string[];
-  project?: string | string[];
-  sort?: string | string[];
   query: string;
-  per_page?: number;
-  referrer?: string;
+  cursor?: string;
+  dataset?: DiscoverDatasets;
+  discoverSavedQueryId?: string;
   environment?: string[];
+  equation?: string[];
   noPagination?: boolean;
+  per_page?: number;
+  project?: string | string[];
+  referrer?: string;
+  sort?: string | string[];
+  team?: string | string[];
+  useRpc?: '1';
 };
 
 export type TagSegment = {
   count: number;
   name: string;
-  value: string;
   url: LocationDescriptor;
+  value: string;
   isOther?: boolean;
   key?: string;
 };
 
 export type Tag = {
   key: string;
-  topValues: Array<TagSegment>;
+  topValues: TagSegment[];
 };
 
 /**
  * Fetches tag facets for a query
  */
-export async function fetchTagFacets(
+export function fetchTagFacets(
   api: Client,
   orgSlug: string,
   query: EventQuery
-): Promise<Tag[]> {
-  const urlParams = pick(query, Object.values(PERFORMANCE_URL_PARAM));
+): Promise<ApiResult<Tag[]>> {
+  const urlParams = pick(query, [...Object.values(PERFORMANCE_URL_PARAM), 'cursor']);
 
   const queryOption = {...urlParams, query: query.query};
 
   return api.requestPromise(`/organizations/${orgSlug}/events-facets/`, {
     query: queryOption,
+    includeAllArgs: true,
   });
 }
 
 /**
  * Fetches total count of events for a given query
  */
-export async function fetchTotalCount(
+export function fetchTotalCount(
   api: Client,
-  orgSlug: String,
+  orgSlug: string,
   query: EventQuery & LocationQuery
 ): Promise<number> {
   const urlParams = pick(query, Object.values(PERFORMANCE_URL_PARAM));
@@ -168,3 +235,115 @@ export async function fetchTotalCount(
     })
     .then((res: Response) => res.count);
 }
+
+type FetchEventAttachmentParameters = {
+  eventId: string;
+  orgSlug: string;
+  projectSlug: string | undefined;
+};
+
+type FetchEventAttachmentResponse = IssueAttachment[];
+
+export const makeFetchEventAttachmentsQueryKey = ({
+  orgSlug,
+  projectSlug,
+  eventId,
+}: FetchEventAttachmentParameters): ApiQueryKey => [
+  `/projects/${orgSlug}/${projectSlug}/events/${eventId}/attachments/`,
+];
+
+export const useFetchEventAttachments = (
+  params: FetchEventAttachmentParameters,
+  options: Partial<UseApiQueryOptions<FetchEventAttachmentResponse>> = {}
+) => {
+  const organization = useOrganization();
+  return useApiQuery<FetchEventAttachmentResponse>(
+    makeFetchEventAttachmentsQueryKey(params),
+    {
+      staleTime: Infinity,
+      ...options,
+      enabled:
+        (organization.features.includes('event-attachments') ?? false) &&
+        options.enabled !== false &&
+        params.projectSlug !== undefined,
+    }
+  );
+};
+
+type DeleteEventAttachmentVariables = {
+  attachmentId: string;
+  eventId: string;
+  orgSlug: string;
+  projectSlug: string;
+};
+
+type DeleteEventAttachmentResponse = unknown;
+
+type DeleteEventAttachmentContext = {
+  previous?: IssueAttachment[];
+};
+
+type DeleteEventAttachmentOptions = UseMutationOptions<
+  DeleteEventAttachmentResponse,
+  RequestError,
+  DeleteEventAttachmentVariables,
+  DeleteEventAttachmentContext
+>;
+
+export const useDeleteEventAttachmentOptimistic = (
+  incomingOptions: Partial<DeleteEventAttachmentOptions> = {}
+) => {
+  const api = useApi({persistInFlight: true});
+  const queryClient = useQueryClient();
+
+  const options: DeleteEventAttachmentOptions = {
+    ...incomingOptions,
+    mutationFn: ({orgSlug, projectSlug, eventId, attachmentId}) => {
+      return api.requestPromise(
+        `/projects/${orgSlug}/${projectSlug}/events/${eventId}/attachments/${attachmentId}/`,
+        {method: 'DELETE'}
+      );
+    },
+    onMutate: async variables => {
+      await queryClient.cancelQueries({
+        queryKey: makeFetchEventAttachmentsQueryKey(variables),
+      });
+
+      const previous = getApiQueryData<FetchEventAttachmentResponse>(
+        queryClient,
+        makeFetchEventAttachmentsQueryKey(variables)
+      );
+
+      setApiQueryData<FetchEventAttachmentResponse>(
+        queryClient,
+        makeFetchEventAttachmentsQueryKey(variables),
+        oldData => {
+          if (!Array.isArray(oldData)) {
+            return oldData;
+          }
+
+          return oldData.filter(attachment => attachment?.id !== variables.attachmentId);
+        }
+      );
+
+      incomingOptions.onMutate?.(variables);
+
+      return {previous};
+    },
+    onError: (error, variables, context) => {
+      addErrorMessage(t('An error occurred while deleting the attachment'));
+
+      if (context) {
+        setApiQueryData(
+          queryClient,
+          makeFetchEventAttachmentsQueryKey(variables),
+          context.previous
+        );
+      }
+
+      incomingOptions.onError?.(error, variables, context);
+    },
+  };
+
+  return useMutation(options);
+};

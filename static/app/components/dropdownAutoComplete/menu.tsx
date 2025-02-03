@@ -1,16 +1,17 @@
-import * as React from 'react';
+import {useCallback} from 'react';
 import styled from '@emotion/styled';
+import memoize from 'lodash/memoize';
 
-import AutoComplete from 'app/components/autoComplete';
-import DropdownBubble from 'app/components/dropdownBubble';
-import LoadingIndicator from 'app/components/loadingIndicator';
-import {t} from 'app/locale';
-import space from 'app/styles/space';
-import Input from 'app/views/settings/components/forms/controls/input';
+import AutoComplete from 'sentry/components/autoComplete';
+import DropdownBubble from 'sentry/components/dropdownBubble';
+import Input from 'sentry/components/input';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
 
-import autoCompleteFilter from './autoCompleteFilter';
+import defaultAutoCompleteFilter from './autoCompleteFilter';
 import List from './list';
-import {Item, ItemsBeforeFilter} from './types';
+import type {Item, ItemsBeforeFilter} from './types';
 
 type AutoCompleteChildrenArgs = Parameters<AutoComplete<Item>['props']['children']>[0];
 type Actions = AutoCompleteChildrenArgs['actions'];
@@ -21,20 +22,92 @@ export type MenuFooterChildProps = {
 
 type ListProps = React.ComponentProps<typeof List>;
 
-type Props = {
-  /** null items indicates loading */
-  items: ItemsBeforeFilter | null;
+// autoFocus react attribute is sync called on render, this causes
+// layout thrashing and is bad for performance. This thin wrapper function
+// will defer the focus call until the next frame, after the browser and react
+// have had a chance to update the DOM, splitting the perf cost across frames.
+function focusElement(targetRef: HTMLElement | null) {
+  if (!targetRef) {
+    return;
+  }
+
+  if ('requestAnimationFrame' in window) {
+    window.requestAnimationFrame(() => {
+      targetRef.focus();
+    });
+  } else {
+    setTimeout(() => {
+      targetRef.focus();
+    }, 1);
+  }
+}
+
+export interface MenuProps
+  extends Pick<
+    ListProps,
+    'virtualizedHeight' | 'virtualizedLabelHeight' | 'itemSize' | 'onScroll'
+  > {
   children: (
     args: Pick<
       AutoCompleteChildrenArgs,
       'getInputProps' | 'getActorProps' | 'actions' | 'isOpen' | 'selectedItem'
     >
   ) => React.ReactNode;
+  /** null items indicates loading */
+  items: ItemsBeforeFilter | null;
 
-  menuHeader?: React.ReactElement;
-  menuFooter?:
-    | React.ReactElement
-    | ((props: MenuFooterChildProps) => React.ReactElement | null);
+  /**
+   * Dropdown menu alignment.
+   */
+  alignMenu?: 'left' | 'right';
+  /**
+   * Optionally provide a custom implementation for filtering result items
+   * Useful if you want to show items that don't strictly match the input value
+   */
+  autoCompleteFilter?: typeof defaultAutoCompleteFilter;
+  /**
+   * Should menu visually lock to a direction (so we don't display a rounded corner)
+   */
+  blendCorner?: boolean;
+
+  /**
+   * Show loading indicator next to input and "Searching..." text in the list
+   */
+  busy?: boolean;
+
+  /**
+   * Show loading indicator next to input but don't hide list items
+   */
+  busyItemsStillVisible?: boolean;
+
+  /**
+   * for passing  styles to the DropdownBubble
+   */
+  className?: string;
+
+  /**
+   * AutoComplete prop
+   */
+  closeOnSelect?: boolean;
+
+  css?: any;
+
+  'data-test-id'?: string;
+
+  /**
+   * If true, the menu will be visually detached from actor.
+   */
+  detached?: boolean;
+
+  /**
+   * Disables padding for the label.
+   */
+  disableLabelPadding?: boolean;
+
+  /**
+   * passed down to the AutoComplete Component
+   */
+  disabled?: boolean;
 
   /**
    * Hide's the input when there are no items. Avoid using this when querying
@@ -43,29 +116,9 @@ type Props = {
   emptyHidesInput?: boolean;
 
   /**
-   * Search input's placeholder text
-   */
-  searchPlaceholder?: string;
-
-  /**
    * Message to display when there are no items initially
    */
   emptyMessage?: React.ReactNode;
-
-  /**
-   * Message to display when there are no items that match the search
-   */
-  noResultsMessage?: React.ReactNode;
-
-  /**
-   * Show loading indicator next to input and "Searching..." text in the list
-   */
-  busy?: boolean;
-
-  /**
-   * Dropdown menu alignment.
-   */
-  alignMenu?: 'left' | 'right';
 
   /**
    * If this is undefined, autocomplete filter will use this value instead of the
@@ -78,33 +131,22 @@ type Props = {
   /**
    * Hides the default filter input
    */
-
   hideInput?: boolean;
 
   /**
-   * Props to pass to menu component
+   * renderProp for the end (right side) of the search input
    */
-  menuProps?: Parameters<AutoCompleteChildrenArgs['getMenuProps']>[0];
-
-  /**
-   * Show loading indicator next to input but don't hide list items
-   */
-  busyItemsStillVisible?: boolean;
-
-  /**
-   * Changes the menu style to have an arrow at the top
-   */
-  menuWithArrow?: boolean;
+  inputActions?: React.ReactElement;
 
   /**
    * Props to pass to input/filter component
    */
-  inputProps?: {style: React.CSSProperties};
+  inputProps?: React.HTMLAttributes<HTMLInputElement>;
 
   /**
-   * Should menu visually lock to a direction (so we don't display a rounded corner)
+   * Used to control the input value (optional)
    */
-  blendCorner?: boolean;
+  inputValue?: string;
 
   /**
    * Used to control dropdown state (optional)
@@ -112,9 +154,35 @@ type Props = {
   isOpen?: boolean;
 
   /**
-   * Callback for when dropdown menu opens
+   * Max height of dropdown menu. Units are assumed as `px`
    */
-  onOpen?: (event?: React.MouseEvent) => void;
+  maxHeight?: ListProps['maxHeight'];
+
+  menuFooter?:
+    | React.ReactElement
+    | ((props: MenuFooterChildProps) => React.ReactElement | null);
+
+  menuHeader?: React.ReactElement;
+
+  /**
+   * Props to pass to menu component
+   */
+  menuProps?: Parameters<AutoCompleteChildrenArgs['getMenuProps']>[0];
+
+  /**
+   * Minimum menu width, defaults to 250
+   */
+  minWidth?: number;
+
+  /**
+   * Message to display when there are no items that match the search
+   */
+  noResultsMessage?: React.ReactNode;
+
+  /**
+   * When AutoComplete input changes
+   */
+  onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void;
 
   /**
    * Callback for when dropdown menu closes
@@ -122,9 +190,14 @@ type Props = {
   onClose?: () => void;
 
   /**
-   * When AutoComplete input changes
+   * Callback for when the input value changes
    */
-  onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  onInputValueChange?: (value: string) => void;
+
+  /**
+   * Callback for when dropdown menu opens
+   */
+  onOpen?: (event?: React.MouseEvent) => void;
 
   /**
    * When an item is selected (via clicking dropdown, or keyboard navigation)
@@ -134,59 +207,40 @@ type Props = {
     state?: AutoComplete<Item>['state'],
     e?: React.MouseEvent | React.KeyboardEvent
   ) => void;
-
-  /**
-   * AutoComplete prop
-   */
-  closeOnSelect?: boolean;
-
-  /**
-   * renderProp for the end (right side) of the search input
-   */
-  inputActions?: React.ReactElement;
-
-  /**
-   * passed down to the AutoComplete Component
-   */
-  disabled?: boolean;
-
-  /**
-   * Max height of dropdown menu. Units are assumed as `px`
-   */
-  maxHeight?: ListProps['maxHeight'];
-
-  /**
-   * for passing  styles to the DropdownBubble
-   */
-  className?: string;
-
-  /**
-   * the styles are forward to the Autocomplete's getMenuProps func
-   */
-  style?: React.CSSProperties;
-
   /**
    * for passing simple styles to the root container
    */
   rootClassName?: string;
 
-  css?: any;
-} & Pick<
-  ListProps,
-  'virtualizedHeight' | 'virtualizedLabelHeight' | 'itemSize' | 'onScroll'
->;
+  /**
+   * Search input's placeholder text
+   */
+  searchPlaceholder?: string;
+  /**
+   * the styles are forward to the Autocomplete's getMenuProps func
+   */
+  style?: React.CSSProperties;
+  /**
+   * Optional element to be rendered on the right side of the dropdown menu
+   */
+  subPanel?: React.ReactNode;
+}
 
-const Menu = ({
+function Menu({
+  autoCompleteFilter = defaultAutoCompleteFilter,
   maxHeight = 300,
   emptyMessage = t('No items'),
   searchPlaceholder = t('Filter search'),
   blendCorner = true,
+  detached = false,
   alignMenu = 'left',
+  minWidth = 250,
   hideInput = false,
+  disableLabelPadding = false,
   busy = false,
   busyItemsStillVisible = false,
-  menuWithArrow = false,
   disabled = false,
+  subPanel = null,
   itemSize,
   virtualizedHeight,
   virtualizedLabelHeight,
@@ -210,151 +264,184 @@ const Menu = ({
   onClose,
   css,
   closeOnSelect,
+  'data-test-id': dataTestId,
   ...props
-}: Props) => (
-  <AutoComplete
-    onSelect={onSelect}
-    inputIsActor={false}
-    onOpen={onOpen}
-    onClose={onClose}
-    disabled={disabled}
-    closeOnSelect={closeOnSelect}
-    resetInputOnClose
-    {...props}
-  >
-    {({
-      getActorProps,
-      getRootProps,
-      getInputProps,
-      getMenuProps,
-      getItemProps,
-      inputValue,
-      selectedItem,
-      highlightedIndex,
-      isOpen,
-      actions,
-    }) => {
-      // This is the value to use to filter (default to value in filter input)
-      const filterValueOrInput: string = filterValue ?? inputValue;
+}: MenuProps) {
+  // Can't search if there are no items
+  const hasItems = !!items?.length;
 
-      // Can't search if there are no items
-      const hasItems = items && !!items.length;
+  // Items are loading if null
+  const itemsLoading = items === null;
 
-      // Only filter results if menu is open and there are items
-      const autoCompleteResults =
-        (isOpen && hasItems && autoCompleteFilter(items, filterValueOrInput)) || [];
+  // Hide the input when we have no items to filter, only if
+  // emptyHidesInput is set to true.
+  const showInput = !hideInput && (hasItems || !emptyHidesInput);
 
-      // Items are loading if null
-      const itemsLoading = items === null;
+  // Only redefine the autocomplete function if our items list has changed.
+  // This avoids producing a new array on every call.
+  const stableItemFilter = useCallback(
+    (filterValueOrInput: string) => autoCompleteFilter(items, filterValueOrInput),
+    [autoCompleteFilter, items]
+  );
 
-      // Has filtered results
-      const hasResults = !!autoCompleteResults.length;
+  // Memoize the filterValueOrInput to the stableItemFilter so that we get the
+  // same list every time when the filter value doesn't change.
+  const getFilteredItems = memoize(stableItemFilter);
 
-      // No items to display
-      const showNoItems = !busy && !filterValueOrInput && !hasItems;
+  return (
+    <AutoComplete
+      onSelect={onSelect}
+      inputIsActor={false}
+      onOpen={onOpen}
+      onClose={onClose}
+      disabled={disabled}
+      closeOnSelect={closeOnSelect}
+      resetInputOnClose
+      {...props}
+    >
+      {({
+        getActorProps,
+        getRootProps,
+        getInputProps,
+        getMenuProps,
+        getItemProps,
+        registerItemCount,
+        registerVisibleItem,
+        inputValue,
+        selectedItem,
+        highlightedIndex,
+        isOpen,
+        actions,
+      }) => {
+        // This is the value to use to filter (default to value in filter input)
+        const filterValueOrInput = filterValue ?? inputValue;
 
-      // Results mean there was an attempt to search
-      const showNoResultsMessage =
-        !busy && !busyItemsStillVisible && filterValueOrInput && !hasResults;
+        // Only filter results if menu is open and there are items. Uses
+        // `getFilteredItems` to ensure we get a stable items list back.
+        const autoCompleteResults =
+          isOpen && hasItems ? getFilteredItems(filterValueOrInput) : [];
 
-      // Hide the input when we have no items to filter, only if
-      // emptyHidesInput is set to true.
-      const showInput = !hideInput && (hasItems || !emptyHidesInput);
+        // Has filtered results
+        const hasResults = !!autoCompleteResults.length;
 
-      // When virtualization is turned on, we need to pass in the number of
-      // selecteable items for arrow-key limits
-      const itemCount = virtualizedHeight
-        ? autoCompleteResults.filter(i => !i.groupLabel).length
-        : undefined;
+        // No items to display
+        const showNoItems = !busy && !filterValueOrInput && !hasItems;
 
-      const renderedFooter =
-        typeof menuFooter === 'function' ? menuFooter({actions}) : menuFooter;
+        // Results mean there was an attempt to search
+        const showNoResultsMessage =
+          !busy && !busyItemsStillVisible && filterValueOrInput && !hasResults;
 
-      return (
-        <AutoCompleteRoot
-          {...getRootProps()}
-          className={rootClassName}
-          disabled={disabled}
-        >
-          {children({
-            getInputProps,
-            getActorProps,
-            actions,
-            isOpen,
-            selectedItem,
-          })}
-          {isOpen && (
-            <BubbleWithMinWidth
-              className={className}
-              {...getMenuProps({
-                ...menuProps,
-                itemCount,
-              })}
-              style={style}
-              css={css}
-              blendCorner={blendCorner}
-              alignMenu={alignMenu}
-              menuWithArrow={menuWithArrow}
-            >
-              {itemsLoading && <LoadingIndicator mini />}
-              {showInput && (
-                <InputWrapper>
-                  <StyledInput
-                    autoFocus
-                    placeholder={searchPlaceholder}
-                    {...getInputProps({...inputProps, onChange})}
-                  />
-                  <InputLoadingWrapper>
-                    {(busy || busyItemsStillVisible) && (
-                      <LoadingIndicator size={16} mini />
+        // When virtualization is turned on, we need to pass in the number of
+        // selectable items for arrow-key limits
+        const itemCount = virtualizedHeight
+          ? autoCompleteResults.filter(i => !i.groupLabel).length
+          : undefined;
+
+        const renderedFooter =
+          typeof menuFooter === 'function' ? menuFooter({actions}) : menuFooter;
+
+        // XXX(epurkhiser): Would be better if this happened in a useEffect,
+        // but hooks do not work inside render-prop callbacks.
+        registerItemCount(itemCount);
+
+        return (
+          <AutoCompleteRoot
+            {...getRootProps()}
+            className={rootClassName}
+            disabled={disabled}
+            data-is-open={isOpen}
+            data-test-id={dataTestId}
+          >
+            {children({
+              getInputProps,
+              getActorProps,
+              actions,
+              isOpen,
+              selectedItem,
+            })}
+            {isOpen && (
+              <StyledDropdownBubble
+                className={className}
+                {...getMenuProps(menuProps)}
+                style={style}
+                css={css}
+                blendCorner={blendCorner}
+                detached={detached}
+                alignMenu={alignMenu}
+                minWidth={minWidth}
+              >
+                <DropdownMainContent minWidth={minWidth}>
+                  {showInput && (
+                    <InputWrapper>
+                      <StyledInput
+                        ref={focusElement}
+                        placeholder={searchPlaceholder}
+                        {...getInputProps({...inputProps, onChange})}
+                      />
+                      <InputLoadingWrapper>
+                        {(busy || busyItemsStillVisible) && (
+                          <LoadingIndicator size={16} mini />
+                        )}
+                      </InputLoadingWrapper>
+                      {inputActions}
+                    </InputWrapper>
+                  )}
+                  <div>
+                    {menuHeader && (
+                      <LabelWithPadding disableLabelPadding={disableLabelPadding}>
+                        {menuHeader}
+                      </LabelWithPadding>
                     )}
-                  </InputLoadingWrapper>
-                  {inputActions}
-                </InputWrapper>
-              )}
-              <div>
-                {menuHeader && <LabelWithPadding>{menuHeader}</LabelWithPadding>}
-                <ItemList data-test-id="autocomplete-list" maxHeight={maxHeight}>
-                  {showNoItems && <EmptyMessage>{emptyMessage}</EmptyMessage>}
-                  {showNoResultsMessage && (
-                    <EmptyMessage>
-                      {noResultsMessage ?? `${emptyMessage} ${t('found')}`}
-                    </EmptyMessage>
-                  )}
-                  {busy && (
-                    <BusyMessage>
-                      <EmptyMessage>{t('Searching\u2026')}</EmptyMessage>
-                    </BusyMessage>
-                  )}
-                  {!busy && (
-                    <List
-                      items={autoCompleteResults}
-                      maxHeight={maxHeight}
-                      highlightedIndex={highlightedIndex}
-                      inputValue={inputValue}
-                      onScroll={onScroll}
-                      getItemProps={getItemProps}
-                      virtualizedLabelHeight={virtualizedLabelHeight}
-                      virtualizedHeight={virtualizedHeight}
-                      itemSize={itemSize}
-                    />
-                  )}
-                </ItemList>
-                {renderedFooter && <LabelWithPadding>{renderedFooter}</LabelWithPadding>}
-              </div>
-            </BubbleWithMinWidth>
-          )}
-        </AutoCompleteRoot>
-      );
-    }}
-  </AutoComplete>
-);
+                    <ItemList data-test-id="autocomplete-list" maxHeight={maxHeight}>
+                      {showNoItems && <EmptyMessage>{emptyMessage}</EmptyMessage>}
+                      {showNoResultsMessage && (
+                        <EmptyMessage>
+                          {noResultsMessage ?? `${emptyMessage} ${t('found')}`}
+                        </EmptyMessage>
+                      )}
+                      {(itemsLoading || busy) && (
+                        <BusyMessage>
+                          {itemsLoading && <LoadingIndicator mini />}
+                          {busy && <EmptyMessage>{t('Searching\u2026')}</EmptyMessage>}
+                        </BusyMessage>
+                      )}
+                      {!busy && (
+                        <List
+                          items={autoCompleteResults}
+                          maxHeight={maxHeight}
+                          highlightedIndex={highlightedIndex}
+                          onScroll={onScroll}
+                          getItemProps={getItemProps}
+                          registerVisibleItem={registerVisibleItem}
+                          virtualizedLabelHeight={virtualizedLabelHeight}
+                          virtualizedHeight={virtualizedHeight}
+                          itemSize={itemSize}
+                        />
+                      )}
+                    </ItemList>
+                    {renderedFooter && (
+                      <LabelWithPadding disableLabelPadding={disableLabelPadding}>
+                        {renderedFooter}
+                      </LabelWithPadding>
+                    )}
+                  </div>
+                </DropdownMainContent>
+                {subPanel}
+              </StyledDropdownBubble>
+            )}
+          </AutoCompleteRoot>
+        );
+      }}
+    </AutoComplete>
+  );
+}
 
 export default Menu;
 
 const StyledInput = styled(Input)`
   flex: 1;
   border: 1px solid transparent;
+  border-radius: calc(${p => p.theme.panelBorderRadius} - 1px);
   &,
   &:focus,
   &:active,
@@ -363,7 +450,7 @@ const StyledInput = styled(Input)`
     box-shadow: none;
     font-size: 13px;
     padding: ${space(1)};
-    font-weight: normal;
+    font-weight: ${p => p.theme.fontWeightNormal};
     color: ${p => p.theme.gray300};
   }
 `;
@@ -387,26 +474,34 @@ const EmptyMessage = styled('div')`
   text-transform: none;
 `;
 
-export const AutoCompleteRoot = styled(({isOpen: _isOpen, ...props}) => (
-  <div {...props} />
-))`
+export const AutoCompleteRoot = styled('div')<{disabled?: boolean}>`
   position: relative;
   display: inline-block;
   ${p => p.disabled && 'pointer-events: none;'}
 `;
 
-const BubbleWithMinWidth = styled(DropdownBubble)`
-  min-width: 250px;
+const StyledDropdownBubble = styled(DropdownBubble)<{minWidth: number}>`
+  display: flex;
+  min-width: ${p => p.minWidth}px;
+
+  ${p => p.detached && p.alignMenu === 'left' && 'right: auto;'}
+  ${p => p.detached && p.alignMenu === 'right' && 'left: auto;'}
+`;
+
+const DropdownMainContent = styled('div')<{minWidth: number}>`
+  width: 100%;
+  min-width: ${p => p.minWidth}px;
 `;
 
 const InputWrapper = styled('div')`
   display: flex;
   border-bottom: 1px solid ${p => p.theme.innerBorder};
-  border-radius: ${p => `${p.theme.borderRadius} ${p.theme.borderRadius} 0 0`};
+  border-radius: ${p =>
+    `calc(${p.theme.panelBorderRadius} - 1px) calc(${p.theme.panelBorderRadius} - 1px) 0 0`};
   align-items: center;
 `;
 
-const LabelWithPadding = styled('div')`
+const LabelWithPadding = styled('div')<{disableLabelPadding: boolean}>`
   background-color: ${p => p.theme.backgroundSecondary};
   border-bottom: 1px solid ${p => p.theme.innerBorder};
   border-width: 1px 0;
@@ -418,10 +513,10 @@ const LabelWithPadding = styled('div')`
   &:last-child {
     border-bottom: none;
   }
-  padding: ${space(0.25)} ${space(1)};
+  padding: ${p => !p.disableLabelPadding && `${space(0.25)} ${space(1)}`};
 `;
 
-const ItemList = styled('div')<{maxHeight: NonNullable<Props['maxHeight']>}>`
+const ItemList = styled('div')<{maxHeight: NonNullable<MenuProps['maxHeight']>}>`
   max-height: ${p => `${p.maxHeight}px`};
   overflow-y: auto;
 `;
@@ -429,5 +524,6 @@ const ItemList = styled('div')<{maxHeight: NonNullable<Props['maxHeight']>}>`
 const BusyMessage = styled('div')`
   display: flex;
   justify-content: center;
-  padding: ${space(1)};
+  align-items: center;
+  padding: ${space(3)} ${space(1)};
 `;

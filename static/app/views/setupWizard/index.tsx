@@ -1,79 +1,69 @@
-import {Component} from 'react';
+import {useState} from 'react';
+import {createBrowserRouter, RouterProvider} from 'react-router-dom';
 
-import {Client} from 'app/api';
-import LoadingIndicator from 'app/components/loadingIndicator';
-import {t} from 'app/locale';
-import withApi from 'app/utils/withApi';
+import LoadingError from 'sentry/components/loadingError';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import {ThemeAndStyleProvider} from 'sentry/components/themeAndStyleProvider';
+import {t} from 'sentry/locale';
+import {
+  DEFAULT_QUERY_CLIENT_CONFIG,
+  QueryClient,
+  QueryClientProvider,
+} from 'sentry/utils/queryClient';
+import {useSetupWizardViewedAnalytics} from 'sentry/views/setupWizard/utils/setupWizardAnalytics';
+import {useOrganizationsWithRegion} from 'sentry/views/setupWizard/utils/useOrganizationsWithRegion';
+import {WaitingForWizardToConnect} from 'sentry/views/setupWizard/waitingForWizardToConnect';
+import {WizardProjectSelection} from 'sentry/views/setupWizard/wizardProjectSelection';
+
+const queryClient = new QueryClient(DEFAULT_QUERY_CLIENT_CONFIG);
 
 type Props = {
-  api: Client;
-  hash?: boolean | string;
+  hash: string;
+  enableProjectSelection?: boolean;
 };
 
-type State = {
-  finished: boolean;
-};
+function SetupWizard({hash, enableProjectSelection = false}: Props) {
+  const [router] = useState(() =>
+    createBrowserRouter([
+      {
+        path: '*',
+        element: (
+          <SetupWizardContent
+            hash={hash}
+            enableProjectSelection={enableProjectSelection}
+          />
+        ),
+      },
+    ])
+  );
 
-class SetupWizard extends Component<Props, State> {
-  static defaultProps = {
-    hash: false,
-  };
-
-  state: State = {
-    finished: false,
-  };
-
-  UNSAFE_componentWillMount() {
-    this.pollFinished();
-  }
-
-  pollFinished() {
-    return new Promise<void>(resolve => {
-      this.props.api.request(`/wizard/${this.props.hash}/`, {
-        method: 'GET',
-        success: () => {
-          setTimeout(() => this.pollFinished(), 1000);
-        },
-        error: () => {
-          resolve();
-          this.setState({finished: true});
-          setTimeout(() => window.close(), 10000);
-        },
-      });
-    });
-  }
-
-  renderSuccess() {
-    return (
-      <div className="row">
-        <h5>{t('Return to your terminal to complete your setup')}</h5>
-        <h5>{t('(This window will close in 10 seconds)')}</h5>
-        <button className="btn btn-default" onClick={() => window.close()}>
-          Close browser tab
-        </button>
-      </div>
-    );
-  }
-
-  renderLoading() {
-    return (
-      <div className="row">
-        <h5>{t('Waiting for wizard to connect')}</h5>
-      </div>
-    );
-  }
-
-  render() {
-    const {finished} = this.state;
-
-    return (
-      <div className="container">
-        <LoadingIndicator style={{margin: '2em auto'}} finished={finished}>
-          {finished ? this.renderSuccess() : this.renderLoading()}
-        </LoadingIndicator>
-      </div>
-    );
-  }
+  return (
+    <ThemeAndStyleProvider>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    </ThemeAndStyleProvider>
+  );
 }
 
-export default withApi(SetupWizard);
+function SetupWizardContent({hash, enableProjectSelection}: Props) {
+  const {data: organizations, isError, isLoading} = useOrganizationsWithRegion();
+
+  useSetupWizardViewedAnalytics(organizations);
+
+  if (isLoading) {
+    return <LoadingIndicator />;
+  }
+
+  if (isError || !organizations) {
+    return <LoadingError message={t('Failed to load organizations')} />;
+  }
+
+  return enableProjectSelection ? (
+    <WizardProjectSelection hash={hash} organizations={organizations} />
+  ) : (
+    <WaitingForWizardToConnect hash={hash} organizations={organizations} />
+  );
+}
+
+export default SetupWizard;

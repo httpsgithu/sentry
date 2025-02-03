@@ -2,16 +2,17 @@ from datetime import timedelta
 
 from django.urls import reverse
 
-from sentry.testutils import APITestCase, SnubaTestCase
-from sentry.testutils.helpers.datetime import before_now, iso_format
+from sentry.testutils.cases import APITestCase, SnubaTestCase
+from sentry.testutils.helpers.datetime import before_now
 from sentry.utils.samples import load_data
 
 
 class BaseOrganizationEventsFacetsPerformanceEndpointTest(SnubaTestCase, APITestCase):
+    url: str
     feature_list = (
         "organizations:discover-basic",
         "organizations:global-views",
-        "organizations:performance-tag-explorer",
+        "organizations:performance-view",
     )
 
     def setUp(self):
@@ -55,24 +56,22 @@ class OrganizationEventsFacetsPerformanceEndpointTest(
 
         self.url = reverse(
             "sentry-api-0-organization-events-facets-performance",
-            kwargs={"organization_slug": self.project.organization.slug},
+            kwargs={"organization_id_or_slug": self.project.organization.slug},
         )
 
     def store_transaction(
-        self, name="exampleTransaction", duration=100, tags=None, project_id=None, lcp=None
+        self, name="exampleTransaction", duration=100, project_id=None, lcp=None, *, tags
     ):
-        if tags is None:
-            tags = []
         if project_id is None:
             project_id = self.project.id
-        event = load_data("transaction").copy()
-        event.data["tags"].extend(tags)
+        event = load_data("transaction")
+        event["tags"].extend(tags)
         event.update(
             {
                 "transaction": name,
                 "event_id": f"{self._transaction_count:02x}".rjust(32, "0"),
-                "start_timestamp": iso_format(self.two_mins_ago - timedelta(seconds=duration)),
-                "timestamp": iso_format(self.two_mins_ago),
+                "start_timestamp": (self.two_mins_ago - timedelta(seconds=duration)).isoformat(),
+                "timestamp": self.two_mins_ago.isoformat(),
             }
         )
 
@@ -156,6 +155,7 @@ class OrganizationEventsFacetsPerformanceEndpointTest(
             }
         )
 
+        assert response.status_code == 200, response.content
         data = response.data["data"]
         assert len(data) == 1
         assert data[0]["count"] == 5
@@ -194,16 +194,10 @@ class OrganizationEventsFacetsPerformanceEndpointTest(
             "query": "(color:red or color:blue)",
             "allTagKeys": True,
         }
-        # No feature access
-        response = self.do_request(request, {"organizations:performance-tag-page": False})
-        data = response.data["data"]
-        assert len(data) == 1
-        assert data[0]["count"] == 5
-        assert data[0]["tags_key"] == "color"
-        assert data[0]["tags_value"] == "blue"
 
         # With feature access
-        response = self.do_request(request, {"organizations:performance-tag-page": True})
+        response = self.do_request(request)
+        assert response.status_code == 200, response.content
         data = response.data["data"]
         assert len(data) == 5
         assert data[0]["count"] == 19
@@ -223,7 +217,8 @@ class OrganizationEventsFacetsPerformanceEndpointTest(
             "allTagKeys": True,
         }
 
-        response = self.do_request(request, {"organizations:performance-tag-page": True})
+        response = self.do_request(request)
+        assert response.status_code == 200, response.content
 
         data = response.data["data"]
         assert len(data) == 5
@@ -242,16 +237,9 @@ class OrganizationEventsFacetsPerformanceEndpointTest(
             "statsPeriod": "14d",
             "tagKey": "color",
         }
-        # No feature access
-        response = self.do_request(request, {"organizations:performance-tag-page": False})
-        data = response.data["data"]
-        assert len(data) == 2
-        assert data[0]["count"] == 5
-        assert data[0]["tags_key"] == "color"
-        assert data[0]["tags_value"] == "blue"
-
         # With feature access
-        response = self.do_request(request, {"organizations:performance-tag-page": True})
+        response = self.do_request(request)
+        assert response.status_code == 200, response.content
         data = response.data["data"]
         assert len(data) == 3
         assert data[0]["count"] == 14
@@ -271,10 +259,47 @@ class OrganizationEventsFacetsPerformanceEndpointTest(
             "query": "(color:purple)",
         }
 
-        response = self.do_request(request, {"organizations:performance-tag-page": True})
+        response = self.do_request(request)
+        assert response.status_code == 200, response.content
         data = response.data["data"]
         assert len(data) == 1
         assert data[0]["count"] == 1
         assert data[0]["comparison"] == 0
         assert data[0]["tags_key"] == "color"
         assert data[0]["tags_value"] == "purple"
+
+    def test_cursor(self):
+        self.store_transaction(tags=[["third_tag", "good"]], duration=1000)
+        self.store_transaction(tags=[["third_tag", "bad"]], duration=10000)
+
+        request = {
+            "aggregateColumn": "transaction.duration",
+            "sort": "-frequency",
+            "per_page": 2,
+            "cursor": "0:0:0",
+        }
+
+        response = self.do_request(request)
+        assert response.status_code == 200, response.content
+        data = response.data["data"]
+        assert len(data) == 2
+        assert data[0]["tags_key"] == "color"
+        assert data[0]["count"] == 5
+        assert data[1]["tags_key"] == "many"
+        assert data[1]["count"] == 1
+
+        request["cursor"] = "0:2:0"
+        response = self.do_request(request)
+        assert response.status_code == 200, response.content
+        data = response.data["data"]
+        # Only 1 key in this page
+        assert len(data) == 1
+        assert data[0]["tags_key"] == "third_tag"
+        assert data[0]["count"] == 1
+
+        request["cursor"] = "0:4:0"
+        response = self.do_request(request)
+        assert response.status_code == 200, response.content
+        data = response.data["data"]
+        # 0 keys, past all 3 tag keys stored.
+        assert len(data) == 0

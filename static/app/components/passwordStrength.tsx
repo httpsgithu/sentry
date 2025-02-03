@@ -1,18 +1,12 @@
 import {Fragment} from 'react';
-import ReactDOM from 'react-dom';
 import {css} from '@emotion/react';
 import styled from '@emotion/styled';
-import throttle from 'lodash/throttle';
+// @ts-expect-error TS(7016): Could not find a declaration file for module 'zxcv... Remove this comment to see the full error message
 import zxcvbn from 'zxcvbn';
 
-import {tct} from 'app/locale';
-import space from 'app/styles/space';
-import theme from 'app/utils/theme';
-
-/**
- * NOTE: Do not import this component synchronously. The zxcvbn library is
- * relatively large. This component should be loaded async as a split chunk.
- */
+import {tct} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import theme from 'sentry/utils/theme';
 
 /**
  * The maximum score that zxcvbn reports
@@ -25,20 +19,24 @@ type Props = {
    */
   value: string;
   /**
-   * A set of labels to display for each password strength level. 5 levels.
-   */
-  labels?: [string, string, string, string, string];
-  /**
    * The color to make the progress bar for each strength level. 5 levels.
    */
   colors?: [string, string, string, string, string];
+  /**
+   * A set of labels to display for each password strength level. 5 levels.
+   */
+  labels?: [string, string, string, string, string];
 };
 
-const PasswordStrength = ({
+/**
+ * NOTE: Do not import this component synchronously. The zxcvbn library is
+ * relatively large. This component should be loaded async as a split chunk.
+ */
+export function PasswordStrength({
   value,
   labels = ['Very Weak', 'Very Weak', 'Weak', 'Strong', 'Very Strong'],
   colors = [theme.red300, theme.red300, theme.yellow300, theme.green300, theme.green300],
-}: Props) => {
+}: Props) {
   if (value === '') {
     return null;
   }
@@ -74,7 +72,7 @@ const PasswordStrength = ({
       </StrengthLabel>
     </Fragment>
   );
-};
+}
 
 const StrengthProgress = styled('div')`
   background: ${theme.gray200};
@@ -96,20 +94,3 @@ const StrengthLabel = styled('div')`
 const ScoreText = styled('strong')`
   color: ${p => p.theme.black};
 `;
-
-export default PasswordStrength;
-
-/**
- * This is a shim that allows the password strength component to be used
- * outside of our main react application. Mostly useful since all of our
- * registration pages aren't in the react app.
- */
-export const attachTo = ({input, element}) =>
-  element &&
-  input &&
-  input.addEventListener(
-    'input',
-    throttle(e => {
-      ReactDOM.render(<PasswordStrength value={e.target.value} />, element);
-    })
-  );

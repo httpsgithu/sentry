@@ -1,56 +1,63 @@
-import * as React from 'react';
+import {forwardRef} from 'react';
 import isPropValid from '@emotion/is-prop-valid';
 import styled from '@emotion/styled';
 
-import EmptyStateWarning from 'app/components/emptyStateWarning';
-import LoadingIndicator from 'app/components/loadingIndicator';
-import {t} from 'app/locale';
-import space from 'app/styles/space';
+import EmptyStateWarning from 'sentry/components/emptyStateWarning';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
 
 import Panel from './panel';
 
-type Props = {
+type PanelTableProps = {
   /**
    * Headers of the table.
    */
   headers: React.ReactNode[];
-
   /**
    * The body of the table. Make sure the number of children elements are
    * multiples of the length of headers.
    */
   children?: React.ReactNode | (() => React.ReactNode);
-
+  className?: string;
   /**
-   * If this is true, then display a loading indicator
+   * If true, disables the border-bottom on the header
    */
-  isLoading?: boolean;
-
+  disableHeaderBorderBottom?: boolean;
   /**
-   * Displays an `<EmptyStateWarning>` if true
+   * If true, disables the headers.
+   * Pass in headers as an array of `undefined` so that the
+   * columns still display appropriately.
    */
-  isEmpty?: boolean;
-
+  disableHeaders?: boolean;
+  /**
+   * Renders without predefined padding on the header and body cells
+   */
+  disablePadding?: boolean;
+  /**
+   * Action to display when isEmpty is true
+   */
+  emptyAction?: React.ReactNode;
   /**
    * Message to use for `<EmptyStateWarning>`
    */
   emptyMessage?: React.ReactNode;
   /**
-   * Action to display when isEmpty is true
+   * Displays an `<EmptyStateWarning>` if true
    */
-  emptyAction?: React.ReactNode;
-
+  isEmpty?: boolean;
   /**
-   * Renders without predefined padding on the header and body cells
+   * If this is true, then display a loading indicator
    */
-  disablePadding?: boolean;
-
-  className?: string;
-
+  isLoading?: boolean;
   /**
    * A custom loading indicator.
    */
   loader?: React.ReactNode;
+  /**
+   * If true, scrolling headers out of view will pin to the top of container.
+   */
+  stickyHeaders?: boolean;
 };
 
 /**
@@ -67,33 +74,45 @@ type Props = {
  *       with `headers`. Then we can get rid of that gross `> *` selector
  * - [ ] Allow customization of wrappers (Header and body cells if added)
  */
-const PanelTable = ({
-  headers,
-  children,
-  isLoading,
-  isEmpty,
-  disablePadding,
-  className,
-  emptyMessage = t('There are no items to display'),
-  emptyAction,
-  loader,
-  ...props
-}: Props) => {
+
+const PanelTable = forwardRef<HTMLDivElement, PanelTableProps>(function PanelTable(
+  {
+    headers,
+    children,
+    isLoading,
+    isEmpty,
+    disablePadding,
+    className,
+    emptyMessage = t('There are no items to display'),
+    emptyAction,
+    loader,
+    stickyHeaders = false,
+    disableHeaderBorderBottom = false,
+    disableHeaders,
+    ...props
+  }: PanelTableProps,
+  ref: React.Ref<HTMLDivElement>
+) {
   const shouldShowLoading = isLoading === true;
   const shouldShowEmptyMessage = !shouldShowLoading && isEmpty;
   const shouldShowContent = !shouldShowLoading && !shouldShowEmptyMessage;
 
   return (
     <Wrapper
+      ref={ref}
       columns={headers.length}
       disablePadding={disablePadding}
       className={className}
       hasRows={shouldShowContent}
+      disableHeaderBorderBottom={disableHeaderBorderBottom}
       {...props}
     >
-      {headers.map((header, i) => (
-        <PanelTableHeader key={i}>{header}</PanelTableHeader>
-      ))}
+      {!disableHeaders &&
+        headers.map((header, i) => (
+          <PanelTableHeader key={i} sticky={stickyHeaders} data-test-id="table-header">
+            {header}
+          </PanelTableHeader>
+        ))}
 
       {shouldShowLoading && (
         <LoadingWrapper>{loader || <LoadingIndicator />}</LoadingWrapper>
@@ -109,9 +128,9 @@ const PanelTable = ({
       {shouldShowContent && getContent(children)}
     </Wrapper>
   );
-};
+});
 
-function getContent(children: Props['children']) {
+function getContent(children: PanelTableProps['children']) {
   if (typeof children === 'function') {
     return children();
   }
@@ -124,8 +143,9 @@ type WrapperProps = {
    * The number of columns the table will have, this is derived from the headers list
    */
   columns: number;
+  disableHeaderBorderBottom: boolean;
+  disablePadding: PanelTableProps['disablePadding'];
   hasRows: boolean;
-  disablePadding: Props['disablePadding'];
 };
 
 const LoadingWrapper = styled('div')``;
@@ -141,12 +161,15 @@ const Wrapper = styled(Panel, {
   > * {
     ${p => (p.disablePadding ? '' : `padding: ${space(2)};`)}
 
-    &:nth-last-child(n + ${p => (p.hasRows ? p.columns + 1 : 0)}) {
-      border-bottom: 1px solid ${p => p.theme.border};
-    }
+    ${p =>
+      p.disableHeaderBorderBottom
+        ? ''
+        : `&:nth-last-child(n + ${p.hasRows ? p.columns + 1 : 0}) {
+      border-bottom: 1px solid ${p.theme.border};
+    }`}
   }
 
-  > ${/* sc-selector */ TableEmptyStateWarning}, > ${/* sc-selector */ LoadingWrapper} {
+  > ${TableEmptyStateWarning}, > ${LoadingWrapper} {
     border: none;
     grid-column: auto / span ${p => p.columns};
   }
@@ -155,10 +178,10 @@ const Wrapper = styled(Panel, {
   overflow: auto;
 `;
 
-export const PanelTableHeader = styled('div')`
+const PanelTableHeader = styled('div')<{sticky: boolean}>`
   color: ${p => p.theme.subText};
   font-size: ${p => p.theme.fontSizeSmall};
-  font-weight: 600;
+  font-weight: ${p => p.theme.fontWeightBold};
   text-transform: uppercase;
   border-radius: ${p => p.theme.borderRadius} ${p => p.theme.borderRadius} 0 0;
   background: ${p => p.theme.backgroundSecondary};
@@ -167,6 +190,14 @@ export const PanelTableHeader = styled('div')`
   flex-direction: column;
   justify-content: center;
   min-height: 45px;
+
+  ${p =>
+    p.sticky &&
+    `
+    position: sticky;
+    top: 0;
+    z-index: ${p.theme.zIndex.initial};
+  `}
 `;
 
-export default PanelTable;
+export {PanelTable, type PanelTableProps, PanelTableHeader};

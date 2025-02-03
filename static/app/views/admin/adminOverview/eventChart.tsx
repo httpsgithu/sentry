@@ -1,19 +1,19 @@
 import {Component} from 'react';
 
-import {Client} from 'app/api';
-import MiniBarChart from 'app/components/charts/miniBarChart';
-import LoadingError from 'app/components/loadingError';
-import LoadingIndicator from 'app/components/loadingIndicator';
-import {t} from 'app/locale';
-import {TimeseriesValue} from 'app/types';
-import {SeriesDataUnit} from 'app/types/echarts';
-import theme from 'app/utils/theme';
-import withApi from 'app/utils/withApi';
+import type {Client} from 'sentry/api';
+import MiniBarChart from 'sentry/components/charts/miniBarChart';
+import LoadingError from 'sentry/components/loadingError';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import {t} from 'sentry/locale';
+import type {TimeseriesValue} from 'sentry/types/core';
+import type {SeriesDataUnit} from 'sentry/types/echarts';
+import theme from 'sentry/utils/theme';
+import withApi from 'sentry/utils/withApi';
 
 type Props = {
   api: Client;
-  since: number;
   resolution: string;
+  since: number;
 };
 
 type State = {
@@ -36,11 +36,11 @@ const initialState: State = {
 class EventChart extends Component<Props, State> {
   state: State = initialState;
 
-  componentWillMount() {
+  UNSAFE_componentWillMount() {
     this.fetchData();
   }
 
-  componentWillReceiveProps(nextProps: Props) {
+  UNSAFE_componentWillReceiveProps(nextProps: Props) {
     if (this.props.since !== nextProps.since) {
       this.setState(initialState, this.fetchData);
     }
@@ -90,20 +90,20 @@ class EventChart extends Component<Props, State> {
     const sRejected: Record<string, number> = {};
     const aReceived = [0, 0]; // received, points
 
-    rawData['events.total'].forEach((point, idx) => {
+    rawData['events.total']!.forEach((point, idx) => {
       const dReceived = point[1];
-      const dRejected = rawData['events.dropped'][idx]?.[1];
+      const dRejected = rawData['events.dropped']![idx]?.[1];
       const ts = point[0];
       if (sReceived[ts] === undefined) {
         sReceived[ts] = dReceived;
-        sRejected[ts] = dRejected;
+        sRejected[ts] = dRejected!;
       } else {
         sReceived[ts] += dReceived;
-        sRejected[ts] += dRejected;
+        sRejected[ts]! += dRejected!;
       }
       if (dReceived > 0) {
-        aReceived[0] += dReceived;
-        aReceived[1] += 1;
+        aReceived[0]! += dReceived;
+        aReceived[1]! += 1;
       }
     });
 
@@ -115,7 +115,7 @@ class EventChart extends Component<Props, State> {
         })),
         accepted: Object.keys(sReceived).map(ts =>
           // total number of events accepted (received - rejected)
-          ({name: parseInt(ts, 10) * 1000, value: sReceived[ts] - sRejected[ts]})
+          ({name: parseInt(ts, 10) * 1000, value: sReceived[ts]! - sRejected[ts]!})
         ),
       },
       loading: false,
@@ -128,12 +128,12 @@ class EventChart extends Component<Props, State> {
     return [
       {
         seriesName: t('Accepted'),
-        data: stats.accepted,
+        data: stats.accepted!,
         color: theme.blue300,
       },
       {
         seriesName: t('Dropped'),
-        data: stats.rejected,
+        data: stats.rejected!,
         color: theme.red200,
       },
     ];
@@ -143,7 +143,8 @@ class EventChart extends Component<Props, State> {
     const {loading, error} = this.state;
     if (loading) {
       return <LoadingIndicator />;
-    } else if (error) {
+    }
+    if (error) {
       return <LoadingError onRetry={this.fetchData} />;
     }
     const series = this.getChartSeries();

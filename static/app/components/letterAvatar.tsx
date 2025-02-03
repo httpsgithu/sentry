@@ -1,8 +1,8 @@
-import * as React from 'react';
+import {forwardRef} from 'react';
+import {useTheme} from '@emotion/react';
 import styled from '@emotion/styled';
 
-import {imageStyle} from 'app/components/avatar/styles';
-import theme from 'app/utils/theme';
+import {imageStyle} from 'sentry/components/avatar/styles';
 
 const COLORS = [
   '#4674ca', // blue
@@ -19,7 +19,7 @@ const COLORS = [
   '#847a8c', // gray
 ] as const;
 
-type Color = typeof COLORS[number];
+type Color = (typeof COLORS)[number];
 
 function hashIdentifier(identifier: string) {
   identifier += '';
@@ -37,7 +37,7 @@ function getColor(identifier: string | undefined): Color {
   }
 
   const id = hashIdentifier(identifier);
-  return COLORS[id % COLORS.length];
+  return COLORS[id % COLORS.length]!;
 }
 
 function getInitials(displayName: string | undefined) {
@@ -46,18 +46,18 @@ function getInitials(displayName: string | undefined) {
   );
   // Use Array.from as slicing and substring() work on ucs2 segments which
   // results in only getting half of any 4+ byte character.
-  let initials = Array.from(names[0])[0];
+  let initials = Array.from(names[0]!)[0]!;
   if (names.length > 1) {
-    initials += Array.from(names[names.length - 1])[0];
+    initials += Array.from(names[names.length - 1]!)[0]!;
   }
   return initials.toUpperCase();
 }
 
 type Props = {
-  identifier?: string;
   displayName?: string;
-  round?: boolean;
   forwardedRef?: React.Ref<SVGSVGElement>;
+  identifier?: string;
+  round?: boolean;
   suggested?: boolean;
 };
 
@@ -75,37 +75,37 @@ const LetterAvatar = styled(
     forwardedRef,
     suggested,
     ...props
-  }: LetterAvatarProps) => (
-    <svg ref={forwardedRef} viewBox="0 0 120 120" {...props}>
-      <rect
-        x="0"
-        y="0"
-        width="120"
-        height="120"
-        rx="15"
-        ry="15"
-        fill={suggested ? '#FFFFFF' : getColor(identifier)}
-      />
-      <text
-        x="50%"
-        y="50%"
-        fontSize="65"
-        style={{dominantBaseline: 'central'}}
-        textAnchor="middle"
-        fill={suggested ? theme.gray400 : '#FFFFFF'}
-      >
-        {getInitials(displayName)}
-      </text>
-    </svg>
-  )
+  }: LetterAvatarProps) => {
+    const theme = useTheme();
+
+    return (
+      <svg ref={forwardedRef} viewBox="0 0 120 120" {...props}>
+        <rect
+          x="0"
+          y="0"
+          width="120"
+          height="120"
+          rx="15"
+          ry="15"
+          fill={suggested ? theme.background : getColor(identifier)}
+        />
+        <text
+          x="50%"
+          y="50%"
+          fontSize="65"
+          style={{dominantBaseline: 'central'}}
+          textAnchor="middle"
+          fill={suggested ? theme.subText : theme.white}
+        >
+          {getInitials(displayName)}
+        </text>
+      </svg>
+    );
+  }
 )<Props>`
   ${imageStyle};
 `;
 
-LetterAvatar.defaultProps = {
-  round: false,
-};
-
-export default React.forwardRef<SVGSVGElement, Props>((props, ref) => (
+export default forwardRef<SVGSVGElement, Props>((props, ref) => (
   <LetterAvatar forwardedRef={ref} {...props} />
 ));

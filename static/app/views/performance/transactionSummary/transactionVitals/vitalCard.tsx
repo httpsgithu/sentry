@@ -1,32 +1,38 @@
 import {Component} from 'react';
+import type {Theme} from '@emotion/react';
 import {withTheme} from '@emotion/react';
 import styled from '@emotion/styled';
-import {Location} from 'history';
+import type {Location} from 'history';
 import isEqual from 'lodash/isEqual';
 import throttle from 'lodash/throttle';
 
-import Button from 'app/components/button';
-import BarChart from 'app/components/charts/barChart';
-import BarChartZoom from 'app/components/charts/barChartZoom';
-import MarkLine from 'app/components/charts/components/markLine';
-import TransparentLoadingMask from 'app/components/charts/transparentLoadingMask';
-import DiscoverButton from 'app/components/discoverButton';
-import Placeholder from 'app/components/placeholder';
-import {t} from 'app/locale';
-import space from 'app/styles/space';
-import {Organization} from 'app/types';
-import {trackAnalyticsEvent} from 'app/utils/analytics';
-import EventView from 'app/utils/discover/eventView';
-import {getAggregateAlias, WebVital} from 'app/utils/discover/fields';
-import {formatAbbreviatedNumber, formatFloat, getDuration} from 'app/utils/formatters';
-import getDynamicText from 'app/utils/getDynamicText';
-import {DataFilter, HistogramData} from 'app/utils/performance/histogram/types';
-import {computeBuckets, formatHistogramData} from 'app/utils/performance/histogram/utils';
-import {Vital} from 'app/utils/performance/vitals/types';
-import {VitalData} from 'app/utils/performance/vitals/vitalsCardsDiscoverQuery';
-import {Theme} from 'app/utils/theme';
-import {MutableSearch} from 'app/utils/tokenizeSearch';
-import {EventsDisplayFilterName} from 'app/views/performance/transactionSummary/transactionEvents/utils';
+import {LinkButton} from 'sentry/components/button';
+import type {BarChartSeries} from 'sentry/components/charts/barChart';
+import {BarChart} from 'sentry/components/charts/barChart';
+import BarChartZoom from 'sentry/components/charts/barChartZoom';
+import MarkLine from 'sentry/components/charts/components/markLine';
+import TransparentLoadingMask from 'sentry/components/charts/transparentLoadingMask';
+import Placeholder from 'sentry/components/placeholder';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {Organization} from 'sentry/types/organization';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import type EventView from 'sentry/utils/discover/eventView';
+import {getAggregateAlias} from 'sentry/utils/discover/fields';
+import getDuration from 'sentry/utils/duration/getDuration';
+import type {WebVital} from 'sentry/utils/fields';
+import {formatAbbreviatedNumber} from 'sentry/utils/formatters';
+import getDynamicText from 'sentry/utils/getDynamicText';
+import {formatFloat} from 'sentry/utils/number/formatFloat';
+import type {DataFilter, HistogramData} from 'sentry/utils/performance/histogram/types';
+import {
+  computeBuckets,
+  formatHistogramData,
+} from 'sentry/utils/performance/histogram/utils';
+import type {Vital} from 'sentry/utils/performance/vitals/types';
+import type {VitalData} from 'sentry/utils/performance/vitals/vitalsCardsDiscoverQuery';
+import {MutableSearch} from 'sentry/utils/tokenizeSearch';
+import {EventsDisplayFilterName} from 'sentry/views/performance/transactionSummary/transactionEvents/utils';
 
 import {VitalBar} from '../../landing/vitalsCards';
 import {
@@ -38,25 +44,25 @@ import {
 
 import {NUM_BUCKETS, PERCENTILE} from './constants';
 import {Card, CardSectionHeading, CardSummary, Description, StatNumber} from './styles';
-import {Rectangle} from './types';
+import type {Rectangle} from './types';
 import {asPixelRect, findNearestBucketIndex, getRefRect, mapPoint} from './utils';
 
 type Props = {
-  theme: Theme;
-  location: Location;
-  organization: Organization;
-  isLoading: boolean;
-  error: boolean;
-  vital: WebVital;
-  vitalDetails: Vital;
-  summaryData: VitalData | null;
   chartData: HistogramData;
   colors: [string];
+  error: boolean;
   eventView: EventView;
-  min?: number;
-  max?: number;
-  precision?: number;
+  isLoading: boolean;
+  location: Location;
+  organization: Organization;
+  summaryData: VitalData | null;
+  theme: Theme;
+  vital: WebVital;
+  vitalDetails: Vital;
   dataFilter?: DataFilter;
+  max?: number;
+  min?: number;
+  precision?: number;
 };
 
 type State = {
@@ -113,26 +119,11 @@ class VitalCard extends Component<Props, State> {
     return {...prevState};
   }
 
-  trackOpenInDiscoverClicked = () => {
-    const {organization} = this.props;
-    const {vitalDetails: vital} = this.props;
-
-    trackAnalyticsEvent({
-      eventKey: 'performance_views.vitals.open_in_discover',
-      eventName: 'Performance Views: Open vitals in discover',
-      organization_id: organization.id,
-      vital: vital.slug,
-    });
-  };
-
   trackOpenAllEventsClicked = () => {
     const {organization} = this.props;
     const {vitalDetails: vital} = this.props;
-
-    trackAnalyticsEvent({
-      eventKey: 'performance_views.vitals.open_all_events',
-      eventName: 'Performance Views: Open vitals in all events',
-      organization_id: organization.id,
+    trackAnalytics('performance_views.vitals.open_all_events', {
+      organization,
       vital: vital.slug,
     });
   };
@@ -157,8 +148,8 @@ class VitalCard extends Component<Props, State> {
     return summary === null
       ? '\u2014'
       : type === 'duration'
-      ? getDuration(summary / 1000, 2, true)
-      : formatFloat(summary, 2);
+        ? getDuration(summary / 1000, 2, true)
+        : formatFloat(summary, 2);
   }
 
   renderSummary() {
@@ -171,9 +162,6 @@ class VitalCard extends Component<Props, State> {
       dataFilter,
     } = this.props;
     const {slug, name, description} = vital;
-    const hasPerformanceEventsPage = organization.features.includes(
-      'performance-events-page'
-    );
 
     const column = `measurements.${slug}`;
 
@@ -219,32 +207,22 @@ class VitalCard extends Component<Props, State> {
         </StatNumber>
         <Description>{description}</Description>
         <div>
-          {hasPerformanceEventsPage ? (
-            <Button
-              size="small"
-              to={newEventView
-                .withColumns([{kind: 'field', field: column}])
-                .withSorts([{kind: 'desc', field: column}])
-                .getPerformanceTransactionEventsViewUrlTarget(organization.slug, {
-                  showTransactions:
-                    dataFilter === 'all'
-                      ? EventsDisplayFilterName.p100
-                      : EventsDisplayFilterName.p75,
-                  webVital: column as WebVital,
-                })}
-              onClick={this.trackOpenAllEventsClicked}
-            >
-              {t('View All Events')}
-            </Button>
-          ) : (
-            <DiscoverButton
-              size="small"
-              to={newEventView.getResultsViewUrlTarget(organization.slug)}
-              onClick={this.trackOpenInDiscoverClicked}
-            >
-              {t('Open in Discover')}
-            </DiscoverButton>
-          )}
+          <LinkButton
+            size="xs"
+            to={newEventView
+              .withColumns([{kind: 'field', field: column}])
+              .withSorts([{kind: 'desc', field: column}])
+              .getPerformanceTransactionEventsViewUrlTarget(organization, {
+                showTransactions:
+                  dataFilter === 'all'
+                    ? EventsDisplayFilterName.P100
+                    : EventsDisplayFilterName.P75,
+                webVital: column as WebVital,
+              })}
+            onClick={this.trackOpenAllEventsClicked}
+          >
+            {t('View Sampled Events')}
+          </LinkButton>
         </div>
       </CardSummary>
     );
@@ -267,7 +245,7 @@ class VitalCard extends Component<Props, State> {
       }
 
       const refPixelRect =
-        refDataRect === null ? null : asPixelRect(chartRef, refDataRect!);
+        refDataRect === null ? null : asPixelRect(chartRef, refDataRect);
       if (refPixelRect !== null && !isEqual(refPixelRect, this.state.refPixelRect)) {
         this.setState({refPixelRect});
       }
@@ -311,7 +289,7 @@ class VitalCard extends Component<Props, State> {
       max,
       axisLabel: {
         color: theme.chartLabel,
-        formatter: formatAbbreviatedNumber,
+        formatter: (value: string | number) => formatAbbreviatedNumber(value),
       },
     };
 
@@ -347,6 +325,7 @@ class VitalCard extends Component<Props, State> {
                 showBar={false}
                 showStates={false}
                 showVitalPercentNames={false}
+                showVitalThresholds={false}
                 showDurationDetail={false}
               />
             </PercentContainer>
@@ -381,13 +360,13 @@ class VitalCard extends Component<Props, State> {
     // We can assume that all buckets are of equal width, use the first two
     // buckets to get the width. The value of each histogram function indicates
     // the beginning of the bucket.
-    return chartData.length >= 2 ? chartData[1].bin - chartData[0].bin : 0;
+    return chartData.length >= 2 ? chartData[1]!.bin - chartData[0]!.bin : 0;
   }
 
   getSeries() {
     const {theme, chartData, precision, vitalDetails, vital} = this.props;
 
-    const additionalFieldsFn = bucket => {
+    const additionalFieldsFn = (bucket: any) => {
       return {
         itemStyle: {color: theme[this.getVitalsColor(vital, bucket)]},
       };
@@ -406,19 +385,21 @@ class VitalCard extends Component<Props, State> {
   }
 
   getVitalsColor(vital: WebVital, value: number) {
+    // @ts-expect-error TS(2551): Property 'measurements.ttfb' does not exist on typ... Remove this comment to see the full error message
     const poorThreshold = webVitalPoor[vital];
+    // @ts-expect-error TS(2551): Property 'measurements.ttfb' does not exist on typ... Remove this comment to see the full error message
     const mehThreshold = webVitalMeh[vital];
 
     if (value >= poorThreshold) {
       return vitalStateColors[VitalState.POOR];
-    } else if (value >= mehThreshold) {
-      return vitalStateColors[VitalState.MEH];
-    } else {
-      return vitalStateColors[VitalState.GOOD];
     }
+    if (value >= mehThreshold) {
+      return vitalStateColors[VitalState.MEH];
+    }
+    return vitalStateColors[VitalState.GOOD];
   }
 
-  getBaselineSeries() {
+  getBaselineSeries(): BarChartSeries | null {
     const {theme, chartData} = this.props;
     const summary = this.summary;
     if (summary === null || this.state.refPixelRect === null) {
@@ -437,7 +418,7 @@ class VitalCard extends Component<Props, State> {
         y: 0,
       },
       this.state.refDataRect!,
-      this.state.refPixelRect!
+      this.state.refPixelRect
     );
     if (thresholdPixelBottom === null) {
       return null;
@@ -450,7 +431,7 @@ class VitalCard extends Component<Props, State> {
         y: Math.max(...chartData.map(data => data.count)) || 1,
       },
       this.state.refDataRect!,
-      this.state.refPixelRect!
+      this.state.refPixelRect
     );
     if (thresholdPixelTop === null) {
       return null;
@@ -466,23 +447,19 @@ class VitalCard extends Component<Props, State> {
         color: theme.textColor,
         type: 'solid',
       },
-    });
-
-    // TODO(tonyx): This conflicts with the types declaration of `MarkLine`
-    // if we add it in the constructor. So we opt to add it here so typescript
-    // doesn't complain.
-    (markLine as any).tooltip = {
-      formatter: () => {
-        return [
-          '<div class="tooltip-series tooltip-series-solo">',
-          '<span class="tooltip-label">',
-          `<strong>${t('p75')}</strong>`,
-          '</span>',
-          '</div>',
-          '<div class="tooltip-arrow"></div>',
-        ].join('');
+      tooltip: {
+        formatter: () => {
+          return [
+            '<div class="tooltip-series tooltip-series-solo">',
+            '<span class="tooltip-label">',
+            `<strong>${t('p75')}</strong>`,
+            '</span>',
+            '</div>',
+            '<div class="tooltip-arrow"></div>',
+          ].join('');
+        },
       },
-    };
+    });
 
     return {
       seriesName: t('p75'),

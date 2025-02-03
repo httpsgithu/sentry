@@ -1,11 +1,11 @@
 import 'echarts/lib/component/legend';
 import 'echarts/lib/component/legendScroll';
 
-import {EChartOption} from 'echarts';
+import type {Theme} from '@emotion/react';
+import type {LegendComponentOption} from 'echarts';
 import merge from 'lodash/merge';
 
-import BaseChart from 'app/components/charts/baseChart';
-import {Theme} from 'app/utils/theme';
+import type BaseChart from 'sentry/components/charts/baseChart';
 
 import {truncationFormatter} from '../utils';
 
@@ -13,9 +13,17 @@ type ChartProps = React.ComponentProps<typeof BaseChart>;
 
 export default function Legend(
   props: ChartProps['legend'] & {theme: Theme}
-): EChartOption.Legend {
+): LegendComponentOption {
   const {truncate, theme, ...rest} = props ?? {};
-  const formatter = (value: string) => truncationFormatter(value, truncate ?? 0);
+  const formatter = (value: string) =>
+    truncationFormatter(
+      value,
+      truncate ?? 0,
+      // Escaping the legend string will cause some special
+      // characters to render as their HTML equivalents.
+      // So disable it here.
+      false
+    );
 
   return merge(
     {

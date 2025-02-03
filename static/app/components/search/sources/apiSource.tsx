@@ -1,29 +1,32 @@
-import * as React from 'react';
-import {withRouter, WithRouterProps} from 'react-router';
+import {Component} from 'react';
 import * as Sentry from '@sentry/react';
 import debounce from 'lodash/debounce';
-import flatten from 'lodash/flatten';
 
-import {Client, ResponseMeta} from 'app/api';
-import {t} from 'app/locale';
-import {
-  EventIdResponse,
+import {fetchOrganizations} from 'sentry/actionCreators/organizations';
+import type {ResponseMeta} from 'sentry/api';
+import {Client} from 'sentry/api';
+import {t} from 'sentry/locale';
+import type {EventIdResponse} from 'sentry/types/event';
+import type {ShortIdResponse} from 'sentry/types/group';
+import type {
+  DocIntegration,
   IntegrationProvider,
-  Member,
-  Organization,
   PluginWithProjectList,
-  Project,
   SentryApp,
-  ShortIdResponse,
-  Team,
-} from 'app/types';
-import {defined} from 'app/utils';
-import {createFuzzySearch} from 'app/utils/createFuzzySearch';
-import {singleLineRenderer as markedSingleLine} from 'app/utils/marked';
-import withLatestContext from 'app/utils/withLatestContext';
-import {documentIntegrationList} from 'app/views/organizationIntegrations/constants';
+} from 'sentry/types/integrations';
+import type {WithRouterProps} from 'sentry/types/legacyReactRouter';
+import type {Member, Organization, Team} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import {defined} from 'sentry/utils';
+import type {Fuse} from 'sentry/utils/fuzzySearch';
+import {createFuzzySearch} from 'sentry/utils/fuzzySearch';
+import {singleLineRenderer as markedSingleLine} from 'sentry/utils/marked';
+import withLatestContext from 'sentry/utils/withLatestContext';
+// eslint-disable-next-line no-restricted-imports
+import withSentryRouter from 'sentry/utils/withSentryRouter';
 
-import {ChildProps, Result, ResultItem} from './types';
+import type {ChildProps, Result, ResultItem} from './types';
+import {strGetFn} from './utils';
 
 // event ids must have string length of 32
 const shouldSearchEventIds = (query?: string) =>
@@ -37,61 +40,65 @@ async function createOrganizationResults(
   organizationsPromise: Promise<Organization[]>
 ): Promise<ResultItem[]> {
   const organizations = (await organizationsPromise) || [];
-  return flatten(
-    organizations.map(org => [
-      {
-        title: t('%s Dashboard', org.slug),
-        description: t('Organization Dashboard'),
-        model: org,
-        sourceType: 'organization',
-        resultType: 'route',
-        to: `/${org.slug}/`,
-      },
-      {
-        title: t('%s Settings', org.slug),
-        description: t('Organization Settings'),
-        model: org,
-        sourceType: 'organization',
-        resultType: 'settings',
-        to: `/settings/${org.slug}/`,
-      },
-    ])
-  );
+  return organizations.flatMap(org => [
+    {
+      title: t('%s Dashboard', org.slug),
+      description: t('Organization Dashboard'),
+      model: org,
+      sourceType: 'organization',
+      resultType: 'route',
+      to: `/${org.slug}/`,
+    },
+    {
+      title: t('%s Settings', org.slug),
+      description: t('Organization Settings'),
+      model: org,
+      sourceType: 'organization',
+      resultType: 'settings',
+      to: `/settings/${org.slug}/`,
+    },
+  ]);
 }
 async function createProjectResults(
   projectsPromise: Promise<Project[]>,
-  orgId: string
+  orgId?: string
 ): Promise<ResultItem[]> {
   const projects = (await projectsPromise) || [];
-  return flatten(
-    projects.map(project => {
-      const projectResults: ResultItem[] = [
-        {
-          title: t('%s Settings', project.slug),
-          description: t('Project Settings'),
-          model: project,
-          sourceType: 'project',
-          resultType: 'settings',
-          to: `/settings/${orgId}/projects/${project.slug}/`,
-        },
-      ];
-
-      projectResults.unshift({
-        title: t('%s Dashboard', project.slug),
-        description: t('Project Details'),
+  return projects.flatMap(project => {
+    const projectResults: ResultItem[] = [
+      {
+        title: t('%s Settings', project.slug),
+        description: t('Project Settings'),
+        model: project,
+        sourceType: 'project',
+        resultType: 'settings',
+        to: `/settings/${orgId}/projects/${project.slug}/`,
+      },
+      {
+        title: t('%s Alerts', project.slug),
+        description: t('List of project alert rules'),
         model: project,
         sourceType: 'project',
         resultType: 'route',
-        to: `/organizations/${orgId}/projects/${project.slug}/?project=${project.id}`,
-      });
+        to: `/organizations/${orgId}/alerts/rules/?project=${project.id}`,
+      },
+    ];
 
-      return projectResults;
-    })
-  );
+    projectResults.unshift({
+      title: t('%s Dashboard', project.slug),
+      description: t('Project Details'),
+      model: project,
+      sourceType: 'project',
+      resultType: 'route',
+      to: `/organizations/${orgId}/projects/${project.slug}/?project=${project.id}`,
+    });
+
+    return projectResults;
+  });
 }
 async function createTeamResults(
   teamsPromise: Promise<Team[]>,
-  orgId: string
+  orgId?: string
 ): Promise<ResultItem[]> {
   const teams = (await teamsPromise) || [];
   return teams.map(team => ({
@@ -106,7 +113,7 @@ async function createTeamResults(
 
 async function createMemberResults(
   membersPromise: Promise<Member[]>,
-  orgId: string
+  orgId?: string
 ): Promise<ResultItem[]> {
   const members = (await membersPromise) || [];
   return members.map(member => ({
@@ -121,7 +128,7 @@ async function createMemberResults(
 
 async function createPluginResults(
   pluginsPromise: Promise<PluginWithProjectList[]>,
-  orgId: string
+  orgId?: string
 ): Promise<ResultItem[]> {
   const plugins = (await pluginsPromise) || [];
   return plugins
@@ -147,33 +154,31 @@ async function createPluginResults(
 
 async function createIntegrationResults(
   integrationsPromise: Promise<{providers: IntegrationProvider[]}>,
-  orgId: string
+  orgId?: string
 ): Promise<ResultItem[]> {
   const {providers} = (await integrationsPromise) || {};
   return (
-    (providers &&
-      providers.map(provider => ({
-        title: provider.name,
-        description: (
-          <span
-            dangerouslySetInnerHTML={{
-              __html: markedSingleLine(provider.metadata.description),
-            }}
-          />
-        ),
-        model: provider,
-        sourceType: 'integration',
-        resultType: 'integration',
-        to: `/settings/${orgId}/integrations/${provider.slug}/`,
-        configUrl: `/api/0/organizations/${orgId}/integrations/?provider_key=${provider.slug}&includeConfig=0`,
-      }))) ||
-    []
+    providers?.map(provider => ({
+      title: provider.name,
+      description: (
+        <span
+          dangerouslySetInnerHTML={{
+            __html: markedSingleLine(provider.metadata.description),
+          }}
+        />
+      ),
+      model: provider,
+      sourceType: 'integration',
+      resultType: 'integration',
+      to: `/settings/${orgId}/integrations/${provider.slug}/`,
+      configUrl: `/api/0/organizations/${orgId}/integrations/?provider_key=${provider.slug}&includeConfig=0`,
+    })) || []
   );
 }
 
 async function createSentryAppResults(
   sentryAppPromise: Promise<SentryApp[]>,
-  orgId: string
+  orgId?: string
 ): Promise<ResultItem[]> {
   const sentryApps = (await sentryAppPromise) || [];
   return sentryApps.map(sentryApp => ({
@@ -187,26 +192,29 @@ async function createSentryAppResults(
     ),
     model: sentryApp,
     sourceType: 'sentryApp',
-    resultType: 'integration',
+    resultType: 'sentryApp',
     to: `/settings/${orgId}/sentry-apps/${sentryApp.slug}/`,
   }));
 }
 
-// Not really async but we need to return a promise
-async function creatDocIntegrationResults(orgId: string): Promise<ResultItem[]> {
-  return documentIntegrationList.map(integration => ({
-    title: integration.name,
+async function createDocIntegrationResults(
+  docIntegrationPromise: Promise<DocIntegration[]>,
+  orgId?: string
+): Promise<ResultItem[]> {
+  const docIntegrations = (await docIntegrationPromise) || [];
+  return docIntegrations.map(docIntegration => ({
+    title: docIntegration.name,
     description: (
       <span
         dangerouslySetInnerHTML={{
-          __html: markedSingleLine(integration.description),
+          __html: markedSingleLine(docIntegration.description || ''),
         }}
       />
     ),
-    model: integration,
+    model: docIntegration,
     sourceType: 'docIntegration',
-    resultType: 'integration',
-    to: `/settings/${orgId}/document-integrations/${integration.slug}/`,
+    resultType: 'docIntegration',
+    to: `/settings/${orgId}/document-integrations/${docIntegration.slug}/`,
   }));
 }
 
@@ -218,19 +226,18 @@ async function createShortIdLookupResult(
     return null;
   }
 
-  const issue = shortIdLookup && shortIdLookup.group;
+  const issue = shortIdLookup?.group;
   return {
     item: {
-      title: `${
-        (issue && issue.metadata && issue.metadata.type) || shortIdLookup.shortId
-      }`,
-      description: `${(issue && issue.metadata && issue.metadata.value) || t('Issue')}`,
+      title: `${issue?.metadata?.type || shortIdLookup.shortId}`,
+      description: `${issue?.metadata?.value || t('Issue')}`,
       model: shortIdLookup.group,
       sourceType: 'issue',
       resultType: 'issue',
       to: `/${shortIdLookup.organizationSlug}/${shortIdLookup.projectSlug}/issues/${shortIdLookup.groupId}/`,
     },
     score: 1,
+    refIndex: 0,
   };
 }
 
@@ -242,40 +249,41 @@ async function createEventIdLookupResult(
     return null;
   }
 
-  const event = eventIdLookup && eventIdLookup.event;
+  const event = eventIdLookup?.event;
   return {
     item: {
-      title: `${(event && event.metadata && event.metadata.type) || t('Event')}`,
-      description: `${event && event.metadata && event.metadata.value}`,
+      title: `${event?.metadata?.type || t('Event')}`,
+      description: `${event?.metadata?.value}`,
       sourceType: 'event',
       resultType: 'event',
       to: `/${eventIdLookup.organizationSlug}/${eventIdLookup.projectSlug}/issues/${eventIdLookup.groupId}/events/${eventIdLookup.eventId}/`,
     },
     score: 1,
+    refIndex: 0,
   };
 }
 
-type Props = WithRouterProps<{orgId: string}> & {
+type Props = WithRouterProps<{}> & {
+  children: (props: ChildProps) => React.ReactElement;
   /**
    * search term
    */
   query: string;
-  organization: Organization;
-  children: (props: ChildProps) => React.ReactElement;
+  organization?: Organization;
   /**
    * fuse.js options
    */
-  searchOptions?: Fuse.FuseOptions<ResultItem>;
+  searchOptions?: Fuse.IFuseOptions<ResultItem>;
 };
 
 type State = {
+  directResults: null | Result[];
+  fuzzy: null | Fuse<ResultItem>;
   loading: boolean;
   searchResults: null | Result[];
-  directResults: null | Result[];
-  fuzzy: null | Fuse<ResultItem, Fuse.FuseOptions<ResultItem>>;
 };
 
-class ApiSource extends React.Component<Props, State> {
+class ApiSource extends Component<Props, State> {
   static defaultProps = {
     searchOptions: {},
   };
@@ -300,7 +308,7 @@ class ApiSource extends React.Component<Props, State> {
     // Otherwise it'd be constant :spinning_loading_wheel:
     if (
       (nextProps.query.length <= 2 &&
-        nextProps.query.substr(0, 2) !== this.props.query.substr(0, 2)) ||
+        nextProps.query.substring(0, 2) !== this.props.query.substring(0, 2)) ||
       // Also trigger a search if next query value satisfies an eventid/shortid query
       shouldSearchShortIds(nextProps.query) ||
       shouldSearchEventIds(nextProps.query)
@@ -313,11 +321,12 @@ class ApiSource extends React.Component<Props, State> {
   api = new Client();
 
   // Debounced method to handle querying all API endpoints (when necessary)
-  doSearch = debounce(async (query: string) => {
-    const {params, organization} = this.props;
-    const orgId = (params && params.orgId) || (organization && organization.slug);
-    let searchUrls = ['/organizations/'];
-    let directUrls: (string | null)[] = [];
+  doSearch = debounce((query: string) => {
+    const {organization} = this.props;
+    const orgId = organization?.slug;
+
+    let searchUrls: string[] = [];
+    let directUrls: Array<string | null> = [];
 
     // Only run these queries when we have an org in context
     if (orgId) {
@@ -329,6 +338,7 @@ class ApiSource extends React.Component<Props, State> {
         `/organizations/${orgId}/plugins/configs/`,
         `/organizations/${orgId}/config/integrations/`,
         '/sentry-apps/?status=published',
+        '/doc-integrations/',
       ];
 
       directUrls = [
@@ -336,21 +346,23 @@ class ApiSource extends React.Component<Props, State> {
         shouldSearchEventIds(query) ? `/organizations/${orgId}/eventids/${query}/` : null,
       ];
     }
-
-    const searchRequests = searchUrls.map(url =>
-      this.api
-        .requestPromise(url, {
-          query: {
-            query,
-          },
-        })
-        .then(
-          resp => resp,
-          err => {
-            this.handleRequestError(err, {orgId, url});
-            return null;
-          }
-        )
+    let searchRequests = [fetchOrganizations(this.api, {query})];
+    searchRequests = searchRequests.concat(
+      searchUrls.map(url =>
+        this.api
+          .requestPromise(url, {
+            query: {
+              query,
+            },
+          })
+          .then(
+            resp => resp,
+            err => {
+              this.handleRequestError(err, {orgId, url});
+              return null;
+            }
+          )
+      )
     );
 
     const directRequests = directUrls.map(url => {
@@ -374,22 +386,23 @@ class ApiSource extends React.Component<Props, State> {
     this.handleSearchRequest(searchRequests, directRequests);
   }, 150);
 
-  handleRequestError = (err: ResponseMeta, {url, orgId}) => {
-    Sentry.withScope(scope => {
-      scope.setExtra(
-        'url',
-        url.replace(`/organizations/${orgId}/`, '/organizations/:orgId/')
-      );
-      Sentry.captureException(
-        new Error(`API Source Failed: ${err?.responseJSON?.detail}`)
-      );
-    });
+  handleRequestError = (err: ResponseMeta, {url, orgId}: any) => {
+    if (err && err.status !== 401 && err.status !== 403) {
+      Sentry.withScope(scope => {
+        scope.setExtra(
+          'url',
+          url.replace(`/organizations/${orgId}/`, '/organizations/:orgId/')
+        );
+        scope.setFingerprint(['api-source-failed']);
+        Sentry.captureException(err);
+      });
+    }
   };
 
   // Handles a list of search request promises, and then updates state with response objects
   async handleSearchRequest(
-    searchRequests: Promise<ResultItem[]>[],
-    directRequests: Promise<Result | null>[]
+    searchRequests: Array<Promise<ResultItem[]>>,
+    directRequests: Array<Promise<Result | null>>
   ) {
     const {searchOptions} = this.props;
 
@@ -398,67 +411,85 @@ class ApiSource extends React.Component<Props, State> {
     //
     // This isn't particularly helpful in its current form because we still wait for all requests to finish before
     // updating state, but you could potentially optimize rendering direct results before all requests are finished.
-    const [organizations, projects, teams, members, plugins, integrations, sentryApps] =
-      searchRequests;
+    const [
+      organizations,
+      projects,
+      teams,
+      members,
+      plugins,
+      integrations,
+      sentryApps,
+      docIntegrations,
+    ] = searchRequests;
     const [shortIdLookup, eventIdLookup] = directRequests;
 
     const [searchResults, directResults] = await Promise.all([
       this.getSearchableResults([
-        organizations,
-        projects,
-        teams,
-        members,
-        plugins,
-        integrations,
-        sentryApps,
+        organizations!,
+        projects!,
+        teams!,
+        members!,
+        plugins!,
+        integrations!,
+        sentryApps!,
+        docIntegrations!,
       ]),
-      this.getDirectResults([shortIdLookup, eventIdLookup]),
+      this.getDirectResults([shortIdLookup!, eventIdLookup!]),
     ]);
 
-    // TODO(XXX): Might consider adding logic to maintain consistent ordering of results so things don't switch positions
-    const fuzzy = createFuzzySearch<ResultItem>(searchResults, {
+    // TODO(XXX): Might consider adding logic to maintain consistent ordering
+    // of results so things don't switch positions
+    const fuzzy = await createFuzzySearch(searchResults, {
       ...searchOptions,
       keys: ['title', 'description'],
+      getFn: strGetFn,
     });
 
     this.setState({
       loading: false,
-      fuzzy: await fuzzy,
+      fuzzy,
       directResults,
     });
   }
 
   // Process API requests that create result objects that should be searchable
-  async getSearchableResults(requests) {
-    const {params, organization} = this.props;
-    const orgId = (params && params.orgId) || (organization && organization.slug);
-    const [organizations, projects, teams, members, plugins, integrations, sentryApps] =
-      requests;
-    const searchResults = flatten(
-      await Promise.all([
-        createOrganizationResults(organizations),
-        createProjectResults(projects, orgId),
-        createTeamResults(teams, orgId),
-        createMemberResults(members, orgId),
-        createIntegrationResults(integrations, orgId),
-        createPluginResults(plugins, orgId),
-        createSentryAppResults(sentryApps, orgId),
-        creatDocIntegrationResults(orgId),
-      ])
-    );
+  async getSearchableResults(requests: Array<Promise<any>>) {
+    const {organization} = this.props;
+    const orgId = organization?.slug;
 
-    return searchResults;
+    const [
+      organizations,
+      projects,
+      teams,
+      members,
+      plugins,
+      integrations,
+      sentryApps,
+      docIntegrations,
+    ] = requests;
+    const searchResults = await Promise.all([
+      createOrganizationResults(organizations!),
+      createProjectResults(projects!, orgId),
+      createTeamResults(teams!, orgId),
+      createMemberResults(members!, orgId),
+      createIntegrationResults(integrations!, orgId),
+      createPluginResults(plugins!, orgId),
+      createSentryAppResults(sentryApps!, orgId),
+      createDocIntegrationResults(docIntegrations!, orgId),
+    ]);
+
+    return searchResults.flat();
   }
 
   // Create result objects from API requests that do not require fuzzy search
   // i.e. these responses only return 1 object or they should always be displayed regardless of query input
-  async getDirectResults(requests: Promise<any>[]): Promise<Result[]> {
+  async getDirectResults(requests: Array<Promise<any>>): Promise<Result[]> {
     const [shortIdLookup, eventIdLookup] = requests;
 
     const directResults = (
       await Promise.all([
-        createShortIdLookupResult(shortIdLookup),
-        createEventIdLookupResult(eventIdLookup),
+        createShortIdLookupResult(shortIdLookup!),
+        createEventIdLookupResult(eventIdLookup!),
       ])
     ).filter(defined);
 
@@ -472,17 +503,14 @@ class ApiSource extends React.Component<Props, State> {
   render() {
     const {children, query} = this.props;
     const {fuzzy, directResults} = this.state;
-    let results: Result[] = [];
-    if (fuzzy) {
-      results = fuzzy.search<ResultItem, true, true>(query);
-    }
+    const results = fuzzy?.search(query) ?? [];
 
     return children({
       isLoading: this.state.loading,
-      results: flatten([results, directResults].filter(defined)) || [],
+      results: [results, directResults].flat().filter(defined),
     });
   }
 }
 
 export {ApiSource};
-export default withLatestContext(withRouter(ApiSource));
+export default withLatestContext(withSentryRouter(ApiSource));

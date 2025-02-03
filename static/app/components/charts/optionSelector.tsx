@@ -1,157 +1,122 @@
-import {Component, createRef, Fragment} from 'react';
+import {Fragment, useMemo} from 'react';
 import styled from '@emotion/styled';
-import isEqual from 'lodash/isEqual';
 
-import {InlineContainer, SectionHeading} from 'app/components/charts/styles';
-import DropdownBubble from 'app/components/dropdownBubble';
-import DropdownButton from 'app/components/dropdownButton';
-import {DropdownItem} from 'app/components/dropdownControl';
-import DropdownMenu from 'app/components/dropdownMenu';
-import Tooltip from 'app/components/tooltip';
-import Truncate from 'app/components/truncate';
-import overflowEllipsis from 'app/styles/overflowEllipsis';
-import space from 'app/styles/space';
-import {SelectValue} from 'app/types';
+import FeatureBadge from 'sentry/components/badge/featureBadge';
+import type {
+  MultipleSelectProps,
+  SelectOption,
+  SingleSelectProps,
+} from 'sentry/components/compactSelect';
+import {CompactSelect} from 'sentry/components/compactSelect';
+import type {SelectOptionWithKey} from 'sentry/components/compactSelect/types';
+import Truncate from 'sentry/components/truncate';
+import {defined} from 'sentry/utils';
 
-const defaultProps = {
-  menuWidth: 'auto',
-};
-
-type Props = {
-  options: SelectValue<string>[];
-  selected: string;
-  onChange: (value: string) => void;
+type BaseProps = {
   title: string;
-} & typeof defaultProps;
-
-type State = {
-  menuContainerWidth?: number;
+  featureType?: 'alpha' | 'beta' | 'new';
 };
 
-class OptionSelector extends Component<Props, State> {
-  static defaultProps = defaultProps;
-
-  state: State = {};
-
-  componentDidMount() {
-    this.setMenuContainerWidth();
-  }
-
-  shouldComponentUpdate(nextProps: Props, nextState: State) {
-    return !isEqual(nextProps, this.props) || !isEqual(nextState, this.state);
-  }
-
-  componentDidUpdate(prevProps: Props) {
-    if (prevProps.selected !== this.props.selected) {
-      this.setMenuContainerWidth();
-    }
-  }
-
-  setMenuContainerWidth() {
-    const menuContainerWidth = this.menuContainerRef?.current?.offsetWidth;
-    if (menuContainerWidth) {
-      this.setState({menuContainerWidth});
-    }
-  }
-
-  menuContainerRef = createRef<HTMLDivElement>();
-
-  render() {
-    const {menuContainerWidth} = this.state;
-    const {options, onChange, selected, title, menuWidth} = this.props;
-    const selectedOption = options.find(opt => selected === opt.value) || options[0];
-
-    return (
-      <InlineContainer>
-        <SectionHeading>{title}</SectionHeading>
-        <MenuContainer ref={this.menuContainerRef}>
-          <DropdownMenu alwaysRenderMenu={false}>
-            {({isOpen, getMenuProps, getActorProps}) => (
-              <Fragment>
-                <StyledDropdownButton {...getActorProps()} size="zero" isOpen={isOpen}>
-                  <TruncatedLabel>{String(selectedOption.label)}</TruncatedLabel>
-                </StyledDropdownButton>
-                <StyledDropdownBubble
-                  {...getMenuProps()}
-                  alignMenu="right"
-                  width={menuWidth}
-                  minWidth={menuContainerWidth}
-                  isOpen={isOpen}
-                  blendWithActor={false}
-                  blendCorner
-                >
-                  {options.map(opt => (
-                    <StyledDropdownItem
-                      key={opt.value}
-                      onSelect={onChange}
-                      eventKey={opt.value}
-                      disabled={opt.disabled}
-                      isActive={selected === opt.value}
-                      data-test-id={`option-${opt.value}`}
-                    >
-                      <Tooltip title={opt.tooltip} containerDisplayMode="inline">
-                        <StyledTruncate
-                          isActive={selected === opt.value}
-                          value={String(opt.label)}
-                          maxLength={60}
-                          expandDirection="left"
-                        />
-                      </Tooltip>
-                    </StyledDropdownItem>
-                  ))}
-                </StyledDropdownBubble>
-              </Fragment>
-            )}
-          </DropdownMenu>
-        </MenuContainer>
-      </InlineContainer>
-    );
-  }
+interface SingleProps
+  extends Omit<
+      SingleSelectProps<string>,
+      'onChange' | 'defaultValue' | 'multiple' | 'title'
+    >,
+    BaseProps {
+  onChange: (value: string) => void;
+  selected: string;
+  defaultValue?: string;
+  multiple?: false;
 }
 
-const TruncatedLabel = styled('span')`
-  ${overflowEllipsis};
-  max-width: 400px;
-`;
+interface MultipleProps
+  extends Omit<
+      MultipleSelectProps<string>,
+      'onChange' | 'defaultValue' | 'multiple' | 'title'
+    >,
+    BaseProps {
+  multiple: true;
+  onChange: (value: string[]) => void;
+  selected: string[];
+  defaultValue?: string[];
+}
 
-const StyledTruncate = styled(Truncate)<{
-  isActive: boolean;
-}>`
-  & span {
-    ${p =>
-      p.isActive &&
-      `
-      color: ${p.theme.white};
-      background: ${p.theme.active};
-      border: none;
-    `}
+function OptionSelector({
+  options,
+  onChange,
+  selected,
+  title,
+  featureType,
+  multiple,
+  defaultValue,
+  closeOnSelect,
+  ...rest
+}: SingleProps | MultipleProps) {
+  const mappedOptions = useMemo(() => {
+    return options.map(opt => ({
+      ...opt,
+      textValue: String(opt.label),
+      label: <Truncate value={String(opt.label)} maxLength={60} expandDirection="left" />,
+    }));
+  }, [options]);
+
+  const selectProps = useMemo(() => {
+    // Use an if statement to help TS separate MultipleProps and SingleProps
+    if (multiple) {
+      return {
+        multiple,
+        value: selected,
+        defaultValue,
+        onChange: (sel: Array<SelectOption<string>>) => {
+          onChange?.(sel.map(o => o.value));
+        },
+        closeOnSelect,
+      };
+    }
+
+    return {
+      multiple,
+      value: selected,
+      defaultValue,
+      onChange: (opt: any) => onChange?.(opt.value),
+      closeOnSelect,
+    };
+  }, [multiple, selected, defaultValue, onChange, closeOnSelect]);
+
+  function isOptionDisabled(option: SelectOptionWithKey<string>) {
+    return Boolean(
+      // Option is explicitly marked as disabled
+      // The user has reached the maximum number of selections (3), and the option hasn't
+      // yet been selected. These options should be disabled to visually indicate that the
+      // user has reached the max.
+      option.disabled ||
+        (multiple && selected.length === 3 && !selected.includes(option.value))
+    );
   }
-`;
 
-const MenuContainer = styled('div')`
-  display: inline-block;
-  position: relative;
-`;
+  return (
+    <CompactSelect
+      {...rest}
+      {...selectProps}
+      size="sm"
+      options={mappedOptions}
+      isOptionDisabled={isOptionDisabled}
+      position="bottom-end"
+      triggerProps={{
+        borderless: true,
+        prefix: (
+          <Fragment>
+            {title}
+            {defined(featureType) ? <StyledFeatureBadge type={featureType} /> : null}
+          </Fragment>
+        ),
+      }}
+    />
+  );
+}
 
-const StyledDropdownButton = styled(DropdownButton)`
-  padding: ${space(1)} ${space(2)};
-  font-weight: normal;
-  z-index: ${p => (p.isOpen ? p.theme.zIndex.dropdownAutocomplete.actor : 'auto')};
-`;
-
-const StyledDropdownBubble = styled(DropdownBubble)<{
-  isOpen: boolean;
-  minWidth?: number;
-}>`
-  display: ${p => (p.isOpen ? 'block' : 'none')};
-  overflow: visible;
-  ${p =>
-    p.minWidth && p.width === 'auto' && `min-width: calc(${p.minWidth}px + ${space(3)})`};
-`;
-
-const StyledDropdownItem = styled(DropdownItem)`
-  line-height: ${p => p.theme.text.lineHeightBody};
-  white-space: nowrap;
+const StyledFeatureBadge = styled(FeatureBadge)`
+  margin-left: 0px;
 `;
 
 export default OptionSelector;

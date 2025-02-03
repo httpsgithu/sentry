@@ -1,6 +1,7 @@
-import {t} from 'app/locale';
+import {t} from 'sentry/locale';
 
-import {MethodType, RuleType, SourceSuggestion, SourceSuggestionType} from './types';
+import type {Rule, SourceSuggestion} from './types';
+import {MethodType, RuleType, SourceSuggestionType} from './types';
 
 function getRuleLabel(type: RuleType) {
   switch (type) {
@@ -64,7 +65,7 @@ function getMethodLabel(type: MethodType) {
   }
 }
 
-const binarySuggestions: Array<SourceSuggestion> = [
+const binarySuggestions: SourceSuggestion[] = [
   {
     type: SourceSuggestionType.BINARY,
     value: '&&',
@@ -75,15 +76,19 @@ const binarySuggestions: Array<SourceSuggestion> = [
   },
 ];
 
-const unarySuggestions: Array<SourceSuggestion> = [
+const unarySuggestions: SourceSuggestion[] = [
   {
     type: SourceSuggestionType.UNARY,
     value: '!',
   },
 ];
 
-const valueSuggestions: Array<SourceSuggestion> = [
-  {type: SourceSuggestionType.VALUE, value: '**', description: t('everywhere')},
+const valueSuggestions: SourceSuggestion[] = [
+  {
+    type: SourceSuggestionType.VALUE,
+    value: '**',
+    description: t('all default PII fields'),
+  },
   {
     type: SourceSuggestionType.VALUE,
     value: 'password',
@@ -173,3 +178,23 @@ export {
   unarySuggestions,
   valueSuggestions,
 };
+
+export function getRuleDescription(rule: Rule) {
+  const {method, type, source} = rule;
+  const methodLabel = getMethodLabel(method);
+  const typeLabel = getRuleLabel(type);
+
+  const descriptionDetails: string[] = [];
+
+  descriptionDetails.push(`[${methodLabel.label}]`);
+
+  descriptionDetails.push(
+    rule.type === RuleType.PATTERN ? `[${rule.pattern}]` : `[${typeLabel}]`
+  );
+
+  if (rule.method === MethodType.REPLACE && rule.placeholder) {
+    descriptionDetails.push(`with [${rule.placeholder}]`);
+  }
+
+  return `${descriptionDetails.join(' ')} ${t('from')} [${source}]`;
+}

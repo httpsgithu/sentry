@@ -1,47 +1,69 @@
-import * as React from 'react';
-import {RouteComponentProps} from 'react-router';
+import {cloneElement, Fragment, isValidElement} from 'react';
 
-import * as AppStoreConnectContext from 'app/components/projects/appStoreConnectContext';
-import {Organization} from 'app/types';
-import withOrganization from 'app/utils/withOrganization';
-import ProjectContext from 'app/views/projects/projectContext';
-import SettingsLayout from 'app/views/settings/components/settingsLayout';
-import ProjectSettingsNavigation from 'app/views/settings/project/projectSettingsNavigation';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import useRouteAnalyticsParams from 'sentry/utils/routeAnalytics/useRouteAnalyticsParams';
+import withOrganization from 'sentry/utils/withOrganization';
+import ProjectContext from 'sentry/views/projects/projectContext';
+import SettingsLayout from 'sentry/views/settings/components/settingsLayout';
+import ProjectSettingsNavigation from 'sentry/views/settings/project/projectSettingsNavigation';
 
 type Props = {
-  organization: Organization;
   children: React.ReactNode;
-} & RouteComponentProps<{orgId: string; projectId: string}, {}>;
+  organization: Organization;
+} & RouteComponentProps<{projectId: string}, {}>;
 
-function ProjectSettingsLayout({
+type InnerProps = Props & {project: Project};
+
+function InnerProjectSettingsLayout({
   params,
+  routes,
+  project,
   organization,
   children,
-  routes,
   ...props
-}: Props) {
-  const {orgId, projectId} = params;
+}: InnerProps) {
+  // set analytics params for route based analytics
+  useRouteAnalyticsParams({
+    project_id: project.id,
+    project_platform: project.platform,
+  });
+
+  const hasNavigationV2 = organization?.features.includes('navigation-sidebar-v2');
+
+  if (hasNavigationV2) {
+    return (
+      <Fragment>
+        <ProjectSettingsNavigation organization={organization} />
+        <SettingsLayout params={params} routes={routes} {...props}>
+          {children && isValidElement(children)
+            ? cloneElement<any>(children, {organization, project})
+            : children}
+        </SettingsLayout>
+      </Fragment>
+    );
+  }
 
   return (
-    <ProjectContext orgId={orgId} projectId={projectId}>
+    <SettingsLayout
+      params={params}
+      routes={routes}
+      {...props}
+      renderNavigation={() => <ProjectSettingsNavigation organization={organization} />}
+    >
+      {children && isValidElement(children)
+        ? cloneElement<any>(children, {organization, project})
+        : children}
+    </SettingsLayout>
+  );
+}
+
+function ProjectSettingsLayout({organization, params, ...props}: Props) {
+  return (
+    <ProjectContext projectSlug={params.projectId}>
       {({project}) => (
-        <AppStoreConnectContext.Provider project={project} organization={organization}>
-          <SettingsLayout
-            params={params}
-            routes={routes}
-            {...props}
-            renderNavigation={() => (
-              <ProjectSettingsNavigation organization={organization} />
-            )}
-          >
-            {children && React.isValidElement(children)
-              ? React.cloneElement(children, {
-                  organization,
-                  project,
-                })
-              : children}
-          </SettingsLayout>
-        </AppStoreConnectContext.Provider>
+        <InnerProjectSettingsLayout {...{params, project, organization, ...props}} />
       )}
     </ProjectContext>
   );

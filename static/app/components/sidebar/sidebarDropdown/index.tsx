@@ -1,59 +1,48 @@
 import {Fragment} from 'react';
 import styled from '@emotion/styled';
 
-import {logout} from 'app/actionCreators/account';
-import {Client} from 'app/api';
-import DemoModeGate from 'app/components/acl/demoModeGate';
-import Avatar from 'app/components/avatar';
-import DropdownMenu from 'app/components/dropdownMenu';
-import Hook from 'app/components/hook';
-import IdBadge from 'app/components/idBadge';
-import Link from 'app/components/links/link';
-import SidebarDropdownMenu from 'app/components/sidebar/sidebarDropdownMenu.styled';
-import SidebarMenuItem, {menuItemStyles} from 'app/components/sidebar/sidebarMenuItem';
-import SidebarOrgSummary from 'app/components/sidebar/sidebarOrgSummary';
-import TextOverflow from 'app/components/textOverflow';
-import {IconChevron, IconSentry} from 'app/icons';
-import {t} from 'app/locale';
-import ConfigStore from 'app/stores/configStore';
-import space from 'app/styles/space';
-import {Config, Organization, Project, User} from 'app/types';
-import withApi from 'app/utils/withApi';
-import withProjects from 'app/utils/withProjects';
+import {logout} from 'sentry/actionCreators/account';
+import DemoModeGate from 'sentry/components/acl/demoModeGate';
+import Avatar from 'sentry/components/avatar';
+import {Chevron} from 'sentry/components/chevron';
+import DeprecatedDropdownMenu from 'sentry/components/deprecatedDropdownMenu';
+import Hook from 'sentry/components/hook';
+import IdBadge from 'sentry/components/idBadge';
+import Link from 'sentry/components/links/link';
+import SidebarDropdownMenu from 'sentry/components/sidebar/sidebarDropdownMenu.styled';
+import SidebarMenuItem, {menuItemStyles} from 'sentry/components/sidebar/sidebarMenuItem';
+import SidebarOrgSummary from 'sentry/components/sidebar/sidebarOrgSummary';
+import TextOverflow from 'sentry/components/textOverflow';
+import {IconSentry} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import ConfigStore from 'sentry/stores/configStore';
+import {useLegacyStore} from 'sentry/stores/useLegacyStore';
+import {space} from 'sentry/styles/space';
+import useApi from 'sentry/utils/useApi';
+import useOrganization from 'sentry/utils/useOrganization';
+import useProjects from 'sentry/utils/useProjects';
+import {useUser} from 'sentry/utils/useUser';
 
-import SidebarMenuItemLink from '../sidebarMenuItemLink';
-import {CommonSidebarProps} from '../types';
+import type SidebarMenuItemLink from '../sidebarMenuItemLink';
+import type {CommonSidebarProps} from '../types';
 
 import Divider from './divider.styled';
 import SwitchOrganization from './switchOrganization';
 
-// TODO: make org and user optional props
 type Props = Pick<CommonSidebarProps, 'orientation' | 'collapsed'> & {
-  api: Client;
-  org: Organization;
-  projects: Project[];
-  user: User;
-  config: Config;
   /**
    * Set to true to hide links within the organization
    */
   hideOrgLinks?: boolean;
 };
 
-const SidebarDropdown = ({
-  api,
-  org,
-  projects,
-  orientation,
-  collapsed,
-  config,
-  user,
-  hideOrgLinks,
-}: Props) => {
-  const handleLogout = async () => {
-    await logout(api);
-    window.location.assign('/auth/login/');
-  };
+export default function SidebarDropdown({orientation, collapsed, hideOrgLinks}: Props) {
+  const api = useApi();
+
+  const config = useLegacyStore(ConfigStore);
+  const org = useOrganization({allowNull: true});
+  const user = useUser();
+  const {projects} = useProjects();
 
   const hasOrganization = !!org;
   const hasUser = !!user;
@@ -65,24 +54,28 @@ const SidebarDropdown = ({
   const hasTeamRead = org?.access?.includes('team:read');
   const canCreateOrg = ConfigStore.get('features').has('organizations:create');
 
+  function handleLogout() {
+    logout(api);
+  }
+
   // Avatar to use: Organization --> user --> Sentry
   const avatar =
     hasOrganization || hasUser ? (
       <StyledAvatar
         collapsed={collapsed}
-        organization={org}
+        organization={org ?? undefined}
         user={!org ? user : undefined}
         size={32}
         round={false}
       />
     ) : (
       <SentryLink to="/">
-        <IconSentry size="32px" />
+        <IconSentry size="xl" />
       </SentryLink>
     );
 
   return (
-    <DropdownMenu>
+    <DeprecatedDropdownMenu>
       {({isOpen, getRootProps, getActorProps, getMenuProps}) => (
         <SidebarDropdownRoot {...getRootProps()}>
           <SidebarDropdownActor
@@ -90,15 +83,15 @@ const SidebarDropdown = ({
             data-test-id="sidebar-dropdown"
             {...getActorProps({})}
           >
-            {avatar}
+            <AvatarWrapper>{avatar}</AvatarWrapper>
             {!collapsed && orientation !== 'top' && (
               <OrgAndUserWrapper>
                 <OrgOrUserName>
-                  {hasOrganization ? org.name : user.name}{' '}
-                  <StyledIconChevron color="white" size="xs" direction="down" />
+                  {hasOrganization ? org.name : user?.name}{' '}
+                  <StyledChevron direction={isOpen ? 'up' : 'down'} />
                 </OrgOrUserName>
                 <UserNameOrEmail>
-                  {hasOrganization ? user.name : user.email}
+                  {hasOrganization ? user?.name : user?.email}
                 </UserNameOrEmail>
               </OrgAndUserWrapper>
             )}
@@ -136,9 +129,11 @@ const SidebarDropdown = ({
                   )}
 
                   {!config.singleOrganization && (
-                    <SidebarMenuItem>
-                      <SwitchOrganization canCreateOrganization={canCreateOrg} />
-                    </SidebarMenuItem>
+                    <DemoModeGate>
+                      <SidebarMenuItem>
+                        <SwitchOrganization canCreateOrganization={canCreateOrg} />
+                      </SidebarMenuItem>
+                    </DemoModeGate>
                   )}
                 </Fragment>
               )}
@@ -156,17 +151,19 @@ const SidebarDropdown = ({
                         {t('User settings')}
                       </SidebarMenuItem>
                       <SidebarMenuItem to="/settings/account/api/">
-                        {t('API keys')}
+                        {t('User auth tokens')}
                       </SidebarMenuItem>
-                      <Hook
-                        name="sidebar:organization-dropdown-menu-bottom"
-                        organization={org}
-                      />
+                      {hasOrganization && (
+                        <Hook
+                          name="sidebar:organization-dropdown-menu-bottom"
+                          organization={org}
+                        />
+                      )}
                       {user.isSuperuser && (
                         <SidebarMenuItem to="/manage/">{t('Admin')}</SidebarMenuItem>
                       )}
                       <SidebarMenuItem
-                        data-test-id="sidebarSignout"
+                        data-test-id="sidebar-signout"
                         onClick={handleLogout}
                       >
                         {t('Sign out')}
@@ -179,11 +176,9 @@ const SidebarDropdown = ({
           )}
         </SidebarDropdownRoot>
       )}
-    </DropdownMenu>
+    </DeprecatedDropdownMenu>
   );
-};
-
-export default withApi(withProjects(SidebarDropdown));
+}
 
 const SentryLink = styled(Link)`
   color: ${p => p.theme.white};
@@ -205,17 +200,18 @@ const UserBadgeNoOverflow = styled(IdBadge)`
 
 const SidebarDropdownRoot = styled('div')`
   position: relative;
+  padding: 0 3px; /* align org icon with sidebar item icons */
 `;
 
 // So that long org names and user names do not overflow
 const OrgAndUserWrapper = styled('div')`
-  overflow: hidden;
+  overflow-x: hidden;
   text-align: left;
 `;
 const OrgOrUserName = styled(TextOverflow)`
   font-size: ${p => p.theme.fontSizeLarge};
   line-height: 1.2;
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
   color: ${p => p.theme.white};
   text-shadow: 0 0 6px rgba(255, 255, 255, 0);
   transition: 0.15s text-shadow linear;
@@ -241,7 +237,7 @@ const SidebarDropdownActor = styled('button')`
       text-shadow: 0 0 6px rgba(255, 255, 255, 0.1);
     }
     ${UserNameOrEmail} {
-      color: ${p => p.theme.gray200};
+      color: ${p => p.theme.white};
     }
   }
 `;
@@ -251,6 +247,10 @@ const StyledAvatar = styled(Avatar)<{collapsed: boolean}>`
   margin-right: ${p => (p.collapsed ? '0' : space(1.5))};
   box-shadow: 0 2px 0 rgba(0, 0, 0, 0.08);
   border-radius: 6px; /* Fixes background bleeding on corners */
+
+  @media (max-width: ${p => p.theme.breakpoints.medium}) {
+    margin-right: 0;
+  }
 `;
 
 const OrgAndUserMenu = styled('div')`
@@ -260,6 +260,10 @@ const OrgAndUserMenu = styled('div')`
   z-index: ${p => p.theme.zIndex.orgAndUserMenu};
 `;
 
-const StyledIconChevron = styled(IconChevron)`
-  margin-left: ${space(0.25)};
+const StyledChevron = styled(Chevron)`
+  transform: translateY(${space(0.25)});
+`;
+
+const AvatarWrapper = styled('div')`
+  position: relative;
 `;

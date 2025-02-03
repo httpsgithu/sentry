@@ -1,9 +1,9 @@
 import styled from '@emotion/styled';
 
-import Tooltip from 'app/components/tooltip';
-import {IconCheckmark, IconClose} from 'app/icons';
-import {t} from 'app/locale';
-import ControlState from 'app/views/settings/components/forms/field/controlState';
+import ControlState from 'sentry/components/forms/fieldGroup/controlState';
+import {Tooltip} from 'sentry/components/tooltip';
+import {IconCheckmark, IconClose} from 'sentry/icons';
+import {t} from 'sentry/locale';
 
 import {EventIdStatus} from '../../types';
 
@@ -12,7 +12,7 @@ type Props = {
   status?: EventIdStatus;
 };
 
-const EventIdFieldStatusIcon = ({status, onClickIconClose}: Props) => {
+function EventIdFieldStatusIcon({status, onClickIconClose}: Props) {
   switch (status) {
     case EventIdStatus.ERROR:
     case EventIdStatus.INVALID:
@@ -27,11 +27,11 @@ const EventIdFieldStatusIcon = ({status, onClickIconClose}: Props) => {
     case EventIdStatus.LOADING:
       return <ControlState isSaving />;
     case EventIdStatus.LOADED:
-      return <IconCheckmark color="green300" />;
+      return <IconCheckmark color="successText" />;
     default:
       return null;
   }
-};
+}
 
 export default EventIdFieldStatusIcon;
 

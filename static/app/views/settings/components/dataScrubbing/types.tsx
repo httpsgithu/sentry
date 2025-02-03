@@ -1,5 +1,3 @@
-import {Project} from 'app/types';
-
 export enum RuleType {
   PATTERN = 'pattern',
   CREDITCARD = 'creditcard',
@@ -43,7 +41,7 @@ export type SourceSuggestion = {
   type: SourceSuggestionType;
   value: string;
   description?: string;
-  examples?: Array<string>;
+  examples?: string[];
 };
 
 type RuleBase = {
@@ -52,6 +50,7 @@ type RuleBase = {
 };
 
 export type RuleDefault = RuleBase & {
+  method: MethodType.MASK | MethodType.REMOVE | MethodType.HASH;
   type:
     | RuleType.CREDITCARD
     | RuleType.PASSWORD
@@ -65,12 +64,11 @@ export type RuleDefault = RuleBase & {
     | RuleType.USER_PATH
     | RuleType.MAC
     | RuleType.ANYTHING;
-  method: MethodType.MASK | MethodType.REMOVE | MethodType.HASH;
 };
 
 export type RulePattern = RuleBase & {
-  type: RuleType.PATTERN;
   pattern: string;
+  type: RuleType.PATTERN;
 } & Pick<RuleDefault, 'method'>;
 
 export type RuleReplace = RuleBase & {
@@ -86,31 +84,31 @@ export type RuleReplaceAndPattern = Omit<RulePattern, 'method'> &
 export type Rule = RuleDefault | RuleReplace | RulePattern | RuleReplaceAndPattern;
 
 export type EventId = {
-  value: string;
   status: EventIdStatus;
+  value: string;
 };
 
 type PiiConfigDefault = {
-  type: RuleDefault['type'];
   redaction: {
     method: RuleDefault['method'];
   };
+  type: RuleDefault['type'];
 };
 
 type PiiConfigReplace = {
-  type: RuleReplace['type'];
   redaction: {
     method: RuleReplace['method'];
     text?: string;
   };
+  type: RuleReplace['type'];
 };
 
 type PiiConfigPattern = {
-  type: RulePattern['type'];
   pattern: string;
   redaction: {
     method: RulePattern['method'];
   };
+  type: RulePattern['type'];
 };
 
 type PiiConfigReplaceAndPattern = Omit<PiiConfigPattern, 'redaction'> &
@@ -122,8 +120,6 @@ export type PiiConfig =
   | PiiConfigReplace
   | PiiConfigReplaceAndPattern;
 
-export type Applications = Record<string, Array<string>>;
+export type Applications = Record<string, string[]>;
 
 export type Errors = Partial<Record<KeysOfUnion<Rule>, string>>;
-
-export type ProjectId = Project['id'] | undefined;

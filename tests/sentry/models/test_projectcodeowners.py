@@ -1,6 +1,6 @@
-from sentry.models import Integration, ProjectCodeOwners
+from sentry.models.projectcodeowners import ProjectCodeOwners
 from sentry.ownership.grammar import Matcher, Owner, Rule, dump_schema
-from sentry.testutils import TestCase
+from sentry.testutils.cases import TestCase
 from sentry.utils.cache import cache
 
 
@@ -12,10 +12,6 @@ class ProjectCodeOwnersTestCase(TestCase):
 
     def setUp(self):
         self.login_as(user=self.user)
-        self.integration = Integration.objects.create(
-            provider="github", name="GitHub", external_id="github:1"
-        )
-        self.oi = self.integration.add_organization(self.organization, self.user)
 
         self.team = self.create_team(
             organization=self.organization, slug="tiger-team", members=[self.user]
@@ -26,7 +22,6 @@ class ProjectCodeOwnersTestCase(TestCase):
         )
         self.code_mapping = self.create_code_mapping(
             project=self.project,
-            organization_integration=self.oi,
         )
 
         self.external_team = self.create_external_team(integration=self.integration)
@@ -44,7 +39,6 @@ class ProjectCodeOwnersTestCase(TestCase):
     def test_merge_codeowners(self):
         self.code_mapping_2 = self.create_code_mapping(
             project=self.project,
-            organization_integration=self.oi,
             stack_root="stack/root/",
         )
 
@@ -73,6 +67,7 @@ class ProjectCodeOwnersTestCase(TestCase):
 
         code_owners = ProjectCodeOwners.objects.filter(project=self.project)
         merged = ProjectCodeOwners.merge_code_owners_list(code_owners_list=code_owners)
+        assert merged is not None
 
         assert merged.schema == {
             "$version": 1,

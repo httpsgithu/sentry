@@ -1,44 +1,49 @@
 import {Component, Fragment} from 'react';
-import {browserHistory, InjectedRouter} from 'react-router';
+import type {Theme} from '@emotion/react';
 import {withTheme} from '@emotion/react';
-import {Location} from 'history';
+import type {Location} from 'history';
 
-import {Client} from 'app/api';
-import BarChart from 'app/components/charts/barChart';
-import LoadingPanel from 'app/components/charts/loadingPanel';
-import OptionSelector from 'app/components/charts/optionSelector';
+import type {Client} from 'sentry/api';
+import {BarChart} from 'sentry/components/charts/barChart';
+import LoadingPanel from 'sentry/components/charts/loadingPanel';
+import OptionSelector from 'sentry/components/charts/optionSelector';
 import {
   ChartContainer,
   ChartControls,
   InlineContainer,
   SectionHeading,
   SectionValue,
-} from 'app/components/charts/styles';
+} from 'sentry/components/charts/styles';
 import {
   getDiffInMinutes,
   ONE_HOUR,
   ONE_WEEK,
   TWENTY_FOUR_HOURS,
   TWO_WEEKS,
-} from 'app/components/charts/utils';
-import {Panel} from 'app/components/panels';
-import Placeholder from 'app/components/placeholder';
-import CHART_PALETTE from 'app/constants/chartPalette';
-import NOT_AVAILABLE_MESSAGES from 'app/constants/notAvailableMessages';
-import {t} from 'app/locale';
-import {Organization, SelectValue} from 'app/types';
-import {defined} from 'app/utils';
-import {trackAnalyticsEvent} from 'app/utils/analytics';
-import {decodeScalar} from 'app/utils/queryString';
-import {Theme} from 'app/utils/theme';
-import {MutableSearch} from 'app/utils/tokenizeSearch';
-import withApi from 'app/utils/withApi';
+} from 'sentry/components/charts/utils';
+import Panel from 'sentry/components/panels/panel';
+import Placeholder from 'sentry/components/placeholder';
+import {CHART_PALETTE} from 'sentry/constants/chartPalette';
+import {NOT_AVAILABLE_MESSAGES} from 'sentry/constants/notAvailableMessages';
+import {t} from 'sentry/locale';
+import type {SelectValue} from 'sentry/types/core';
+import type {InjectedRouter} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import {defined} from 'sentry/utils';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import {browserHistory} from 'sentry/utils/browserHistory';
+import {DiscoverDatasets} from 'sentry/utils/discover/types';
+import {decodeScalar} from 'sentry/utils/queryString';
+import {MutableSearch} from 'sentry/utils/tokenizeSearch';
+import withApi from 'sentry/utils/withApi';
+import {isPlatformANRCompatible} from 'sentry/views/projectDetail/utils';
 import {
   getSessionTermDescription,
   SessionTerm,
-} from 'app/views/releases/utils/sessionTerm';
+} from 'sentry/views/releases/utils/sessionTerm';
 
-import {getTermHelp, PERFORMANCE_TERM} from '../performance/data';
+import {getTermHelp, PerformanceTerm} from '../performance/data';
 
 import ProjectBaseEventsChart from './charts/projectBaseEventsChart';
 import ProjectBaseSessionsChart from './charts/projectBaseSessionsChart';
@@ -51,20 +56,24 @@ export enum DisplayModes {
   ERRORS = 'errors',
   TRANSACTIONS = 'transactions',
   STABILITY = 'crash_free',
+  STABILITY_USERS = 'crash_free_users',
+  ANR_RATE = 'anr_rate',
+  FOREGROUND_ANR_RATE = 'foreground_anr_rate',
   SESSIONS = 'sessions',
 }
 
 type Props = {
   api: Client;
+  chartId: string;
+  chartIndex: number;
+  hasSessions: boolean | null;
+  hasTransactions: boolean;
   location: Location;
   organization: Organization;
   router: InjectedRouter;
-  chartId: string;
-  chartIndex: number;
   theme: Theme;
-  hasSessions: boolean | null;
-  hasTransactions: boolean;
   visibleCharts: string[];
+  project?: Project;
   projectId?: string;
   query?: string;
 };
@@ -79,18 +88,25 @@ class ProjectCharts extends Component<Props, State> {
   };
 
   get defaultDisplayModes() {
-    const {hasSessions, hasTransactions} = this.props;
+    const {hasSessions, hasTransactions, project} = this.props;
 
     if (!hasSessions && !hasTransactions) {
       return [DisplayModes.ERRORS];
     }
 
     if (hasSessions && !hasTransactions) {
+      if (isPlatformANRCompatible(project?.platform)) {
+        return [DisplayModes.STABILITY, DisplayModes.ANR_RATE];
+      }
       return [DisplayModes.STABILITY, DisplayModes.ERRORS];
     }
 
     if (!hasSessions && hasTransactions) {
       return [DisplayModes.FAILURE_RATE, DisplayModes.APDEX];
+    }
+
+    if (isPlatformANRCompatible(project?.platform)) {
+      return [DisplayModes.STABILITY, DisplayModes.ANR_RATE];
     }
 
     return [DisplayModes.STABILITY, DisplayModes.APDEX];
@@ -104,7 +120,7 @@ class ProjectCharts extends Component<Props, State> {
       .map(urlKey => {
         return decodeScalar(
           location.query[urlKey],
-          this.defaultDisplayModes[visibleCharts.findIndex(value => value === urlKey)]
+          this.defaultDisplayModes[visibleCharts.findIndex(value => value === urlKey)]!
         );
       });
   }
@@ -121,18 +137,26 @@ class ProjectCharts extends Component<Props, State> {
     return displayMode;
   }
 
-  get displayModes(): SelectValue<string>[] {
-    const {organization, hasSessions, hasTransactions} = this.props;
+  get displayModes(): Array<SelectValue<string>> {
+    const {organization, hasSessions, hasTransactions, project} = this.props;
     const hasPerformance = organization.features.includes('performance-view');
     const noPerformanceTooltip = NOT_AVAILABLE_MESSAGES.performance;
     const noHealthTooltip = NOT_AVAILABLE_MESSAGES.releaseHealth;
 
-    return [
+    const options = [
       {
         value: DisplayModes.STABILITY,
         label: t('Crash Free Sessions'),
         disabled:
           this.otherActiveDisplayModes.includes(DisplayModes.STABILITY) || !hasSessions,
+        tooltip: !hasSessions ? noHealthTooltip : undefined,
+      },
+      {
+        value: DisplayModes.STABILITY_USERS,
+        label: t('Crash Free Users'),
+        disabled:
+          this.otherActiveDisplayModes.includes(DisplayModes.STABILITY_USERS) ||
+          !hasSessions,
         tooltip: !hasSessions ? noHealthTooltip : undefined,
       },
       {
@@ -144,7 +168,7 @@ class ProjectCharts extends Component<Props, State> {
           !hasTransactions,
         tooltip:
           hasPerformance && hasTransactions
-            ? getTermHelp(organization, PERFORMANCE_TERM.APDEX)
+            ? getTermHelp(organization, PerformanceTerm.APDEX)
             : noPerformanceTooltip,
       },
       {
@@ -156,7 +180,7 @@ class ProjectCharts extends Component<Props, State> {
           !hasTransactions,
         tooltip:
           hasPerformance && hasTransactions
-            ? getTermHelp(organization, PERFORMANCE_TERM.FAILURE_RATE)
+            ? getTermHelp(organization, PerformanceTerm.FAILURE_RATE)
             : noPerformanceTooltip,
       },
       {
@@ -168,7 +192,7 @@ class ProjectCharts extends Component<Props, State> {
           !hasTransactions,
         tooltip:
           hasPerformance && hasTransactions
-            ? getTermHelp(organization, PERFORMANCE_TERM.TPM)
+            ? getTermHelp(organization, PerformanceTerm.TPM)
             : noPerformanceTooltip,
       },
       {
@@ -193,6 +217,29 @@ class ProjectCharts extends Component<Props, State> {
         tooltip: hasPerformance && hasTransactions ? undefined : noPerformanceTooltip,
       },
     ];
+
+    if (isPlatformANRCompatible(project?.platform)) {
+      return [
+        {
+          value: DisplayModes.ANR_RATE,
+          label: t('ANR Rate'),
+          disabled:
+            this.otherActiveDisplayModes.includes(DisplayModes.ANR_RATE) || !hasSessions,
+          tooltip: !hasSessions ? noHealthTooltip : undefined,
+        },
+        {
+          value: DisplayModes.FOREGROUND_ANR_RATE,
+          label: t('Foreground ANR Rate'),
+          disabled:
+            this.otherActiveDisplayModes.includes(DisplayModes.FOREGROUND_ANR_RATE) ||
+            !hasSessions,
+          tooltip: !hasSessions ? noHealthTooltip : undefined,
+        },
+        ...options,
+      ];
+    }
+
+    return options;
   }
 
   get summaryHeading() {
@@ -202,6 +249,10 @@ class ProjectCharts extends Component<Props, State> {
       case DisplayModes.STABILITY:
       case DisplayModes.SESSIONS:
         return t('Total Sessions');
+      case DisplayModes.STABILITY_USERS:
+      case DisplayModes.ANR_RATE:
+      case DisplayModes.FOREGROUND_ANR_RATE:
+        return t('Total Users');
       case DisplayModes.APDEX:
       case DisplayModes.FAILURE_RATE:
       case DisplayModes.TPM:
@@ -244,12 +295,10 @@ class ProjectCharts extends Component<Props, State> {
 
   handleDisplayModeChange = (value: string) => {
     const {location, chartId, chartIndex, organization} = this.props;
-
-    trackAnalyticsEvent({
-      eventKey: `project_detail.change_chart${chartIndex + 1}`,
-      eventName: `Project Detail: Change Chart #${chartIndex + 1}`,
-      organization_id: parseInt(organization.id, 10),
+    trackAnalytics('project_detail.change_chart', {
+      organization,
       metric: value,
+      chart_index: chartIndex,
     });
 
     browserHistory.push({
@@ -265,11 +314,12 @@ class ProjectCharts extends Component<Props, State> {
   };
 
   render() {
-    const {api, router, location, organization, theme, projectId, hasSessions, query} =
+    const {api, router, organization, theme, projectId, hasSessions, query, project} =
       this.props;
     const {totalValues} = this.state;
     const hasDiscover = organization.features.includes('discover-basic');
     const displayMode = this.displayMode;
+    const hasAnrRateFeature = isPlatformANRCompatible(project?.platform);
 
     return (
       <Panel>
@@ -281,7 +331,7 @@ class ProjectCharts extends Component<Props, State> {
               {displayMode === DisplayModes.APDEX && (
                 <ProjectBaseEventsChart
                   title={t('Apdex')}
-                  help={getTermHelp(organization, PERFORMANCE_TERM.APDEX_NEW)}
+                  help={getTermHelp(organization, PerformanceTerm.APDEX)}
                   query={new MutableSearch([
                     'event.type:transaction',
                     query ?? '',
@@ -298,7 +348,7 @@ class ProjectCharts extends Component<Props, State> {
               {displayMode === DisplayModes.FAILURE_RATE && (
                 <ProjectBaseEventsChart
                   title={t('Failure Rate')}
-                  help={getTermHelp(organization, PERFORMANCE_TERM.FAILURE_RATE)}
+                  help={getTermHelp(organization, PerformanceTerm.FAILURE_RATE)}
                   query={new MutableSearch([
                     'event.type:transaction',
                     query ?? '',
@@ -315,7 +365,7 @@ class ProjectCharts extends Component<Props, State> {
               {displayMode === DisplayModes.TPM && (
                 <ProjectBaseEventsChart
                   title={t('Transactions Per Minute')}
-                  help={getTermHelp(organization, PERFORMANCE_TERM.TPM)}
+                  help={getTermHelp(organization, PerformanceTerm.TPM)}
                   query={new MutableSearch([
                     'event.type:transaction',
                     query ?? '',
@@ -348,12 +398,11 @@ class ProjectCharts extends Component<Props, State> {
                     interval={this.barChartInterval}
                     chartComponent={BarChart}
                     disableReleases
+                    dataset={DiscoverDatasets.ERRORS}
                   />
                 ) : (
                   <ProjectErrorsBasicChart
-                    organization={organization}
                     projectId={projectId}
-                    location={location}
                     onTotalValuesChange={this.handleTotalValuesChange}
                   />
                 ))}
@@ -380,7 +429,39 @@ class ProjectCharts extends Component<Props, State> {
                 <ProjectBaseSessionsChart
                   title={t('Crash Free Sessions')}
                   help={getSessionTermDescription(SessionTerm.STABILITY, null)}
-                  router={router}
+                  api={api}
+                  organization={organization}
+                  onTotalValuesChange={this.handleTotalValuesChange}
+                  displayMode={displayMode}
+                  query={query}
+                />
+              )}
+              {hasAnrRateFeature && displayMode === DisplayModes.ANR_RATE && (
+                <ProjectBaseSessionsChart
+                  title={t('ANR Rate')}
+                  help={getSessionTermDescription(SessionTerm.ANR_RATE, null)}
+                  api={api}
+                  organization={organization}
+                  onTotalValuesChange={this.handleTotalValuesChange}
+                  displayMode={displayMode}
+                  query={query}
+                />
+              )}
+              {hasAnrRateFeature && displayMode === DisplayModes.FOREGROUND_ANR_RATE && (
+                <ProjectBaseSessionsChart
+                  title={t('Foreground ANR Rate')}
+                  help={getSessionTermDescription(SessionTerm.FOREGROUND_ANR_RATE, null)}
+                  api={api}
+                  organization={organization}
+                  onTotalValuesChange={this.handleTotalValuesChange}
+                  displayMode={displayMode}
+                  query={query}
+                />
+              )}
+              {displayMode === DisplayModes.STABILITY_USERS && (
+                <ProjectBaseSessionsChart
+                  title={t('Crash Free Users')}
+                  help={getSessionTermDescription(SessionTerm.CRASH_FREE_USERS, null)}
                   api={api}
                   organization={organization}
                   onTotalValuesChange={this.handleTotalValuesChange}
@@ -391,7 +472,6 @@ class ProjectCharts extends Component<Props, State> {
               {displayMode === DisplayModes.SESSIONS && (
                 <ProjectBaseSessionsChart
                   title={t('Number of Sessions')}
-                  router={router}
                   api={api}
                   organization={organization}
                   onTotalValuesChange={this.handleTotalValuesChange}
@@ -418,7 +498,7 @@ class ProjectCharts extends Component<Props, State> {
               <InlineContainer>
                 <OptionSelector
                   title={t('Display')}
-                  selected={displayMode}
+                  selected={displayMode!}
                   options={this.displayModes}
                   onChange={this.handleDisplayModeChange}
                 />

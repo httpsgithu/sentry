@@ -1,14 +1,16 @@
-import {Location} from 'history';
+import type {Location} from 'history';
 
-import {t} from 'app/locale';
-import {Organization, Project} from 'app/types';
-import EventView from 'app/utils/discover/eventView';
-import {isAggregateField, WebVital} from 'app/utils/discover/fields';
-import {WEB_VITAL_DETAILS} from 'app/utils/performance/vitals/constants';
-import {decodeScalar} from 'app/utils/queryString';
-import {MutableSearch} from 'app/utils/tokenizeSearch';
-import withOrganization from 'app/utils/withOrganization';
-import withProjects from 'app/utils/withProjects';
+import {t} from 'sentry/locale';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import EventView from 'sentry/utils/discover/eventView';
+import {isAggregateField} from 'sentry/utils/discover/fields';
+import type {WebVital} from 'sentry/utils/fields';
+import {WEB_VITAL_DETAILS} from 'sentry/utils/performance/vitals/constants';
+import {decodeScalar} from 'sentry/utils/queryString';
+import {MutableSearch} from 'sentry/utils/tokenizeSearch';
+import withOrganization from 'sentry/utils/withOrganization';
+import withProjects from 'sentry/utils/withProjects';
 
 import PageLayout from '../pageLayout';
 import Tab from '../tabs';
@@ -30,7 +32,7 @@ function TransactionVitals(props: Props) {
       location={location}
       organization={organization}
       projects={projects}
-      tab={Tab.WebVitals}
+      tab={Tab.WEB_VITALS}
       getDocumentTitle={getDocumentTitle}
       generateEventView={generateEventView}
       childComponent={VitalsContent}
@@ -49,16 +51,23 @@ function getDocumentTitle(transactionName: string): string {
   return [t('Summary'), t('Vitals')].join(' \u2014 ');
 }
 
-function generateEventView(location: Location, transactionName: string): EventView {
+function generateEventView({
+  location,
+  transactionName,
+}: {
+  location: Location;
+  transactionName: string;
+}): EventView {
   const query = decodeScalar(location.query.query, '');
   const conditions = new MutableSearch(query);
-  conditions
-    .setFilterValues('event.type', ['transaction'])
-    .setFilterValues('transaction.op', ['pageload'])
-    .setFilterValues('transaction', [transactionName]);
+
+  conditions.setFilterValues('event.type', ['transaction']);
+  conditions.setFilterValues('transaction', [transactionName]);
 
   Object.keys(conditions.filters).forEach(field => {
-    if (isAggregateField(field)) conditions.removeFilter(field);
+    if (isAggregateField(field)) {
+      conditions.removeFilter(field);
+    }
   });
 
   const vitals = VITAL_GROUPS.reduce((allVitals: WebVital[], group) => {

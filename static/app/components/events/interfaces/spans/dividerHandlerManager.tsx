@@ -1,11 +1,10 @@
-import * as React from 'react';
+import {Component, createContext, createRef} from 'react';
 
-import {
-  clamp,
-  rectOfContent,
-  toPercent,
-} from 'app/components/performance/waterfall/utils';
-import {setBodyUserSelect, UserSelectValues} from 'app/utils/userselect';
+import {rectOfContent} from 'sentry/components/performance/waterfall/utils';
+import clamp from 'sentry/utils/number/clamp';
+import toPercent from 'sentry/utils/number/toPercent';
+import type {UserSelectValues} from 'sentry/utils/userselect';
+import {setBodyUserSelect} from 'sentry/utils/userselect';
 
 // divider handle is positioned at 50% width from the left-hand side
 const DEFAULT_DIVIDER_POSITION = 0.4;
@@ -22,23 +21,23 @@ const selectRefs = (
 };
 
 export type DividerHandlerManagerChildrenProps = {
-  dividerPosition: number;
-  setHover: (nextHover: boolean) => void;
-  onDragStart: (event: React.MouseEvent<HTMLDivElement, MouseEvent>) => void;
   addDividerLineRef: () => React.RefObject<HTMLDivElement>;
   addGhostDividerLineRef: () => React.RefObject<HTMLDivElement>;
+  dividerPosition: number;
+  onDragStart: (event: React.MouseEvent<HTMLDivElement, MouseEvent>) => void;
+  setHover: (nextHover: boolean) => void;
 };
 
 type StateType = {
   dividerPosition: number; // between 0 and 1
 };
 
-const DividerManagerContext = React.createContext<DividerHandlerManagerChildrenProps>({
+const DividerManagerContext = createContext<DividerHandlerManagerChildrenProps>({
   dividerPosition: DEFAULT_DIVIDER_POSITION,
   onDragStart: () => {},
   setHover: () => {},
-  addDividerLineRef: () => React.createRef<HTMLDivElement>(),
-  addGhostDividerLineRef: () => React.createRef<HTMLDivElement>(),
+  addDividerLineRef: () => createRef<HTMLDivElement>(),
+  addGhostDividerLineRef: () => createRef<HTMLDivElement>(),
 });
 
 type PropType = {
@@ -49,7 +48,7 @@ type PropType = {
   interactiveLayerRef: React.RefObject<HTMLDivElement>;
 };
 
-export class Provider extends React.Component<PropType, StateType> {
+export class Provider extends Component<PropType, StateType> {
   state: StateType = {
     dividerPosition: DEFAULT_DIVIDER_POSITION,
   };
@@ -67,13 +66,13 @@ export class Provider extends React.Component<PropType, StateType> {
   hasInteractiveLayer = (): boolean => !!this.props.interactiveLayerRef.current;
 
   addDividerLineRef = () => {
-    const ref = React.createRef<HTMLDivElement>();
+    const ref = createRef<HTMLDivElement>();
     this.dividerLineRefs.push(ref);
     return ref;
   };
 
   addGhostDividerLineRef = () => {
-    const ref = React.createRef<HTMLDivElement>();
+    const ref = createRef<HTMLDivElement>();
     this.ghostDividerLineRefs.push(ref);
     return ref;
   };

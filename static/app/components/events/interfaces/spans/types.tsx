@@ -1,23 +1,89 @@
+import type {MRI} from 'sentry/types/metrics';
+import type {Fuse} from 'sentry/utils/fuzzySearch';
+
+import type {SpanBarProps} from './spanBar';
+import type {SpanDescendantGroupBarProps} from './spanDescendantGroupBar';
+import type {SpanSiblingGroupBarProps} from './spanSiblingGroupBar';
+import type SpanTreeModel from './spanTreeModel';
+
 export type GapSpanType = {
-  type: 'gap';
-  start_timestamp: number;
-  timestamp: number; // this is essentially end_timestamp
-  description?: string;
   isOrphan: boolean;
+  start_timestamp: number;
+  // this is essentially end_timestamp
+  timestamp: number;
+  type: 'gap';
+  description?: string;
 };
 
+interface SpanSourceCodeAttributes {
+  'code.column'?: number;
+  'code.filepath'?: string;
+  'code.function'?: string;
+  'code.lineno'?: number;
+  'code.namespace'?: string;
+}
+
+interface SpanDatabaseAttributes {
+  'db.name'?: string;
+  'db.operation'?: string;
+  'db.system'?: string;
+  'db.user'?: string;
+}
+
+export interface MetricsSummaryItem {
+  count: number | null;
+  max: number | null;
+  min: number | null;
+  sum: number | null;
+  tags: Record<string, string> | null;
+}
+
+export interface MetricsSummary {
+  [mri: MRI]: MetricsSummaryItem[] | null;
+}
+
 export type RawSpanType = {
-  trace_id: string;
-  parent_span_id?: string;
   span_id: string;
   start_timestamp: number;
-  timestamp: number; // this is essentially end_timestamp
-  same_process_as_parent?: boolean;
-  op?: string;
+  // this is essentially end_timestamp
+  timestamp: number;
+  trace_id: string;
+  data?: SpanSourceCodeAttributes & SpanDatabaseAttributes & Record<string, any>;
   description?: string;
+  exclusive_time?: number;
+  hash?: string;
+  op?: string;
+  origin?: string;
+  parent_span_id?: string;
+  project_slug?: string;
+  same_process_as_parent?: boolean;
+  sentry_tags?: Record<string, string>;
+  'span.averageResults'?: {
+    'avg(span.duration)'?: number;
+    'avg(span.self_time)'?: number;
+  };
   status?: string;
-  data: Object;
   tags?: {[key: string]: string};
+};
+
+export type AggregateSpanType = RawSpanType & {
+  count: number;
+  frequency: number;
+  samples: Array<{
+    span: string;
+    timestamp: number;
+    trace: string;
+    transaction: string;
+  }>;
+  total: number;
+  type: 'aggregate';
+};
+
+/**
+ * Extendeds the Raw type from json with a type for discriminating the union.
+ */
+type BaseSpanType = RawSpanType & {
+  type?: undefined;
 };
 
 export const rawSpanKeys: Set<keyof RawSpanType> = new Set([
@@ -28,17 +94,20 @@ export const rawSpanKeys: Set<keyof RawSpanType> = new Set([
   'timestamp',
   'same_process_as_parent',
   'op',
+  'origin',
   'description',
   'status',
   'data',
   'tags',
+  'hash',
+  'exclusive_time',
 ]);
 
-export type OrphanSpanType = {
+export type OrphanSpanType = RawSpanType & {
   type: 'orphan';
-} & RawSpanType;
+};
 
-export type SpanType = RawSpanType | OrphanSpanType;
+export type SpanType = BaseSpanType | OrphanSpanType | AggregateSpanType;
 
 // this type includes natural spans which are part of the transaction event payload,
 // and as well as pseudo-spans (e.g. gap spans)
@@ -50,134 +119,210 @@ export type FetchEmbeddedChildrenState =
   | 'error_fetching_embedded_transactions';
 
 export type SpanGroupProps = {
-  spanGrouping: EnhancedSpan[] | undefined;
-  showSpanGroup: boolean;
-  toggleSpanGroup: (() => void) | undefined;
+  isNestedSpanGroupExpanded: boolean;
+  spanNestedGrouping: EnhancedSpan[] | undefined;
+  toggleNestedSpanGroup: (() => void) | undefined;
+  toggleSiblingSpanGroup: ((span: SpanType) => void) | undefined;
+};
+
+export type SpanSiblingGroupProps = {
+  isLastSibling: boolean;
+  occurrence: number;
+  spanSiblingGrouping: EnhancedSpan[] | undefined;
+  toggleSiblingSpanGroup: (span: SpanType, occurrence: number) => void;
 };
 
 type CommonEnhancedProcessedSpanType = {
-  numOfSpanChildren: number;
-  treeDepth: number;
-  isLastSibling: boolean;
-  continuingTreeDepths: Array<TreeDepthType>;
+  continuingTreeDepths: TreeDepthType[];
   fetchEmbeddedChildrenState: FetchEmbeddedChildrenState;
+  isEmbeddedTransactionTimeAdjusted: boolean;
+  isLastSibling: boolean;
+  numOfSpanChildren: number;
   showEmbeddedChildren: boolean;
-  toggleEmbeddedChildren:
-    | ((props: {orgSlug: string; eventSlug: string}) => void)
-    | undefined;
+  toggleEmbeddedChildren: ((orgSlug: string, eventSlugs: string[]) => void) | undefined;
+  treeDepth: number;
+  groupOccurrence?: number;
+  isFirstSiblingOfGroup?: boolean;
 };
 
 export type EnhancedSpan =
   | ({
-      type: 'root_span';
       span: SpanType;
+      type: 'root_span';
     } & CommonEnhancedProcessedSpanType)
   | ({
-      type: 'span';
       span: SpanType;
-      toggleSpanGroup: (() => void) | undefined;
+      toggleNestedSpanGroup: (() => void) | undefined;
+      toggleSiblingSpanGroup: ((span: SpanType, occurrence: number) => void) | undefined;
+      type: 'span';
     } & CommonEnhancedProcessedSpanType);
 
 // ProcessedSpanType with additional information
 export type EnhancedProcessedSpanType =
   | EnhancedSpan
   | ({
-      type: 'gap';
       span: GapSpanType;
+      type: 'gap';
     } & CommonEnhancedProcessedSpanType)
   | {
-      type: 'filtered_out';
       span: SpanType;
+      type: 'filtered_out';
     }
   | {
-      type: 'out_of_view';
       span: SpanType;
+      type: 'out_of_view';
     }
   | ({
-      type: 'span_group_chain';
+      continuingTreeDepths: TreeDepthType[];
       span: SpanType;
       treeDepth: number;
-      continuingTreeDepths: Array<TreeDepthType>;
-    } & SpanGroupProps);
-
-export type SpanEntry = {
-  type: 'spans';
-  data: Array<RawSpanType>;
-};
+      type: 'span_group_chain';
+    } & SpanGroupProps)
+  | ({
+      continuingTreeDepths: TreeDepthType[];
+      span: SpanType;
+      treeDepth: number;
+      type: 'span_group_siblings';
+    } & SpanSiblingGroupProps);
 
 // map span_id to children whose parent_span_id is equal to span_id
-export type SpanChildrenLookupType = {[span_id: string]: Array<SpanType>};
+export type SpanChildrenLookupType = {[span_id: string]: SpanType[]};
 
 export type ParsedTraceType = {
-  op: string;
   childSpans: SpanChildrenLookupType;
-  traceID: string;
+  op: string;
   rootSpanID: string;
   rootSpanStatus: string | undefined;
-  parentSpanID?: string;
-  traceStartTimestamp: number;
-  traceEndTimestamp: number;
   spans: SpanType[];
+  traceEndTimestamp: number;
+  traceID: string;
+  traceStartTimestamp: number;
+  count?: number;
   description?: string;
+  exclusiveTime?: number;
+  frequency?: number;
+  hash?: string;
+  parentSpanID?: string;
+  total?: number;
 };
 
 export enum TickAlignment {
-  Left,
-  Right,
-  Center,
+  LEFT = 0,
+  RIGHT = 1,
+  CENTER = 2,
 }
 
 export type TraceContextType = {
-  op?: string;
-  type?: 'trace';
-  span_id?: string;
-  trace_id?: string;
-  parent_span_id?: string;
+  client_sample_rate?: number;
+  count?: number;
+  data?: Record<string, any>;
   description?: string;
+  exclusive_time?: number;
+  frequency?: number;
+  hash?: string;
+  op?: string;
+  parent_span_id?: string;
+  span_id?: string;
   status?: string;
+  total?: number;
+  trace_id?: string;
+  type?: 'trace';
 };
 
 type SpanTreeDepth = number;
 
 export type OrphanTreeDepth = {
-  type: 'orphan';
   depth: number;
+  type: 'orphan';
 };
 
 export type TreeDepthType = SpanTreeDepth | OrphanTreeDepth;
 
 export type IndexedFusedSpan = {
-  span: RawSpanType;
-  indexed: string[];
-  tagKeys: string[];
-  tagValues: string[];
   dataKeys: string[];
   dataValues: string[];
-};
-
-export type FuseResult = {
-  item: IndexedFusedSpan;
-  score: number;
+  indexed: string[];
+  span: RawSpanType;
+  tagKeys: string[];
+  tagValues: string[];
 };
 
 export type FilterSpans = {
-  results: FuseResult[];
+  results: Array<Fuse.FuseResult<IndexedFusedSpan>>;
   spanIDs: Set<string>;
-};
-
-type FuseKey = 'indexed' | 'tagKeys' | 'tagValues' | 'dataKeys' | 'dataValues';
-
-export type SpanFuseOptions = {
-  keys: FuseKey[];
-  includeMatches: false;
-  threshold: number;
-  location: number;
-  distance: number;
-  maxPatternLength: number;
 };
 
 export type TraceBound = {
   spanId: string;
-  traceStartTimestamp: number;
   traceEndTimestamp: number;
+  traceStartTimestamp: number;
 };
+
+export type DescendantGroup = {
+  group: SpanTreeModel[];
+  occurrence?: number;
+};
+
+export enum GroupType {
+  DESCENDANTS = 0,
+  SIBLINGS = 1,
+}
+
+export enum SpanTreeNodeType {
+  SPAN = 0,
+  DESCENDANT_GROUP = 1,
+  SIBLING_GROUP = 2,
+  MESSAGE = 3,
+}
+
+type SpanBarNode = {
+  props: Omit<
+    SpanBarProps,
+    | 'measure'
+    | 'didAnchoredSpanMount'
+    | 'markAnchoredSpanIsMounted'
+    | 'addExpandedSpan'
+    | 'removeExpandedSpan'
+    | 'isSpanExpanded'
+    | 'cellMeasurerCache'
+    | 'listRef'
+  >;
+  type: SpanTreeNodeType.SPAN;
+};
+
+type SpanSiblingNode = {
+  props: Omit<
+    SpanSiblingGroupBarProps,
+    | 'measure'
+    | 'didAnchoredSpanMount'
+    | 'markAnchoredSpanIsMounted'
+    | 'addExpandedSpan'
+    | 'removeExpandedSpan'
+    | 'isSpanExpanded'
+  >;
+  type: SpanTreeNodeType.SIBLING_GROUP;
+};
+
+type SpanDescendantNode = {
+  props: Omit<
+    SpanDescendantGroupBarProps,
+    | 'measure'
+    | 'didAnchoredSpanMount'
+    | 'markAnchoredSpanIsMounted'
+    | 'addExpandedSpan'
+    | 'removeExpandedSpan'
+    | 'isSpanExpanded'
+  >;
+  type: SpanTreeNodeType.DESCENDANT_GROUP;
+};
+
+type SpanMessageNode = {
+  element: JSX.Element;
+  type: SpanTreeNodeType.MESSAGE;
+};
+
+export type SpanTreeNode =
+  | SpanBarNode
+  | SpanSiblingNode
+  | SpanDescendantNode
+  | SpanMessageNode;

@@ -1,42 +1,51 @@
-import Reflux from 'reflux';
+import {createStore} from 'reflux';
 
-import {SidebarPanelKey} from 'app/components/sidebar/types';
+import type {SidebarPanelKey} from 'sentry/components/sidebar/types';
 
-import SidebarPanelActions from '../actions/sidebarPanelActions';
+import type {StrictStoreDefinition} from './types';
 
-type SidebarPanelStoreInterface = {
-  activePanel: SidebarPanelKey | '';
+type ActivePanelType = Readonly<SidebarPanelKey | ''>;
 
-  onActivatePanel(panel: SidebarPanelKey): void;
-  onTogglePanel(panel: SidebarPanelKey): void;
-  onHidePanel(): void;
-};
+interface SidebarPanelStoreDefinition extends StrictStoreDefinition<ActivePanelType> {
+  activatePanel(panel: SidebarPanelKey): void;
 
-const sidebarPanelStoreConfig: Reflux.StoreDefinition & SidebarPanelStoreInterface = {
-  activePanel: '',
+  hidePanel(hash?: string): void;
+  togglePanel(panel: SidebarPanelKey): void;
+}
+
+const storeConfig: SidebarPanelStoreDefinition = {
+  state: '',
 
   init() {
-    this.listenTo(SidebarPanelActions.activatePanel, this.onActivatePanel);
-    this.listenTo(SidebarPanelActions.hidePanel, this.onHidePanel);
-    this.listenTo(SidebarPanelActions.togglePanel, this.onTogglePanel);
+    // XXX: Do not use `this.listenTo` in this store. We avoid usage of reflux
+    // listeners due to their leaky nature in tests.
   },
 
-  onActivatePanel(panel: SidebarPanelKey) {
-    this.activePanel = panel;
-    this.trigger(this.activePanel);
+  activatePanel(panel: SidebarPanelKey) {
+    this.state = panel;
+    this.trigger(this.state);
   },
 
-  onTogglePanel(panel: SidebarPanelKey) {
-    if (this.activePanel === panel) {
-      this.onHidePanel();
+  togglePanel(panel: SidebarPanelKey) {
+    if (this.state === panel) {
+      this.hidePanel();
     } else {
-      this.onActivatePanel(panel);
+      this.activatePanel(panel);
     }
   },
 
-  onHidePanel() {
-    this.activePanel = '';
-    this.trigger(this.activePanel);
+  hidePanel(hash?: string) {
+    this.state = '';
+
+    if (hash) {
+      window.location.hash = window.location.hash.replace(`#${hash}`, '');
+    }
+
+    this.trigger(this.state);
+  },
+
+  getState() {
+    return this.state;
   },
 };
 
@@ -44,7 +53,5 @@ const sidebarPanelStoreConfig: Reflux.StoreDefinition & SidebarPanelStoreInterfa
  * This store is used to hold local user preferences
  * Side-effects (like reading/writing to cookies) are done in associated actionCreators
  */
-const SidebarPanelStore = Reflux.createStore(sidebarPanelStoreConfig) as Reflux.Store &
-  SidebarPanelStoreInterface;
-
+const SidebarPanelStore = createStore(storeConfig);
 export default SidebarPanelStore;

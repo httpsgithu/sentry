@@ -79,7 +79,7 @@ def capture_transaction_exceptions(func):
     return inner
 
 
-def less_shitty_error_messages(func):
+def more_better_error_messages(func):
     """
     Wraps functions where the first param is a SQL statement and enforces
     any exceptions thrown will also contain the statement in the message.
@@ -90,8 +90,6 @@ def less_shitty_error_messages(func):
         try:
             return func(self, sql, *args, **kwargs)
         except Exception as e:
-            exc_info = sys.exc_info()
-            msg = f"{e!r}\nSQL: {sql}"
-            raise exc_info[0](msg).with_traceback(exc_info[2])
+            raise type(e)(f"{e!r}\nSQL: {sql}").with_traceback(e.__traceback__)
 
     return inner

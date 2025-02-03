@@ -1,13 +1,18 @@
-import {Organization} from 'app/types';
-import getConfiguration from 'app/views/settings/account/navigationConfiguration';
-import SettingsNavigation from 'app/views/settings/components/settingsNavigation';
+import type {Organization} from 'sentry/types/organization';
+import getConfiguration from 'sentry/views/settings/account/navigationConfiguration';
+import SettingsNavigation from 'sentry/views/settings/components/settingsNavigation';
 
 type Props = {
   organization: Organization;
 };
 
-const AccountSettingsNavigation = ({organization}: Props) => (
-  <SettingsNavigation navigationObjects={getConfiguration({organization})} />
-);
+function AccountSettingsNavigation({organization}: Props) {
+  return (
+    <SettingsNavigation
+      organization={organization}
+      navigationObjects={getConfiguration({organization})}
+    />
+  );
+}
 
 export default AccountSettingsNavigation;

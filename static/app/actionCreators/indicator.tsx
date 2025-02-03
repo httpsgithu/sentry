@@ -1,43 +1,44 @@
-import * as React from 'react';
+import {isValidElement} from 'react';
 import styled from '@emotion/styled';
 import * as Sentry from '@sentry/react';
 
-import IndicatorActions from 'app/actions/indicatorActions';
-import {DEFAULT_TOAST_DURATION} from 'app/constants';
-import {t, tct} from 'app/locale';
-import space from 'app/styles/space';
-import FormModel, {FieldValue} from 'app/views/settings/components/forms/model';
+import type {FieldValue} from 'sentry/components/forms/model';
+import type FormModel from 'sentry/components/forms/model';
+import {DEFAULT_TOAST_DURATION} from 'sentry/constants';
+import {t, tct} from 'sentry/locale';
+import IndicatorStore from 'sentry/stores/indicatorStore';
+import {space} from 'sentry/styles/space';
 
 type IndicatorType = 'loading' | 'error' | 'success' | 'undo' | '';
 
 type Options = {
-  duration?: number;
   append?: boolean;
+  disableDismiss?: boolean;
+  duration?: number | null;
   modelArg?: {
-    model: FormModel;
     id: string;
+    model: FormModel;
     undo: () => void;
   };
-  disableDismiss?: boolean;
   undo?: () => void;
 };
 
 export type Indicator = {
-  type: IndicatorType;
   id: string | number;
   message: React.ReactNode;
   options: Options;
+  type: IndicatorType;
   clearId?: null | number;
 };
 
 // Removes a single indicator
 export function removeIndicator(indicator: Indicator) {
-  IndicatorActions.remove(indicator);
+  IndicatorStore.remove(indicator);
 }
 
 // Clears all indicators
 export function clearIndicators() {
-  IndicatorActions.clear();
+  IndicatorStore.clear();
 }
 
 // Note previous IndicatorStore.add behavior was to default to "loading" if no type was supplied
@@ -50,12 +51,9 @@ export function addMessage(
 
   // XXX: Debug for https://sentry.io/organizations/sentry/issues/1595204979/
   if (
-    // @ts-expect-error
-    typeof msg?.message !== 'undefined' &&
-    // @ts-expect-error
-    typeof msg?.code !== 'undefined' &&
-    // @ts-expect-error
-    typeof msg?.extra !== 'undefined'
+    typeof (msg as any)?.message !== 'undefined' &&
+    typeof (msg as any)?.code !== 'undefined' &&
+    typeof (msg as any)?.extra !== 'undefined'
   ) {
     Sentry.captureException(new Error('Attempt to XHR response to Indicators'));
   }
@@ -64,11 +62,11 @@ export function addMessage(
   const duration =
     typeof optionsDuration === 'undefined' ? DEFAULT_TOAST_DURATION : optionsDuration;
 
-  const action = append ? 'append' : 'replace';
+  const action = append ? 'append' : 'add';
   // XXX: This differs from `IndicatorStore.add` since it won't return the indicator that is created
   // because we are firing an action. You can just add a new message and it will, by default,
   // replace active indicator
-  IndicatorActions[action](msg, type, {...rest, duration});
+  IndicatorStore[action](msg, type, {...rest, duration});
 }
 
 function addMessageWithType(type: IndicatorType) {
@@ -83,7 +81,19 @@ export function addLoadingMessage(
 }
 
 export function addErrorMessage(msg: React.ReactNode, options?: Options) {
-  return addMessageWithType('error')(msg, options);
+  if (typeof msg === 'string' || isValidElement(msg)) {
+    return addMessageWithType('error')(msg, options);
+  }
+  // When non string, non-react element responses are passed, addErrorMessage
+  // crashes the entire page because it falls outside any error
+  // boundaries defined for the components on the page. Adding a fallback
+  // to prevent page crashes.
+  return addMessageWithType('error')(
+    t(
+      "You've hit an issue, fortunately we use Sentry to monitor Sentry. So it's likely we're already looking into this!"
+    ),
+    options
+  );
 }
 
 export function addSuccessMessage(msg: React.ReactNode, options?: Options) {
@@ -106,7 +116,7 @@ const prettyFormString = (val: ChangeValue, model: FormModel, fieldName: string)
 
   if (descriptor && typeof descriptor.formatMessageValue === 'function') {
     const initialData = model.initialData;
-    // XXX(epurkhsier): We pass the "props" as the descriptor and initialData.
+    // XXX(epurkhiser): We pass the "props" as the descriptor and initialData.
     // This isn't necessarily all of the props of the form field, but should
     // make up a good portion needed for formatting.
     return descriptor.formatMessageValue(val, {...descriptor, initialData});
@@ -124,8 +134,8 @@ const prettyFormString = (val: ChangeValue, model: FormModel, fieldName: string)
 type ChangeValue = FieldValue | Record<string, any>;
 
 type Change = {
-  old: ChangeValue;
   new: ChangeValue;
+  old: ChangeValue;
 };
 
 /**
@@ -155,18 +165,17 @@ export function saveOnBlurUndoMessage(
   // Hide the change text when formatMessageValue is explicitly set to false
   const showChangeText = model.getDescriptor(fieldName, 'formatMessageValue') !== false;
 
+  const tctArgsSuccess = {
+    root: <MessageContainer />,
+    fieldName: <FieldName>{label}</FieldName>,
+    oldValue: <FormValue>{prettifyValue(change.old)}</FormValue>,
+    newValue: <FormValue>{prettifyValue(change.new)}</FormValue>,
+  };
+
   addSuccessMessage(
-    tct(
-      showChangeText
-        ? 'Changed [fieldName] from [oldValue] to [newValue]'
-        : 'Changed [fieldName]',
-      {
-        root: <MessageContainer />,
-        fieldName: <FieldName>{label}</FieldName>,
-        oldValue: <FormValue>{prettifyValue(change.old)}</FormValue>,
-        newValue: <FormValue>{prettifyValue(change.new)}</FormValue>,
-      }
-    ),
+    showChangeText
+      ? tct('Changed [fieldName] from [oldValue] to [newValue]', tctArgsSuccess)
+      : tct('Changed [fieldName]', tctArgsSuccess),
     {
       modelArg: {
         model,
@@ -190,36 +199,40 @@ export function saveOnBlurUndoMessage(
           // `saveField` can return null if it can't save
           const saveResult = model.saveField(fieldName, newValue);
 
+          const tctArgsFail = {
+            root: <MessageContainer />,
+            fieldName: <FieldName>{label}</FieldName>,
+            oldValue: <FormValue>{prettifyValue(oldValue)}</FormValue>,
+            newValue: <FormValue>{prettifyValue(newValue)}</FormValue>,
+          };
+
           if (!saveResult) {
             addErrorMessage(
-              tct(
-                showChangeText
-                  ? 'Unable to restore [fieldName] from [oldValue] to [newValue]'
-                  : 'Unable to restore [fieldName]',
-                {
-                  root: <MessageContainer />,
-                  fieldName: <FieldName>{label}</FieldName>,
-                  oldValue: <FormValue>{prettifyValue(oldValue)}</FormValue>,
-                  newValue: <FormValue>{prettifyValue(newValue)}</FormValue>,
-                }
-              )
+              showChangeText
+                ? tct(
+                    'Unable to restore [fieldName] from [oldValue] to [newValue]',
+                    tctArgsFail
+                  )
+                : tct('Unable to restore [fieldName]', tctArgsFail)
             );
             return;
           }
 
+          const tctArgsRestored = {
+            root: <MessageContainer />,
+            fieldName: <FieldName>{label}</FieldName>,
+            oldValue: <FormValue>{prettifyValue(oldValue)}</FormValue>,
+            newValue: <FormValue>{prettifyValue(newValue)}</FormValue>,
+          };
+
           saveResult.then(() => {
             addMessage(
-              tct(
-                showChangeText
-                  ? 'Restored [fieldName] from [oldValue] to [newValue]'
-                  : 'Restored [fieldName]',
-                {
-                  root: <MessageContainer />,
-                  fieldName: <FieldName>{label}</FieldName>,
-                  oldValue: <FormValue>{prettifyValue(oldValue)}</FormValue>,
-                  newValue: <FormValue>{prettifyValue(newValue)}</FormValue>,
-                }
-              ),
+              showChangeText
+                ? tct(
+                    'Restored [fieldName] from [oldValue] to [newValue]',
+                    tctArgsRestored
+                  )
+                : tct('Restored [fieldName]', tctArgsRestored),
               'undo',
               {
                 duration: DEFAULT_TOAST_DURATION,
@@ -237,7 +250,7 @@ const FormValue = styled('span')`
   margin: 0 ${space(0.5)};
 `;
 const FieldName = styled('span')`
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
   margin: 0 ${space(0.5)};
 `;
 const MessageContainer = styled('div')`

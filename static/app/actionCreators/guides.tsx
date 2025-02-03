@@ -1,37 +1,56 @@
-import GuideActions from 'app/actions/guideActions';
-import {Client} from 'app/api';
-import ConfigStore from 'app/stores/configStore';
-import {trackAnalyticsEvent} from 'app/utils/analytics';
+import * as Sentry from '@sentry/react';
+
+import {fetchOrganizationDetails} from 'sentry/actionCreators/organization';
+import {Client} from 'sentry/api';
+import ConfigStore from 'sentry/stores/configStore';
+import GuideStore from 'sentry/stores/guideStore';
+import type {Organization} from 'sentry/types/organization';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import {isDemoModeEnabled} from 'sentry/utils/demoMode';
+import {getDemoGuides, getTourTask} from 'sentry/utils/demoMode/guides';
+
+import {demoEndModal} from './modal';
+import {updateOnboardingTask} from './onboardingTasks';
 
 const api = new Client();
 
-export function fetchGuides() {
-  api.request('/assistant/?v2', {
-    method: 'GET',
-    success: data => {
-      GuideActions.fetchSucceeded(data);
-    },
-  });
+export async function fetchGuides() {
+  try {
+    if (isDemoModeEnabled()) {
+      GuideStore.fetchSucceeded(getDemoGuides());
+      return;
+    }
+    const data = await api.requestPromise('/assistant/');
+    GuideStore.fetchSucceeded(data);
+  } catch (err) {
+    if (err.status !== 401 && err.status !== 403) {
+      Sentry.captureException(err);
+    }
+  }
 }
 
 export function registerAnchor(target: string) {
-  GuideActions.registerAnchor(target);
+  GuideStore.registerAnchor(target);
 }
 
 export function unregisterAnchor(target: string) {
-  GuideActions.unregisterAnchor(target);
+  GuideStore.unregisterAnchor(target);
 }
 
 export function nextStep() {
-  GuideActions.nextStep();
+  GuideStore.nextStep();
+}
+
+export function setForceHide(forceHide: boolean) {
+  GuideStore.setForceHide(forceHide);
 }
 
 export function toStep(step: number) {
-  GuideActions.toStep(step);
+  GuideStore.toStep(step);
 }
 
 export function closeGuide(dismissed?: boolean) {
-  GuideActions.closeGuide(dismissed);
+  GuideStore.closeGuide(dismissed);
 }
 
 export function dismissGuide(guide: string, step: number, orgId: string | null) {
@@ -39,51 +58,60 @@ export function dismissGuide(guide: string, step: number, orgId: string | null) 
   closeGuide(true);
 }
 
-export function recordFinish(guide: string, orgId: string | null) {
-  api.request('/assistant/', {
-    method: 'PUT',
-    data: {
-      guide,
-      status: 'viewed',
-    },
-  });
+export function recordFinish(
+  guide: string,
+  orgId: string | null,
+  orgSlug: string | null,
+  org: Organization | null
+) {
+  if (!isDemoModeEnabled()) {
+    api.requestPromise('/assistant/', {
+      method: 'PUT',
+      data: {
+        guide,
+        status: 'viewed',
+      },
+    });
+  }
+
+  const tourTask = getTourTask(guide);
+
+  if (isDemoModeEnabled() && tourTask && org) {
+    const {tour, task} = tourTask;
+    updateOnboardingTask(api, org, {task, status: 'complete', completionSeen: true});
+    fetchOrganizationDetails(api, org.slug, true, false);
+    demoEndModal({tour, orgSlug});
+  }
 
   const user = ConfigStore.get('user');
   if (!user) {
     return;
   }
 
-  const data = {
-    eventKey: 'assistant.guide_finished',
-    eventName: 'Assistant Guide Finished',
+  trackAnalytics('assistant.guide_finished', {
+    organization: orgId,
     guide,
-    organization_id: orgId,
-    user_id: parseInt(user.id, 10),
-  };
-  trackAnalyticsEvent(data);
+  });
 }
 
 export function recordDismiss(guide: string, step: number, orgId: string | null) {
-  api.request('/assistant/', {
-    method: 'PUT',
-    data: {
-      guide,
-      status: 'dismissed',
-    },
-  });
+  if (!isDemoModeEnabled()) {
+    api.requestPromise('/assistant/', {
+      method: 'PUT',
+      data: {
+        guide,
+        status: 'dismissed',
+      },
+    });
+  }
 
   const user = ConfigStore.get('user');
   if (!user) {
     return;
   }
-
-  const data = {
-    eventKey: 'assistant.guide_dismissed',
-    eventName: 'Assistant Guide Dismissed',
+  trackAnalytics('assistant.guide_dismissed', {
+    organization: orgId,
     guide,
     step,
-    organization_id: orgId,
-    user_id: parseInt(user.id, 10),
-  };
-  trackAnalyticsEvent(data);
+  });
 }

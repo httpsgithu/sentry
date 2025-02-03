@@ -1,82 +1,84 @@
-import * as React from 'react';
+import {Component} from 'react';
 import styled from '@emotion/styled';
 import debounce from 'lodash/debounce';
 
-import {Client} from 'app/api';
-import SelectControl from 'app/components/forms/selectControl';
-import IdBadge from 'app/components/idBadge';
-import Tooltip from 'app/components/tooltip';
-import {t} from 'app/locale';
-import MemberListStore from 'app/stores/memberListStore';
-import {Member, Organization, Project, User} from 'app/types';
-import {callIfFunction} from 'app/utils/callIfFunction';
-import withApi from 'app/utils/withApi';
+import type {Client} from 'sentry/api';
+import SelectControl from 'sentry/components/forms/controls/selectControl';
+import IdBadge from 'sentry/components/idBadge';
+import {Tooltip} from 'sentry/components/tooltip';
+import {t} from 'sentry/locale';
+import MemberListStore from 'sentry/stores/memberListStore';
+import type {Member, Organization} from 'sentry/types/organization';
+import type {User} from 'sentry/types/user';
+import withApi from 'sentry/utils/withApi';
 
 const getSearchKeyForUser = (user: User) =>
-  `${user.email && user.email.toLowerCase()} ${user.name && user.name.toLowerCase()}`;
+  `${user.email?.toLowerCase()} ${user.name?.toLowerCase()}`;
 
 type MentionableUser = {
-  value: string;
-  label: React.ReactElement;
-  searchKey: string;
   actor: {
-    type: 'user';
     id: string;
     name: string;
+    type: 'user';
   };
+  label: React.ReactElement;
+  searchKey: string;
+  value: string;
   disabled?: boolean;
 };
 
 type Props = {
   api: Client;
-  project?: Project;
+  onChange: (value: any) => any;
   organization: Organization;
   value: any;
-  onChange: (value: any) => any;
-  onInputChange?: (value: any) => any;
   disabled?: boolean;
+  onInputChange?: (value: any) => any;
   placeholder?: string;
   styles?: {control?: (provided: any) => any};
 };
 
 type State = {
+  inputValue: string;
   loading: boolean;
   memberListLoading: boolean;
-  inputValue: string;
   options: MentionableUser[] | null;
 };
 
 type FilterOption<T> = {
-  value: string;
-  label: React.ReactNode;
   data: T;
+  label: React.ReactNode;
+  value: string;
 };
 
 /**
  * A component that allows you to select either members and/or teams
  */
-class SelectMembers extends React.Component<Props, State> {
+class SelectMembers extends Component<Props, State> {
   state: State = {
     loading: false,
     inputValue: '',
     options: null,
-    memberListLoading: !MemberListStore.isLoaded(),
+    memberListLoading: MemberListStore.state.loading,
   };
 
   componentWillUnmount() {
-    this.unlisteners.forEach(callIfFunction);
+    this.unlisteners.forEach(listener => {
+      if (typeof listener === 'function') {
+        listener();
+      }
+    });
   }
 
   unlisteners = [
-    MemberListStore.listen(() => {
-      this.setState({
-        memberListLoading: !MemberListStore.isLoaded(),
-      });
-    }, undefined),
+    MemberListStore.listen(
+      () => this.setState({memberListLoading: MemberListStore.state.loading}),
+      undefined
+    ),
   ];
 
   renderUserBadge = (user: User) => (
-    <IdBadge avatarSize={24} user={user} hideEmail useLink={false} />
+    <IdBadge avatarSize={24} user={user} hideEmail disableLink />
   );
 
   createMentionableUser = (user: User): MentionableUser => ({
@@ -90,7 +92,7 @@ class SelectMembers extends React.Component<Props, State> {
     },
   });
 
-  createUnmentionableUser = ({user}) => ({
+  createUnmentionableUser = ({user}: any) => ({
     ...this.createMentionableUser(user),
     disabled: true,
     label: (
@@ -109,11 +111,11 @@ class SelectMembers extends React.Component<Props, State> {
     return MemberListStore.getAll().map(this.createMentionableUser);
   }
 
-  handleChange = newValue => {
+  handleChange = (newValue: any) => {
     this.props.onChange(newValue);
   };
 
-  handleInputChange = inputValue => {
+  handleInputChange = (inputValue: any) => {
     this.setState({inputValue});
 
     if (this.props.onInputChange) {
@@ -146,7 +148,7 @@ class SelectMembers extends React.Component<Props, State> {
 
     // Return a promise for `react-select`
     return new Promise((resolve, reject) => {
-      this.queryMembers(this.state.inputValue, (err, result) => {
+      this.queryMembers(this.state.inputValue, (err: any, result: any) => {
         if (err) {
           reject(err);
         } else {
@@ -160,7 +162,7 @@ class SelectMembers extends React.Component<Props, State> {
           // has not registered for sentry yet, but has been invited
           (members
             ? (members as Member[])
-                .filter(({user}) => user && usersInProjectById.indexOf(user.id) === -1)
+                .filter(({user}) => user && !usersInProjectById.includes(user.id))
                 .map(this.createUnmentionableUser)
             : []) as MentionableUser[]
       )
@@ -187,7 +189,6 @@ class SelectMembers extends React.Component<Props, State> {
           option?.data?.searchKey?.indexOf(filterText) > -1
         }
         loadOptions={this.handleLoadOptions}
-        isOptionDisabled={option => option.disabled}
         defaultOptions
         async
         isDisabled={this.props.disabled}
@@ -198,8 +199,10 @@ class SelectMembers extends React.Component<Props, State> {
         value={this.state.options?.find(({value}) => value === this.props.value)}
         styles={{
           ...(styles ?? {}),
+          // @ts-expect-error TS(7006): Parameter 'provided' implicitly has an 'any' type.
           option: (provided, state: any) => ({
             ...provided,
+
             svg: {
               color: state.isSelected && state.theme.white,
             },

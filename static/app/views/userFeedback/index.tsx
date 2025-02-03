@@ -1,78 +1,98 @@
-import {RouteComponentProps} from 'react-router';
 import styled from '@emotion/styled';
 import {withProfiler} from '@sentry/react';
 import omit from 'lodash/omit';
 
-import Button from 'app/components/button';
-import ButtonBar from 'app/components/buttonBar';
-import EventUserFeedback from 'app/components/events/userFeedback';
-import CompactIssue from 'app/components/issues/compactIssue';
-import LoadingIndicator from 'app/components/loadingIndicator';
-import NoProjectMessage from 'app/components/noProjectMessage';
-import GlobalSelectionHeader from 'app/components/organizations/globalSelectionHeader';
-import PageHeading from 'app/components/pageHeading';
-import Pagination from 'app/components/pagination';
-import {Panel} from 'app/components/panels';
-import {t} from 'app/locale';
-import {PageContent} from 'app/styles/organization';
-import space from 'app/styles/space';
-import {Organization, UserReport} from 'app/types';
-import withOrganization from 'app/utils/withOrganization';
-import AsyncView from 'app/views/asyncView';
+import {LinkButton} from 'sentry/components/button';
+import {EventUserFeedback} from 'sentry/components/events/userFeedback';
+import CompactIssue from 'sentry/components/issues/compactIssue';
+import * as Layout from 'sentry/components/layouts/thirds';
+import LoadingError from 'sentry/components/loadingError';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import NoProjectMessage from 'sentry/components/noProjectMessage';
+import {DatePageFilter} from 'sentry/components/organizations/datePageFilter';
+import {EnvironmentPageFilter} from 'sentry/components/organizations/environmentPageFilter';
+import PageFilterBar from 'sentry/components/organizations/pageFilterBar';
+import PageFiltersContainer from 'sentry/components/organizations/pageFilters/container';
+import {ProjectPageFilter} from 'sentry/components/organizations/projectPageFilter';
+import {PageHeadingQuestionTooltip} from 'sentry/components/pageHeadingQuestionTooltip';
+import Pagination from 'sentry/components/pagination';
+import Panel from 'sentry/components/panels/panel';
+import {SegmentedControl} from 'sentry/components/segmentedControl';
+import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
+import {Tooltip} from 'sentry/components/tooltip';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {UserReport} from 'sentry/types/group';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import {useApiQuery} from 'sentry/utils/queryClient';
+import normalizeUrl from 'sentry/utils/url/normalizeUrl';
+import useOrganization from 'sentry/utils/useOrganization';
 
-import UserFeedbackEmpty from './userFeedbackEmpty';
+import {UserFeedbackEmpty} from './userFeedbackEmpty';
 import {getQuery} from './utils';
 
-type State = AsyncView['state'] & {
-  reportList: UserReport[];
-};
+interface Props extends RouteComponentProps<{}, {}> {}
 
-type Props = RouteComponentProps<{orgId: string}, {}> & {
-  organization: Organization;
-};
+function OrganizationUserFeedback({location: {search, pathname, query}, router}: Props) {
+  const organization = useOrganization();
+  const {status} = getQuery(search);
 
-class OrganizationUserFeedback extends AsyncView<Props, State> {
-  getEndpoints(): ReturnType<AsyncView['getEndpoints']> {
-    const {
-      organization,
-      location: {search},
-    } = this.props;
+  const unresolvedQuery = omit(query, 'status');
+  const allIssuesQuery = {...query, status: ''};
+  const hasNewFeedback = organization.features.includes('user-feedback-ui');
 
-    return [
-      [
-        'reportList',
-        `/organizations/${organization.slug}/user-feedback/`,
-        {
-          query: getQuery(search),
-        },
-      ],
-    ];
-  }
+  const {
+    data: reportList,
+    isPending,
+    isError,
+    getResponseHeader,
+  } = useApiQuery<UserReport[]>(
+    [
+      `/organizations/${organization.slug}/user-feedback/`,
+      {
+        query: getQuery(search),
+      },
+    ],
+    {staleTime: 0}
+  );
 
-  getTitle() {
-    return `${t('User Feedback')} - ${this.props.organization.slug}`;
-  }
+  const reportListsPageLinks = getResponseHeader?.('Link');
 
-  get projectIds() {
-    const {project} = this.props.location.query;
+  function getProjectIds() {
+    const {project} = query;
 
     return Array.isArray(project)
       ? project
       : typeof project === 'string'
-      ? [project]
-      : [];
+        ? [project]
+        : [];
   }
 
-  renderResults() {
-    const {orgId} = this.props.params;
-
+  function StreamBody() {
+    if (isError) {
+      return <LoadingError />;
+    }
+    if (isPending) {
+      return (
+        <Panel>
+          <LoadingIndicator />
+        </Panel>
+      );
+    }
+    if (!reportList?.length) {
+      return <UserFeedbackEmpty projectIds={getProjectIds()} issueTab={false} />;
+    }
     return (
       <Panel className="issue-list" data-test-id="user-feedback-list">
-        {this.state.reportList.map(item => {
+        {reportList.map(item => {
           const issue = item.issue;
           return (
             <CompactIssue key={item.id} id={issue.id} data={issue} eventId={item.eventID}>
-              <StyledEventUserFeedback report={item} orgId={orgId} issueId={issue.id} />
+              <StyledEventUserFeedback
+                report={item}
+                orgSlug={organization.slug}
+                issueId={issue.id}
+              />
             </CompactIssue>
           );
         })}
@@ -80,81 +100,101 @@ class OrganizationUserFeedback extends AsyncView<Props, State> {
     );
   }
 
-  renderEmpty() {
-    return <UserFeedbackEmpty projectIds={this.projectIds} />;
-  }
-
-  renderLoading() {
-    return this.renderBody();
-  }
-
-  renderStreamBody() {
-    const {loading, reportList} = this.state;
-
-    if (loading) {
-      return (
-        <Panel>
-          <LoadingIndicator />
-        </Panel>
-      );
-    }
-
-    if (!reportList.length) {
-      return this.renderEmpty();
-    }
-
-    return this.renderResults();
-  }
-
-  renderBody() {
-    const {organization} = this.props;
-    const {location} = this.props;
-    const {pathname, search, query} = location;
-    const {status} = getQuery(search);
-    const {reportListPageLinks} = this.state;
-
-    const unresolvedQuery = omit(query, 'status');
-    const allIssuesQuery = {...query, status: ''};
-
-    return (
-      <GlobalSelectionHeader>
-        <PageContent>
-          <NoProjectMessage organization={organization}>
-            <div data-test-id="user-feedback">
-              <Header>
-                <PageHeading>{t('User Feedback')}</PageHeading>
-                <ButtonBar active={!Array.isArray(status) ? status || '' : ''} merged>
-                  <Button
-                    size="small"
-                    barId="unresolved"
-                    to={{pathname, query: unresolvedQuery}}
+  return (
+    <SentryDocumentTitle title={`${t('User Feedback')} - ${organization.slug}`}>
+      <PageFiltersContainer>
+        <NoProjectMessage organization={organization}>
+          <Layout.Header>
+            <Layout.HeaderContent>
+              <Layout.Title>
+                {t('User Feedback')}
+                <PageHeadingQuestionTooltip
+                  docsUrl="https://docs.sentry.io/product/user-feedback/"
+                  title={t(
+                    'Feedback submitted by users who experienced an error while using your application, including their name, email address, and any additional comments.'
+                  )}
+                />
+              </Layout.Title>
+            </Layout.HeaderContent>
+            {hasNewFeedback && (
+              <Layout.HeaderActions>
+                <Tooltip
+                  title={t('Go back to the new feedback layout.')}
+                  position="left"
+                  isHoverable
+                >
+                  <LinkButton
+                    size="sm"
+                    priority="default"
+                    to={{
+                      pathname: normalizeUrl(
+                        `/organizations/${organization.slug}/feedback/`
+                      ),
+                      query: {
+                        ...query,
+                        query: undefined,
+                        cursor: undefined,
+                      },
+                    }}
                   >
+                    {t('Go to New User Feedback')}
+                  </LinkButton>
+                </Tooltip>
+              </Layout.HeaderActions>
+            )}
+          </Layout.Header>
+          <Layout.Body data-test-id="user-feedback">
+            <Layout.Main fullWidth>
+              <Filters>
+                <PageFilterBar>
+                  <ProjectPageFilter />
+                  <EnvironmentPageFilter />
+                  <DatePageFilter position="bottom-end" />
+                </PageFilterBar>
+                <SegmentedControl
+                  aria-label={t('Issue Status')}
+                  value={!Array.isArray(status) ? status || '' : ''}
+                  onChange={key =>
+                    router.replace({
+                      pathname,
+                      query: key === 'unresolved' ? unresolvedQuery : allIssuesQuery,
+                    })
+                  }
+                >
+                  <SegmentedControl.Item key="unresolved">
                     {t('Unresolved')}
-                  </Button>
-                  <Button size="small" barId="" to={{pathname, query: allIssuesQuery}}>
-                    {t('All Issues')}
-                  </Button>
-                </ButtonBar>
-              </Header>
-              {this.renderStreamBody()}
-              <Pagination pageLinks={reportListPageLinks} />
-            </div>
-          </NoProjectMessage>
-        </PageContent>
-      </GlobalSelectionHeader>
-    );
-  }
+                  </SegmentedControl.Item>
+                  <SegmentedControl.Item key="">{t('All Issues')}</SegmentedControl.Item>
+                </SegmentedControl>
+              </Filters>
+              <StreamBody />
+              <Pagination pageLinks={reportListsPageLinks} />
+            </Layout.Main>
+          </Layout.Body>
+        </NoProjectMessage>
+      </PageFiltersContainer>
+    </SentryDocumentTitle>
+  );
 }
 
-export default withOrganization(withProfiler(OrganizationUserFeedback));
+export default withProfiler(OrganizationUserFeedback);
 
-const Header = styled('div')`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+const Filters = styled('div')`
+  display: grid;
+  grid-template-columns: minmax(0, max-content) max-content;
+  justify-content: start;
+  gap: ${space(2)};
   margin-bottom: ${space(2)};
+
+  @media (max-width: ${p => p.theme.breakpoints.medium}) {
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  @media (max-width: ${p => p.theme.breakpoints.small}) {
+    grid-template-columns: minmax(0, 1fr);
+  }
 `;
 
 const StyledEventUserFeedback = styled(EventUserFeedback)`
-  margin: ${space(2)} 0 0;
+  margin: ${space(2)} 0;
 `;

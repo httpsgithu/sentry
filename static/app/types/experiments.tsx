@@ -1,11 +1,11 @@
-import {experimentList, unassignedValue} from 'app/data/experimentConfig';
+import type {experimentList, unassignedValue} from 'sentry/data/experimentConfig';
 
 /**
  * The grouping of the experiment
  */
 export enum ExperimentType {
-  Organization = 'organization',
-  User = 'user',
+  ORGANIZATION = 'organization',
+  USER = 'user',
 }
 
 /**
@@ -14,10 +14,18 @@ export enum ExperimentType {
  */
 export type ExperimentConfig = {
   /**
+   * Possible assignment values of the experiment
+   */
+  assignments: ReadonlyArray<string | number | typeof unassignedValue>;
+  /**
    * The name of the organization. This maps to the key exposed by the
    * organization manager on the backend.
    */
   key: string;
+  /**
+   * The parameter used to access the assignment value
+   */
+  parameter: string | 'variant' | 'exposed';
   /**
    * The type of experiment. This configures what group the experiment is
    * performed on.
@@ -26,14 +34,6 @@ export type ExperimentConfig = {
    * A User experiment assigns a single user.
    */
   type: ExperimentType;
-  /**
-   * The parameter used to access the assignment value
-   */
-  parameter: string | 'variant' | 'exposed';
-  /**
-   * Possible assignment values of the experiment
-   */
-  assignments: ReadonlyArray<string | number | typeof unassignedValue>;
 };
 
 // NOTE: The code below is mostly type mechanics to provide utility types
@@ -42,16 +42,16 @@ export type ExperimentConfig = {
 //
 // [0]: app/data/experimentConfig.tsx
 
-type ExperimentList = typeof experimentList[number];
+type ExperimentList = (typeof experimentList)[number];
 
 type ExperimentSelect<
   C extends ExperimentConfig,
-  N extends ExperimentConfig['key']
+  N extends ExperimentConfig['key'],
 > = C extends {key: N} ? C : never;
 
 type TypeSelect<
   C extends ExperimentConfig,
-  T extends ExperimentConfig['type']
+  T extends ExperimentConfig['type'],
 > = C extends {type: T} ? C : never;
 
 /**
@@ -71,11 +71,11 @@ type GetExperimentAssignment<E extends ExperimentList['key']> = {
 };
 
 export type OrgExperiments = GetExperimentAssignment<
-  TypeSelect<ExperimentList, ExperimentType.Organization>['key']
+  TypeSelect<ExperimentList, ExperimentType.ORGANIZATION>['key']
 >;
 
 export type UserExperiments = GetExperimentAssignment<
-  TypeSelect<ExperimentList, ExperimentType.User>['key']
+  TypeSelect<ExperimentList, ExperimentType.USER>['key']
 >;
 
 export type ExperimentAssignment = GetExperimentAssignment<ExperimentList['key']>;

@@ -1,22 +1,16 @@
-import * as React from 'react';
+import {Component, Fragment} from 'react';
 import styled from '@emotion/styled';
 import sortBy from 'lodash/sortBy';
 
-import Button from 'app/components/button';
-import {IconChevron} from 'app/icons';
-import {t} from 'app/locale';
-import space from 'app/styles/space';
-import Input from 'app/views/settings/components/forms/controls/input';
-import Field from 'app/views/settings/components/forms/field';
+import {Button} from 'sentry/components/button';
+import FieldGroup from 'sentry/components/forms/fieldGroup';
+import Input from 'sentry/components/input';
+import {IconChevron} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
 
-import {
-  EventId,
-  KeysOfUnion,
-  MethodType,
-  Rule,
-  RuleType,
-  SourceSuggestion,
-} from '../../types';
+import type {EventId, KeysOfUnion, Rule, SourceSuggestion} from '../../types';
+import {MethodType, RuleType} from '../../types';
 import {getMethodLabel, getRuleLabel} from '../../utils';
 
 import EventIdField from './eventIdField';
@@ -26,20 +20,20 @@ import SourceField from './sourceField';
 type Values = Omit<Record<KeysOfUnion<Rule>, string>, 'id'>;
 
 type Props<V extends Values, K extends keyof V> = {
-  values: V;
   errors: Partial<V>;
-  sourceSuggestions: Array<SourceSuggestion>;
-  onValidate: (field: K) => () => void;
-  onChange: (field: K, value: string) => void;
   eventId: EventId;
+  onChange: (field: K, value: string) => void;
   onUpdateEventId: (eventId: string) => void;
+  onValidate: (field: K) => () => void;
+  sourceSuggestions: SourceSuggestion[];
+  values: V;
 };
 
 type State = {
   displayEventId: boolean;
 };
 
-class Form extends React.Component<Props<Values, KeysOfUnion<Values>>, State> {
+class Form extends Component<Props<Values, KeysOfUnion<Values>>, State> {
   state: State = {displayEventId: !!this.props.eventId?.value};
 
   handleChange =
@@ -66,10 +60,9 @@ class Form extends React.Component<Props<Values, KeysOfUnion<Values>>, State> {
     const {displayEventId} = this.state;
 
     return (
-      <React.Fragment>
-        <FieldGroup hasTwoColumns={values.method === MethodType.REPLACE}>
-          <Field
-            data-test-id="method-field"
+      <Fragment>
+        <FieldContainer hasTwoColumns={values.method === MethodType.REPLACE}>
+          <FieldGroup
             label={t('Method')}
             help={t('What to do')}
             inline={false}
@@ -87,10 +80,9 @@ class Form extends React.Component<Props<Values, KeysOfUnion<Values>>, State> {
               value={method}
               onChange={value => onChange('method', value?.value)}
             />
-          </Field>
+          </FieldGroup>
           {values.method === MethodType.REPLACE && (
-            <Field
-              data-test-id="placeholder-field"
+            <FieldGroup
               label={t('Custom Placeholder (Optional)')}
               help={t('It will replace the default placeholder [Filtered]')}
               inline={false}
@@ -105,11 +97,11 @@ class Form extends React.Component<Props<Values, KeysOfUnion<Values>>, State> {
                 onChange={this.handleChange('placeholder')}
                 value={values.placeholder}
               />
-            </Field>
+            </FieldGroup>
           )}
-        </FieldGroup>
-        <FieldGroup hasTwoColumns={values.type === RuleType.PATTERN}>
-          <Field
+        </FieldContainer>
+        <FieldContainer hasTwoColumns={values.type === RuleType.PATTERN}>
+          <FieldGroup
             data-test-id="type-field"
             label={t('Data Type')}
             help={t(
@@ -130,13 +122,13 @@ class Form extends React.Component<Props<Values, KeysOfUnion<Values>>, State> {
               value={type}
               onChange={value => onChange('type', value?.value)}
             />
-          </Field>
+          </FieldGroup>
           {values.type === RuleType.PATTERN && (
-            <Field
-              data-test-id="regex-field"
+            <FieldGroup
               label={t('Regex matches')}
               help={t('Custom regular expression (see documentation)')}
               inline={false}
+              id="regex-matches"
               error={errors?.pattern}
               flexibleControlStateSize
               stacked
@@ -150,10 +142,11 @@ class Form extends React.Component<Props<Values, KeysOfUnion<Values>>, State> {
                 onChange={this.handleChange('pattern')}
                 value={values.pattern}
                 onBlur={onValidate('pattern')}
+                id="regex-matches"
               />
-            </Field>
+            </FieldGroup>
           )}
-        </FieldGroup>
+        </FieldContainer>
         <ToggleWrapper>
           {displayEventId ? (
             <Toggle priority="link" onClick={this.handleToggleEventId}>
@@ -180,18 +173,18 @@ class Form extends React.Component<Props<Values, KeysOfUnion<Values>>, State> {
             suggestions={sourceSuggestions}
           />
         </SourceGroup>
-      </React.Fragment>
+      </Fragment>
     );
   }
 }
 
 export default Form;
 
-const FieldGroup = styled('div')<{hasTwoColumns: boolean}>`
+const FieldContainer = styled('div')<{hasTwoColumns: boolean}>`
   display: grid;
   margin-bottom: ${space(2)};
-  @media (min-width: ${p => p.theme.breakpoints[0]}) {
-    grid-gap: ${space(2)};
+  @media (min-width: ${p => p.theme.breakpoints.small}) {
+    gap: ${space(2)};
     ${p => p.hasTwoColumns && `grid-template-columns: 1fr 1fr;`}
     margin-bottom: ${p => (p.hasTwoColumns ? 0 : space(2))};
   }
@@ -206,7 +199,7 @@ const SourceGroup = styled('div')<{isExpanded: boolean}>`
     `
     border-radius: ${p.theme.borderRadius};
     border: 1px solid ${p.theme.border};
-    box-shadow: ${p.theme.dropShadowLight};
+    box-shadow: ${p.theme.dropShadowMedium};
     margin: ${space(2)} 0 ${space(3)} 0;
     padding: ${space(2)};
     height: 180px;
@@ -223,7 +216,7 @@ const ToggleWrapper = styled('div')`
 `;
 
 const Toggle = styled(Button)`
-  font-weight: 700;
+  font-weight: ${p => p.theme.fontWeightBold};
   color: ${p => p.theme.subText};
   &:hover,
   &:focus {
@@ -231,7 +224,7 @@ const Toggle = styled(Button)`
   }
   > *:first-child {
     display: grid;
-    grid-gap: ${space(0.5)};
+    gap: ${space(0.5)};
     grid-template-columns: repeat(2, max-content);
     align-items: center;
   }

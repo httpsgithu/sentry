@@ -1,12 +1,11 @@
 import styled from '@emotion/styled';
 
-import {ROW_HEIGHT} from 'app/components/performance/waterfall/constants';
-import {Row} from 'app/components/performance/waterfall/row';
-import space from 'app/styles/space';
+import {ROW_HEIGHT} from 'sentry/components/performance/waterfall/constants';
+import {Row} from 'sentry/components/performance/waterfall/row';
+import {space} from 'sentry/styles/space';
 
 export const MessageRow = styled(Row)`
   display: block;
-  cursor: auto;
   line-height: ${ROW_HEIGHT}px;
   padding-left: ${space(1)};
   padding-right: ${space(1)};

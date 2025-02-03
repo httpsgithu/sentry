@@ -1,70 +1,33 @@
+from __future__ import annotations
+
 import logging
-import re
 from datetime import timedelta
 
+import orjson
 import sentry_sdk
 from django.utils import timezone
-from snuba_sdk.legacy import json_to_snql
+from sentry_protos.snuba.v1.endpoint_create_subscription_pb2 import CreateSubscriptionRequest
+from sentry_protos.snuba.v1.endpoint_time_series_pb2 import TimeSeriesRequest
 
-from sentry.constants import CRASH_RATE_ALERT_SESSION_COUNT_ALIAS
-from sentry.search.events.fields import resolve_field_list
-from sentry.search.events.filter import get_filter
-from sentry.snuba.models import QueryDatasets, QuerySubscription
-from sentry.tasks.base import instrumented_task
-from sentry.utils import json, metrics
-from sentry.utils.snuba import (
-    Dataset,
-    SnubaError,
-    _snuba_pool,
-    resolve_column,
-    resolve_snuba_aliases,
+from sentry import features
+from sentry.snuba.dataset import Dataset, EntityKey
+from sentry.snuba.entity_subscription import (
+    get_entity_key_from_query_builder,
+    get_entity_key_from_request,
+    get_entity_key_from_snuba_query,
+    get_entity_subscription,
+    get_entity_subscription_from_snuba_query,
 )
+from sentry.snuba.models import QuerySubscription, SnubaQuery
+from sentry.snuba.utils import build_query_strings
+from sentry.tasks.base import instrumented_task
+from sentry.utils import metrics, snuba_rpc
+from sentry.utils.snuba import SNUBA_INFO, SnubaError, _snuba_pool
 
 logger = logging.getLogger(__name__)
 
 
-# TODO: If we want to support security events here we'll need a way to
-# differentiate within the dataset. For now we can just assume all subscriptions
-# created within this dataset are just for errors.
-DATASET_CONDITIONS = {
-    QueryDatasets.EVENTS: "event.type:error",
-    QueryDatasets.TRANSACTIONS: "event.type:transaction",
-}
 SUBSCRIPTION_STATUS_MAX_AGE = timedelta(minutes=10)
-
-
-def apply_dataset_query_conditions(dataset, query, event_types, discover=False):
-    """
-    Applies query dataset conditions to a query. This essentially turns a query like
-    'release:123 or release:456' into '(event.type:error) AND (release:123 or release:456)'.
-    :param dataset: The `QueryDataset` that the query applies to
-    :param query: A string containing query to apply conditions to
-    :param event_types: A list of EventType(s) to apply to the query
-    :param discover: Whether this is intended for use with the discover dataset or not.
-    When False, we won't modify queries for `QueryDatasets.TRANSACTIONS` at all. This is
-    because the discover dataset requires that we always specify `event.type` so we can
-    differentiate between errors and transactions, but the TRANSACTIONS dataset doesn't
-    need it specified, and `event.type` ends up becoming a tag search.
-    """
-    if not discover and dataset == QueryDatasets.TRANSACTIONS:
-        return query
-
-    if dataset == QueryDatasets.SESSIONS:
-        return query
-
-    if event_types:
-        event_type_conditions = " OR ".join(
-            f"event.type:{event_type.name.lower()}" for event_type in event_types
-        )
-    elif dataset in DATASET_CONDITIONS:
-        event_type_conditions = DATASET_CONDITIONS[dataset]
-    else:
-        return query
-
-    if query:
-        return f"({event_type_conditions}) AND ({query})"
-
-    return event_type_conditions
 
 
 @instrumented_task(
@@ -77,6 +40,8 @@ def create_subscription_in_snuba(query_subscription_id, **kwargs):
     """
     Task to create a corresponding subscription in Snuba from a `QuerySubscription` in
     Sentry. We store the snuba subscription id locally on success.
+
+    TODO: utilize query_extra from QuerySubscription in request
     """
     try:
         subscription = QuerySubscription.objects.get(id=query_subscription_id)
@@ -86,14 +51,20 @@ def create_subscription_in_snuba(query_subscription_id, **kwargs):
     if subscription.status != QuerySubscription.Status.CREATING.value:
         metrics.incr("snuba.subscriptions.create.incorrect_status")
         return
-    if subscription.subscription_id is not None:
+    if subscription.subscription_id is not None and subscription.snuba_query is not None:
         metrics.incr("snuba.subscriptions.create.already_created_in_snuba")
         # This mostly shouldn't happen, but it's possible that a subscription can get
         # into this state. Just attempt to delete the existing subscription and then
         # create a new one.
+        query_dataset = Dataset(subscription.snuba_query.dataset)
+        entity_key = get_entity_key_from_snuba_query(
+            subscription.snuba_query, subscription.project.organization_id, subscription.project_id
+        )
         try:
             _delete_from_snuba(
-                QueryDatasets(subscription.snuba_query.dataset), subscription.subscription_id
+                query_dataset,
+                subscription.subscription_id,
+                entity_key,
             )
         except SnubaError:
             logger.exception("Failed to delete subscription")
@@ -110,7 +81,14 @@ def create_subscription_in_snuba(query_subscription_id, **kwargs):
     default_retry_delay=5,
     max_retries=5,
 )
-def update_subscription_in_snuba(query_subscription_id, old_dataset=None, **kwargs):
+def update_subscription_in_snuba(
+    query_subscription_id,
+    old_query_type=None,
+    old_dataset=None,
+    old_aggregate=None,
+    old_query=None,
+    **kwargs,
+):
     """
     Task to update a corresponding subscription in Snuba from a `QuerySubscription` in
     Sentry. Updating in Snuba means deleting the existing subscription, then creating a
@@ -126,9 +104,44 @@ def update_subscription_in_snuba(query_subscription_id, old_dataset=None, **kwar
         metrics.incr("snuba.subscriptions.update.incorrect_status")
         return
 
-    if subscription.subscription_id is not None:
-        dataset = old_dataset if old_dataset is not None else subscription.snuba_query.dataset
-        _delete_from_snuba(QueryDatasets(dataset), subscription.subscription_id)
+    if subscription.subscription_id is not None and subscription.snuba_query is not None:
+        dataset = Dataset(
+            old_dataset if old_dataset is not None else subscription.snuba_query.dataset
+        )
+        query_type = SnubaQuery.Type(
+            old_query_type if old_query_type is not None else subscription.snuba_query.type
+        )
+        query = old_query if old_query is not None else subscription.snuba_query.query
+        aggregate = (
+            old_aggregate if old_aggregate is not None else subscription.snuba_query.aggregate
+        )
+        old_entity_subscription = get_entity_subscription(
+            query_type,
+            dataset,
+            aggregate,
+            subscription.snuba_query.time_window,
+            extra_fields={
+                "org_id": subscription.project.organization_id,
+                "event_types": subscription.snuba_query.event_types,
+            },
+        )
+        old_entity_key = (
+            EntityKey.EAPSpans
+            if dataset == Dataset.EventsAnalyticsPlatform
+            else get_entity_key_from_query_builder(
+                old_entity_subscription.build_query_builder(
+                    query,
+                    [subscription.project_id],
+                    None,
+                    {"organization_id": subscription.project.organization_id},
+                ),
+            )
+        )
+        _delete_from_snuba(
+            Dataset(dataset),
+            subscription.subscription_id,
+            old_entity_key,
+        )
 
     subscription_id = _create_in_snuba(subscription)
     subscription.update(
@@ -149,6 +162,8 @@ def delete_subscription_from_snuba(query_subscription_id, **kwargs):
     If the local subscription is marked for deletion (as opposed to disabled),
     then we delete the local subscription once we've successfully removed from Snuba.
     """
+    from sentry.incidents.models.alert_rule import AlertRule
+
     try:
         subscription = QuerySubscription.objects.get(id=query_subscription_id)
     except QuerySubscription.DoesNotExist:
@@ -162,104 +177,130 @@ def delete_subscription_from_snuba(query_subscription_id, **kwargs):
         metrics.incr("snuba.subscriptions.delete.incorrect_status")
         return
 
-    if subscription.subscription_id is not None:
+    if subscription.subscription_id is not None and subscription.snuba_query is not None:
+        query_dataset = Dataset(subscription.snuba_query.dataset)
+        entity_key = get_entity_key_from_snuba_query(
+            subscription.snuba_query,
+            subscription.project.organization_id,
+            subscription.project_id,
+            skip_field_validation_for_entity_subscription_deletion=True,
+        )
         _delete_from_snuba(
-            QueryDatasets(subscription.snuba_query.dataset), subscription.subscription_id
+            query_dataset,
+            subscription.subscription_id,
+            entity_key,
         )
 
     if subscription.status == QuerySubscription.Status.DELETING.value:
+        snuba_query = subscription.snuba_query
         subscription.delete()
+        # check that there are no subscriptions left related to the SnubaQuery before deleting
+        # add a check for the alert rule - in the snapshot case we could fall in here but the alert rule isn't deleted
+        if (
+            snuba_query
+            and not QuerySubscription.objects.filter(snuba_query=snuba_query.id).exists()
+            and not AlertRule.objects_with_snapshots.filter(snuba_query=snuba_query.id).exists()
+        ):
+            snuba_query.delete()
     else:
         subscription.update(subscription_id=None)
 
 
-def build_snuba_filter(dataset, query, aggregate, environment, event_types, params=None):
-    resolve_func = {
-        QueryDatasets.EVENTS: resolve_column(Dataset.Events),
-        QueryDatasets.SESSIONS: resolve_column(Dataset.Sessions),
-        QueryDatasets.TRANSACTIONS: resolve_column(Dataset.Transactions),
-    }[dataset]
-
-    functions_acl = None
-
-    aggregations = [aggregate]
-    if dataset == QueryDatasets.SESSIONS:
-        # This aggregation is added to return the total number of sessions in crash
-        # rate alerts that is used to identify if we are below a general minimum alert threshold
-        count_col = re.search(r"(sessions|users)", aggregate)
-        count_col_matched = count_col.group()
-
-        aggregations += [f"identity({count_col_matched}) AS {CRASH_RATE_ALERT_SESSION_COUNT_ALIAS}"]
-        functions_acl = ["identity"]
-
-    query = apply_dataset_query_conditions(dataset, query, event_types)
-    snuba_filter = get_filter(query, params=params)
-    snuba_filter.update_with(
-        resolve_field_list(
-            aggregations, snuba_filter, auto_fields=False, functions_acl=functions_acl
+def _create_in_snuba(subscription: QuerySubscription) -> str:
+    with sentry_sdk.start_span(op="snuba.tasks", name="create_in_snuba") as span:
+        span.set_tag(
+            "uses_metrics_layer",
+            features.has("organizations:use-metrics-layer", subscription.project.organization),
         )
-    )
-    snuba_filter = resolve_snuba_aliases(snuba_filter, resolve_func)[0]
-    if snuba_filter.group_ids:
-        snuba_filter.conditions.append(["group_id", "IN", list(map(int, snuba_filter.group_ids))])
-    if environment:
-        snuba_filter.conditions.append(["environment", "=", environment.name])
-    return snuba_filter
+        span.set_tag("dataset", subscription.snuba_query.dataset)
+
+        snuba_query = subscription.snuba_query
+        entity_subscription = get_entity_subscription_from_snuba_query(
+            snuba_query,
+            subscription.project.organization_id,
+        )
+        query_string = build_query_strings(subscription, snuba_query).query_string
+        if entity_subscription.dataset == Dataset.EventsAnalyticsPlatform:
+            rpc_time_series_request = entity_subscription.build_rpc_request(
+                query=query_string,
+                project_ids=[subscription.project_id],
+                environment=snuba_query.environment,
+                params={
+                    "organization_id": subscription.project.organization_id,
+                    "project_id": [subscription.project_id],
+                },
+            )
+            return _create_rpc_in_snuba(
+                subscription, snuba_query, rpc_time_series_request, entity_subscription
+            )
+        else:
+            snql_query = entity_subscription.build_query_builder(
+                query=query_string,
+                project_ids=[subscription.project_id],
+                environment=snuba_query.environment,
+                params={
+                    "organization_id": subscription.project.organization_id,
+                    "project_id": [subscription.project_id],
+                },
+            ).get_snql_query()
+
+            return _create_snql_in_snuba(subscription, snuba_query, snql_query, entity_subscription)
 
 
-def _create_in_snuba(subscription):
-    snuba_query = subscription.snuba_query
-    snuba_filter = build_snuba_filter(
-        QueryDatasets(snuba_query.dataset),
-        snuba_query.query,
-        snuba_query.aggregate,
-        snuba_query.environment,
-        snuba_query.event_types,
-    )
-
+# This indirection function only exists such that snql queries can be rewritten
+# by sentry.utils.pytest.metrics
+def _create_snql_in_snuba(subscription, snuba_query, snql_query, entity_subscription):
     body = {
         "project_id": subscription.project_id,
-        "project": subscription.project_id,  # for SnQL SDK
-        "dataset": snuba_query.dataset,
-        "conditions": snuba_filter.conditions,
-        "aggregations": snuba_filter.aggregations,
+        "query": str(snql_query.query),
         "time_window": snuba_query.time_window,
         "resolution": snuba_query.resolution,
+        **entity_subscription.get_entity_extra_params(),
     }
+    if SNUBA_INFO:
+        import pprint
 
-    if Dataset(snuba_query.dataset) == Dataset.Sessions:
-        body.update(
-            {
-                "organization": subscription.project.organization_id,
-            }
+        print(  # NOQA: only prints when an env variable is set
+            f"subscription.body:\n {pprint.pformat(body)}"
         )
 
-    try:
-        metrics.incr("snuba.snql.subscription.create", tags={"dataset": snuba_query.dataset})
-        snql_query = json_to_snql(body, snuba_query.dataset)
-        snql_query.validate()
-        body["query"] = str(snql_query)
-        body["type"] = "delegate"  # mark this as a combined subscription
-    except Exception as e:
-        logger.warning(
-            "snuba.snql.subscription.parsing.error",
-            extra={"error": str(e), "params": json.dumps(body), "dataset": snuba_query.dataset},
-        )
-        metrics.incr("snuba.snql.subscription.parsing.error", tags={"dataset": snuba_query.dataset})
+    entity_key = get_entity_key_from_request(snql_query)
 
+    post_body: str | bytes = orjson.dumps(body)
     response = _snuba_pool.urlopen(
         "POST",
-        f"/{snuba_query.dataset}/subscriptions",
-        body=json.dumps(body),
+        f"/{snuba_query.dataset}/{entity_key.value}/subscriptions",
+        body=post_body,
     )
     if response.status != 202:
         metrics.incr("snuba.snql.subscription.http.error", tags={"dataset": snuba_query.dataset})
         raise SnubaError("HTTP %s response from Snuba!" % response.status)
-    return json.loads(response.data)["subscription_id"]
+
+    return orjson.loads(response.data)["subscription_id"]
 
 
-def _delete_from_snuba(dataset: QueryDatasets, subscription_id: str) -> None:
-    response = _snuba_pool.urlopen("DELETE", f"/{dataset.value}/subscriptions/{subscription_id}")
+def _create_rpc_in_snuba(
+    subscription, snuba_query, rpc_time_series_request: TimeSeriesRequest, entity_subscription
+):
+    subscription_request = CreateSubscriptionRequest(
+        time_series_request=rpc_time_series_request,
+        time_window_secs=snuba_query.time_window,
+        resolution_secs=snuba_query.resolution,
+    )
+
+    try:
+        response = snuba_rpc.create_subscription(subscription_request)
+    except snuba_rpc.SnubaRPCError:
+        metrics.incr("snuba.snql.subscription.http.error", tags={"dataset": snuba_query.dataset})
+        raise
+
+    return response.subscription_id
+
+
+def _delete_from_snuba(dataset: Dataset, subscription_id: str, entity_key: EntityKey) -> None:
+    response = _snuba_pool.urlopen(
+        "DELETE", f"/{dataset.value}/{entity_key.value}/subscriptions/{subscription_id}"
+    )
     if response.status != 202:
         raise SnubaError("HTTP %s response from Snuba!" % response.status)
 
@@ -273,28 +314,23 @@ def subscription_checker(**kwargs):
     Checks for subscriptions stuck in a transition status and attempts to repair them
     """
     count = 0
-    with sentry_sdk.start_transaction(
-        op="subscription_checker",
-        name="subscription_checker",
-        sampled=False,
+    for subscription in QuerySubscription.objects.filter(
+        status__in=(
+            QuerySubscription.Status.CREATING.value,
+            QuerySubscription.Status.UPDATING.value,
+            QuerySubscription.Status.DELETING.value,
+        ),
+        date_updated__lt=timezone.now() - SUBSCRIPTION_STATUS_MAX_AGE,
     ):
-        for subscription in QuerySubscription.objects.filter(
-            status__in=(
-                QuerySubscription.Status.CREATING.value,
-                QuerySubscription.Status.UPDATING.value,
-                QuerySubscription.Status.DELETING.value,
-            ),
-            date_updated__lt=timezone.now() - SUBSCRIPTION_STATUS_MAX_AGE,
-        ):
-            with sentry_sdk.start_span(op="repair_subscription") as span:
-                span.set_data("subscription_id", subscription.id)
-                span.set_data("status", subscription.status)
-                count += 1
-                if subscription.status == QuerySubscription.Status.CREATING.value:
-                    create_subscription_in_snuba.delay(query_subscription_id=subscription.id)
-                elif subscription.status == QuerySubscription.Status.UPDATING.value:
-                    update_subscription_in_snuba.delay(query_subscription_id=subscription.id)
-                elif subscription.status == QuerySubscription.Status.DELETING.value:
-                    delete_subscription_from_snuba.delay(query_subscription_id=subscription.id)
+        with sentry_sdk.start_span(op="repair_subscription") as span:
+            span.set_data("subscription_id", subscription.id)
+            span.set_data("status", subscription.status)
+            count += 1
+            if subscription.status == QuerySubscription.Status.CREATING.value:
+                create_subscription_in_snuba.delay(query_subscription_id=subscription.id)
+            elif subscription.status == QuerySubscription.Status.UPDATING.value:
+                update_subscription_in_snuba.delay(query_subscription_id=subscription.id)
+            elif subscription.status == QuerySubscription.Status.DELETING.value:
+                delete_subscription_from_snuba.delay(query_subscription_id=subscription.id)
 
     metrics.incr("snuba.subscriptions.repair", amount=count)

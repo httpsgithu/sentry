@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 import time
 from datetime import datetime
 from enum import IntEnum
 
-from django.conf import settings
-
+from sentry.conf.types.kafka_definition import Topic
 from sentry.constants import DataCategory
 from sentry.utils import json, kafka_config, metrics
 from sentry.utils.dates import to_datetime
@@ -19,30 +20,34 @@ class Outcome(IntEnum):
     INVALID = 3
     ABUSE = 4
     CLIENT_DISCARD = 5
+    CARDINALITY_LIMITED = 6
 
     def api_name(self) -> str:
         return self.name.lower()
 
     @classmethod
-    def parse(cls, name: str) -> "Outcome":
+    def parse(cls, name: str) -> Outcome:
         return Outcome[name.upper()]
 
+    def is_billing(self) -> bool:
+        return self in (Outcome.ACCEPTED, Outcome.RATE_LIMITED)
 
-outcomes = settings.KAFKA_TOPICS[settings.KAFKA_OUTCOMES]
-outcomes_publisher = None
+
+outcomes_publisher: KafkaPublisher | None = None
+billing_publisher: KafkaPublisher | None = None
 
 
 def track_outcome(
-    org_id,
-    project_id,
-    key_id,
-    outcome,
-    reason=None,
-    timestamp=None,
-    event_id=None,
-    category=None,
-    quantity=None,
-):
+    org_id: int,
+    project_id: int,
+    key_id: int | None,
+    outcome: Outcome,
+    reason: str | None = None,
+    timestamp: datetime | None = None,
+    event_id: str | None = None,
+    category: DataCategory | None = None,
+    quantity: int | None = None,
+) -> None:
     """
     This is a central point to track org/project counters per incoming event.
     NB: This should only ever be called once per incoming event, which means
@@ -54,11 +59,7 @@ def track_outcome(
     events.
     """
     global outcomes_publisher
-    if outcomes_publisher is None:
-        cluster_name = outcomes["cluster"]
-        outcomes_publisher = KafkaPublisher(
-            kafka_config.get_kafka_producer_cluster_options(cluster_name)
-        )
+    global billing_publisher
 
     if quantity is None:
         quantity = 1
@@ -71,11 +72,39 @@ def track_outcome(
     assert isinstance(category, (type(None), DataCategory))
     assert isinstance(quantity, int)
 
+    outcomes_config = kafka_config.get_topic_definition(Topic.OUTCOMES)
+    billing_config = kafka_config.get_topic_definition(Topic.OUTCOMES_BILLING)
+
+    use_billing = outcome.is_billing()
+
+    # Create a second producer instance only if the cluster differs. Otherwise,
+    # reuse the same producer and just send to the other topic.
+    if use_billing and billing_config["cluster"] != outcomes_config["cluster"]:
+        if billing_publisher is None:
+            cluster_name = billing_config["cluster"]
+            billing_publisher = KafkaPublisher(
+                kafka_config.get_kafka_producer_cluster_options(cluster_name)
+            )
+        publisher = billing_publisher
+
+    else:
+        if outcomes_publisher is None:
+            cluster_name = outcomes_config["cluster"]
+            outcomes_publisher = KafkaPublisher(
+                kafka_config.get_kafka_producer_cluster_options(cluster_name)
+            )
+        publisher = outcomes_publisher
+
     timestamp = timestamp or to_datetime(time.time())
 
+    # Send billing outcomes to a dedicated topic.
+    topic_name = (
+        billing_config["real_topic_name"] if use_billing else outcomes_config["real_topic_name"]
+    )
+
     # Send a snuba metrics payload.
-    outcomes_publisher.publish(
-        outcomes["topic"],
+    publisher.publish(
+        topic_name,
         json.dumps(
             {
                 "timestamp": timestamp,
@@ -98,5 +127,6 @@ def track_outcome(
             "outcome": outcome.name.lower(),
             "reason": reason,
             "category": category.api_name() if category is not None else "null",
+            "topic": topic_name,
         },
     )

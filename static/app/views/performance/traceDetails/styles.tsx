@@ -1,23 +1,30 @@
+import {useState} from 'react';
 import styled from '@emotion/styled';
-import {Location} from 'history';
+import type {Location} from 'history';
 
-import EventTagsPill from 'app/components/events/eventTags/eventTagsPill';
-import {SecondaryHeader} from 'app/components/events/interfaces/spans/header';
-import {Panel} from 'app/components/panels';
-import Pills from 'app/components/pills';
-import SearchBar from 'app/components/searchBar';
-import space from 'app/styles/space';
-import {Organization} from 'app/types';
-import {defined} from 'app/utils';
-import {TraceFullDetailed} from 'app/utils/performance/quickTrace/types';
-import {appendTagCondition} from 'app/utils/queryString';
-import {transactionSummaryRouteWithQuery} from 'app/views/performance/transactionSummary/utils';
+import EventTagsPill from 'sentry/components/events/eventTags/eventTagsPill';
+import {SecondaryHeader} from 'sentry/components/events/interfaces/spans/header';
+import Panel from 'sentry/components/panels/panel';
+import Pills from 'sentry/components/pills';
+import SearchBar from 'sentry/components/searchBar';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {EventTag} from 'sentry/types/event';
+import type {Organization} from 'sentry/types/organization';
+import {defined, generateQueryWithTag} from 'sentry/utils';
+import type {
+  TraceError,
+  TraceFullDetailed,
+} from 'sentry/utils/performance/quickTrace/types';
+import {isTraceTransaction} from 'sentry/utils/performance/quickTrace/utils';
+import {appendTagCondition} from 'sentry/utils/queryString';
+import {transactionSummaryRouteWithQuery} from 'sentry/views/performance/transactionSummary/utils';
 
 export {
   Row,
   SpanDetails as TransactionDetails,
   SpanDetailContainer as TransactionDetailsContainer,
-} from 'app/components/events/interfaces/spans/spanDetail';
+} from 'sentry/components/events/interfaces/spans/spanDetail';
 
 export const TraceSearchContainer = styled('div')`
   display: flex;
@@ -29,26 +36,27 @@ export const TraceSearchBar = styled(SearchBar)`
 `;
 
 export const TraceViewHeaderContainer = styled(SecondaryHeader)`
-  position: static;
-  top: auto;
   border-top: none;
   border-bottom: 1px solid ${p => p.theme.border};
+  position: sticky;
+  top: 0;
+  z-index: 1;
 `;
 
 export const TraceDetailHeader = styled('div')`
   display: grid;
   grid-template-columns: 1fr;
-  grid-gap: ${space(2)};
+  gap: ${space(3)};
   margin-bottom: ${space(2)};
 
-  @media (min-width: ${p => p.theme.breakpoints[1]}) {
-    grid-template-columns: minmax(250px, 1fr) minmax(160px, 1fr) 6fr;
+  @media (min-width: ${p => p.theme.breakpoints.medium}) {
+    grid-template-columns: max-content max-content;
     grid-row-gap: 0;
   }
 `;
 
 export const TraceDetailBody = styled('div')`
-  margin-top: ${space(2)};
+  height: 100%;
 `;
 
 export const TraceViewContainer = styled('div')`
@@ -58,7 +66,8 @@ export const TraceViewContainer = styled('div')`
 `;
 
 export const TracePanel = styled(Panel)`
-  overflow: hidden;
+  height: 100%;
+  overflow: auto;
 `;
 
 export const ProjectBadgeContainer = styled('span')`
@@ -75,49 +84,75 @@ const StyledPills = styled(Pills)`
 export function Tags({
   location,
   organization,
-  transaction,
+  enableHiding,
+  event,
+  tags,
 }: {
+  event: TraceFullDetailed | TraceError;
   location: Location;
   organization: Organization;
-  transaction: TraceFullDetailed;
+  tags: EventTag[];
+  enableHiding?: boolean;
 }) {
-  const {tags} = transaction;
+  const [showingAll, setShowingAll] = useState(enableHiding ? false : true);
 
   if (!tags || tags.length <= 0) {
     return null;
   }
 
-  const orgSlug = organization.slug;
-  const releasesPath = `/organizations/${orgSlug}/releases/`;
+  const renderText = showingAll ? t('Show less') : t('Show more') + '...';
 
   return (
     <tr>
       <td className="key">Tags</td>
       <td className="value">
         <StyledPills>
-          {tags.map((tag, index) => {
-            const {pathname: streamPath, query} = transactionSummaryRouteWithQuery({
-              orgSlug,
-              transaction: transaction.transaction,
-              projectID: String(transaction.project_id),
-              query: {
-                ...location.query,
-                query: appendTagCondition(location.query.query, tag.key, tag.value),
-              },
-            });
+          {tags.slice(0, showingAll ? tags.length : 5).map((tag, index) => {
+            let streamPath = '';
+            let query = {};
+
+            if (isTraceTransaction(event)) {
+              const route = transactionSummaryRouteWithQuery({
+                organization,
+                transaction: event.transaction,
+                projectID: String(event.project_id),
+                query: {
+                  ...location.query,
+                  query: appendTagCondition(location.query.query, tag.key, tag.value),
+                },
+              });
+              streamPath = route.pathname;
+              query = route.query;
+            } else {
+              streamPath = `/organizations/${organization.slug}/issues/`;
+              query = generateQueryWithTag(
+                {...location.query, referrer: 'event-tags'},
+                tag
+              );
+            }
 
             return (
               <EventTagsPill
                 key={!defined(tag.key) ? `tag-pill-${index}` : tag.key}
                 tag={tag}
-                projectId={transaction.project_slug}
+                projectSlug={event.project_slug}
+                projectId={event.project_id.toString()}
                 organization={organization}
                 query={query}
                 streamPath={streamPath}
-                releasesPath={releasesPath}
               />
             );
           })}
+          {tags.length > 5 && enableHiding && (
+            <div style={{position: 'relative', height: '20px'}}>
+              <a
+                style={{position: 'absolute', bottom: '0px', whiteSpace: 'nowrap'}}
+                onClick={() => setShowingAll(prev => !prev)}
+              >
+                {renderText}
+              </a>
+            </div>
+          )}
         </StyledPills>
       </td>
     </tr>

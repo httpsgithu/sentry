@@ -1,130 +1,118 @@
-import * as React from 'react';
-import {ClassNames} from '@emotion/react';
+import {css} from '@emotion/react';
 import styled from '@emotion/styled';
 
-import GuideAnchor from 'app/components/assistant/guideAnchor';
-import space from 'app/styles/space';
-import {Organization, SavedSearch} from 'app/types';
+import {DatePageFilter} from 'sentry/components/organizations/datePageFilter';
+import {EnvironmentPageFilter} from 'sentry/components/organizations/environmentPageFilter';
+import PageFilterBar from 'sentry/components/organizations/pageFilterBar';
+import {ProjectPageFilter} from 'sentry/components/organizations/projectPageFilter';
+import {space} from 'sentry/styles/space';
+import useOrganization from 'sentry/utils/useOrganization';
+import IssueListSortOptions from 'sentry/views/issueList/actions/sortOptions';
+import {IssueSearchWithSavedSearches} from 'sentry/views/issueList/issueSearchWithSavedSearches';
 
-import IssueListDisplayOptions from './displayOptions';
-import IssueListSearchBar from './searchBar';
-import IssueListSortOptions from './sortOptions';
-import {TagValueLoader} from './types';
-import {IssueDisplayOptions} from './utils';
-
-type IssueListSearchBarProps = React.ComponentProps<typeof IssueListSearchBar>;
-
-type Props = {
-  organization: Organization;
-  savedSearch: SavedSearch;
-  display: IssueDisplayOptions;
-  sort: string;
-  query: string;
-  isSearchDisabled: boolean;
-  hasSessions: boolean;
-  selectedProjects: number[];
-
-  onDisplayChange: (display: string) => void;
-  onSortChange: (sort: string) => void;
+interface Props {
   onSearch: (query: string) => void;
-  onSidebarToggle: (event: React.MouseEvent) => void;
-  tagValueLoader: TagValueLoader;
-  tags: NonNullable<IssueListSearchBarProps['supportedTags']>;
-};
-
-class IssueListFilters extends React.Component<Props> {
-  render() {
-    const {
-      organization,
-      savedSearch,
-      query,
-      isSearchDisabled,
-      sort,
-      display,
-      hasSessions,
-      selectedProjects,
-
-      onSidebarToggle,
-      onSearch,
-      onSortChange,
-      onDisplayChange,
-      tagValueLoader,
-      tags,
-    } = this.props;
-    const isAssignedQuery = /\bassigned:/.test(query);
-    const hasIssuePercentDisplay = organization.features.includes(
-      'issue-percent-display'
-    );
-
-    return (
-      <SearchContainer hasIssuePercentDisplay={hasIssuePercentDisplay}>
-        <ClassNames>
-          {({css}) => (
-            <GuideAnchor
-              target="assigned_or_suggested_query"
-              disabled={!isAssignedQuery}
-              containerClassName={css`
-                width: 100%;
-              `}
-            >
-              <IssueListSearchBar
-                organization={organization}
-                query={query || ''}
-                sort={sort}
-                onSearch={onSearch}
-                disabled={isSearchDisabled}
-                excludeEnvironment
-                supportedTags={tags}
-                tagValueLoader={tagValueLoader}
-                savedSearch={savedSearch}
-                onSidebarToggle={onSidebarToggle}
-              />
-            </GuideAnchor>
-          )}
-        </ClassNames>
-
-        <DropdownsWrapper hasIssuePercentDisplay={hasIssuePercentDisplay}>
-          {hasIssuePercentDisplay && (
-            <IssueListDisplayOptions
-              onDisplayChange={onDisplayChange}
-              display={display}
-              hasSessions={hasSessions}
-              hasMultipleProjectsSelected={
-                selectedProjects.length !== 1 || selectedProjects[0] === -1
-              }
-            />
-          )}
-          <IssueListSortOptions sort={sort} query={query} onSelect={onSortChange} />
-        </DropdownsWrapper>
-      </SearchContainer>
-    );
-  }
+  onSortChange: (sort: string) => void;
+  query: string;
+  sort: string;
 }
 
-const SearchContainer = styled('div')<{hasIssuePercentDisplay?: boolean}>`
-  display: inline-grid;
-  grid-gap: ${space(1)};
+function IssueListFilters({query, sort, onSortChange, onSearch}: Props) {
+  const organization = useOrganization();
+
+  const hasNewLayout = organization.features.includes('issue-stream-table-layout');
+
+  return (
+    <FiltersContainer hasNewLayout={hasNewLayout}>
+      <StyledPageFilterBar>
+        <ProjectPageFilter />
+        <EnvironmentPageFilter />
+        <DatePageFilter />
+      </StyledPageFilterBar>
+
+      <Search {...{query, onSearch}} />
+
+      {organization.features.includes('issue-stream-table-layout') && (
+        <Sort
+          query={query}
+          sort={sort}
+          onSelect={onSortChange}
+          triggerSize="md"
+          showIcon={false}
+        />
+      )}
+    </FiltersContainer>
+  );
+}
+
+const FiltersContainer = styled('div')<{hasNewLayout: boolean}>`
+  display: grid;
+  column-gap: ${space(1)};
+  row-gap: ${space(1)};
   margin-bottom: ${space(2)};
   width: 100%;
 
-  @media (min-width: ${p => p.theme.breakpoints[p.hasIssuePercentDisplay ? 1 : 0]}) {
-    grid-template-columns: 1fr auto;
-  }
+  ${p =>
+    p.hasNewLayout
+      ? css`
+          grid-template-columns: 100%;
+          grid-template-areas:
+            'page-filters'
+            'search'
+            'sort';
 
-  @media (max-width: ${p => p.theme.breakpoints[0]}) {
-    grid-template-columns: 1fr;
+          @media (min-width: ${p.theme.breakpoints.xsmall}) {
+            grid-template-columns: auto 1fr;
+            grid-template-areas:
+              'page-filters sort'
+              'search search';
+          }
+
+          @media (min-width: ${p.theme.breakpoints.large}) {
+            grid-template-columns: auto 1fr auto;
+            grid-template-areas: 'page-filters search sort';
+          }
+        `
+      : css`
+          grid-template-columns: 100%;
+          grid-template-areas:
+            'page-filters'
+            'search';
+
+          @media (min-width: ${p.theme.breakpoints.xsmall}) {
+            grid-template-columns: auto 1fr;
+            grid-template-areas:
+              'page-filters sort'
+              'search search';
+          }
+
+          @media (min-width: ${p.theme.breakpoints.large}) {
+            grid-template-columns: auto 1fr;
+            grid-template-areas: 'page-filters search';
+          }
+        `}
+`;
+
+const Search = styled(IssueSearchWithSavedSearches)`
+  grid-area: search;
+`;
+
+const StyledPageFilterBar = styled(PageFilterBar)`
+  grid-area: page-filters;
+  display: flex;
+  flex-basis: content;
+  width: 100%;
+  max-width: 43rem;
+  justify-self: start;
+
+  > div > button {
+    width: 100%;
   }
 `;
 
-const DropdownsWrapper = styled('div')<{hasIssuePercentDisplay?: boolean}>`
-  display: grid;
-  grid-gap: ${space(1)};
-  grid-template-columns: 1fr ${p => (p.hasIssuePercentDisplay ? '1fr' : '')};
-  align-items: start;
-
-  @media (max-width: ${p => p.theme.breakpoints[0]}) {
-    grid-template-columns: 1fr;
-  }
+const Sort = styled(IssueListSortOptions)`
+  grid-area: sort;
+  justify-self: end;
 `;
 
 export default IssueListFilters;

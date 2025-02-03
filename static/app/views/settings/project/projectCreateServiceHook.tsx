@@ -1,28 +1,33 @@
 import {Fragment} from 'react';
-import DocumentTitle from 'react-document-title';
-import {RouteComponentProps} from 'react-router';
 
-import {t} from 'app/locale';
-import SettingsPageHeader from 'app/views/settings/components/settingsPageHeader';
-import ServiceHookSettingsForm from 'app/views/settings/project/serviceHookSettingsForm';
+import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
+import {t} from 'sentry/locale';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import withOrganization from 'sentry/utils/withOrganization';
+import SettingsPageHeader from 'sentry/views/settings/components/settingsPageHeader';
+import ServiceHookSettingsForm from 'sentry/views/settings/project/serviceHookSettingsForm';
 
-type Props = RouteComponentProps<{orgId: string; projectId: string}, {}>;
+type Props = RouteComponentProps<{projectId: string}, {}> & {
+  organization: Organization;
+};
 
-function ProjectCreateServiceHook({params}: Props) {
-  const {orgId, projectId} = params;
+function ProjectCreateServiceHook({organization, params}: Props) {
+  const {projectId} = params;
   const title = t('Create Service Hook');
+
   return (
-    <DocumentTitle title={`${title} - Sentry`}>
+    <SentryDocumentTitle title={title}>
       <Fragment>
         <SettingsPageHeader title={title} />
         <ServiceHookSettingsForm
-          orgId={orgId}
+          organization={organization}
           projectId={projectId}
           initialData={{events: [], isActive: true}}
         />
       </Fragment>
-    </DocumentTitle>
+    </SentryDocumentTitle>
   );
 }
 
-export default ProjectCreateServiceHook;
+export default withOrganization(ProjectCreateServiceHook);

@@ -1,17 +1,20 @@
 import * as Sentry from '@sentry/react';
 
-import ExternalLink from 'app/components/links/externalLink';
+import type {Field} from 'sentry/components/forms/types';
+import ExternalLink from 'sentry/components/links/externalLink';
 import {
   AWS_REGIONS,
   DEBUG_SOURCE_CASINGS,
   DEBUG_SOURCE_LAYOUTS,
-} from 'app/data/debugFileSources';
-import {t, tct} from 'app/locale';
-import {CustomRepoType} from 'app/types/debugFiles';
-import {Field} from 'app/views/settings/components/forms/type';
+} from 'sentry/data/debugFileSources';
+import {t, tct} from 'sentry/locale';
+import {CustomRepoType} from 'sentry/types/debugFiles';
+import {uniqueId} from 'sentry/utils/guid';
 
-function objectToChoices(obj: Record<string, string>): [key: string, value: string][] {
-  return Object.entries(obj).map(([key, value]) => [key, t(value)]);
+function objectToChoices(
+  obj: Record<string, string>
+): Array<[key: string, value: string]> {
+  return Object.entries(obj).map(([key, value]) => [key, value]);
 }
 
 type FieldMap = Record<string, Field>;
@@ -21,7 +24,7 @@ const commonFields: FieldMap = {
     name: 'id',
     type: 'hidden',
     required: true,
-    defaultValue: () => Math.random().toString(36).substring(2),
+    defaultValue: uniqueId,
   },
   name: {
     name: 'name',
@@ -65,7 +68,7 @@ export function getFormFieldsAndInitialData(
   type: CustomRepoType,
   sourceConfig?: Record<string, any>
 ) {
-  if (type === CustomRepoType.HTTP || type === CustomRepoType.APP_STORE_CONNECT) {
+  if (type === CustomRepoType.HTTP) {
     return {};
   }
 
@@ -211,7 +214,7 @@ export function getFormFieldsAndInitialData(
 }
 
 export function getFinalData(type: CustomRepoType, data: Record<string, any>) {
-  if (type === CustomRepoType.HTTP || type === CustomRepoType.APP_STORE_CONNECT) {
+  if (type === CustomRepoType.HTTP) {
     return data;
   }
 
