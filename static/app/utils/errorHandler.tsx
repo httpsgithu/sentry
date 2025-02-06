@@ -1,14 +1,14 @@
-import * as React from 'react';
+import {Component} from 'react';
 
-import RouteError from 'app/views/routeError';
+import RouteError from 'sentry/views/routeError';
 
 type State = {
-  hasError: boolean;
   error: Error | undefined;
+  hasError: boolean;
 };
 
-export default function errorHandler<P>(Component: React.ComponentType<P>) {
-  class ErrorHandler extends React.Component<P, State> {
+export default function errorHandler<P>(WrappedComponent: React.ComponentType<P>) {
+  class ErrorHandler extends Component<P, State> {
     static getDerivedStateFromError(error: Error) {
       // Update state so the next render will show the fallback UI.
       return {
@@ -37,7 +37,8 @@ export default function errorHandler<P>(Component: React.ComponentType<P>) {
         return <RouteError error={this.state.error} />;
       }
 
-      return <Component {...this.props} />;
+      // TODO(any): HoC prop types not working w/ emotion https://github.com/emotion-js/emotion/issues/3261
+      return <WrappedComponent {...(this.props as any)} />;
     }
   }
 

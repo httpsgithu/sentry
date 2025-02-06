@@ -1,34 +1,35 @@
-import {browserHistory} from 'react-router';
-import {Location} from 'history';
+import type {Location} from 'history';
 
-import * as Layout from 'app/components/layouts/thirds';
-import LoadingIndicator from 'app/components/loadingIndicator';
-import {t} from 'app/locale';
-import {Organization, Project} from 'app/types';
-import {trackAnalyticsEvent} from 'app/utils/analytics';
-import DiscoverQuery from 'app/utils/discover/discoverQuery';
-import EventView from 'app/utils/discover/eventView';
+import * as Layout from 'sentry/components/layouts/thirds';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import {t} from 'sentry/locale';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import DiscoverQuery from 'sentry/utils/discover/discoverQuery';
+import EventView from 'sentry/utils/discover/eventView';
 import {
   isAggregateField,
-  QueryFieldValue,
   SPAN_OP_BREAKDOWN_FIELDS,
   SPAN_OP_RELATIVE_BREAKDOWN_FIELD,
-  WebVital,
-} from 'app/utils/discover/fields';
-import {removeHistogramQueryStrings} from 'app/utils/performance/histogram';
-import {decodeScalar} from 'app/utils/queryString';
-import {MutableSearch} from 'app/utils/tokenizeSearch';
-import withOrganization from 'app/utils/withOrganization';
-import withProjects from 'app/utils/withProjects';
+} from 'sentry/utils/discover/fields';
+import {WebVital} from 'sentry/utils/fields';
+import {removeHistogramQueryStrings} from 'sentry/utils/performance/histogram';
+import {decodeScalar} from 'sentry/utils/queryString';
+import {MutableSearch} from 'sentry/utils/tokenizeSearch';
+import {useNavigate} from 'sentry/utils/useNavigate';
+import withOrganization from 'sentry/utils/withOrganization';
+import withProjects from 'sentry/utils/withProjects';
 
 import {
   decodeFilterFromLocation,
   filterToLocationQuery,
   SpanOperationBreakdownFilter,
 } from '../filter';
-import PageLayout, {ChildProps} from '../pageLayout';
+import type {ChildProps} from '../pageLayout';
+import PageLayout from '../pageLayout';
 import Tab from '../tabs';
-import {ZOOM_END, ZOOM_START} from '../transactionOverview/latencyChart';
+import {ZOOM_END, ZOOM_START} from '../transactionOverview/latencyChart/utils';
 
 import EventsContent from './content';
 import {
@@ -36,6 +37,8 @@ import {
   EventsDisplayFilterName,
   filterEventsDisplayToLocationQuery,
   getEventsFilterOptions,
+  getPercentilesEventView,
+  mapPercentileValues,
 } from './utils';
 
 type PercentileValues = Record<EventsDisplayFilterName, number>;
@@ -54,17 +57,25 @@ function TransactionEvents(props: Props) {
       location={location}
       organization={organization}
       projects={projects}
-      tab={Tab.Events}
+      tab={Tab.EVENTS}
       getDocumentTitle={getDocumentTitle}
       generateEventView={generateEventView}
       childComponent={EventsContentWrapper}
-      features={['performance-events-page']}
     />
   );
 }
 
 function EventsContentWrapper(props: ChildProps) {
-  const {location, organization, eventView, transactionName, setError} = props;
+  const {
+    location,
+    organization,
+    eventView,
+    transactionName,
+    setError,
+    projectId,
+    projects,
+  } = props;
+  const navigate = useNavigate();
   const eventsDisplayFilterName = decodeEventsDisplayFilterFromLocation(location);
   const spanOperationBreakdownFilter = decodeFilterFromLocation(location);
   const webVital = getWebVital(location);
@@ -78,7 +89,7 @@ function EventsContentWrapper(props: ChildProps) {
     const filteredEventView = eventView?.clone();
     if (filteredEventView && filter?.query) {
       const query = new MutableSearch(filteredEventView.query);
-      filter.query.forEach(item => query.setFilterValues(item[0], [item[1]]));
+      filter.query.forEach(item => query.setFilterValues(item[0]!, [item[1]!]));
       filteredEventView.query = query.formatString();
     }
     return filteredEventView;
@@ -87,10 +98,8 @@ function EventsContentWrapper(props: ChildProps) {
   const onChangeSpanOperationBreakdownFilter = (
     newFilter: SpanOperationBreakdownFilter
   ) => {
-    trackAnalyticsEvent({
-      eventName: 'Performance Views: Transaction Events Ops Breakdown Filter Dropdown',
-      eventKey: 'performance_views.transactionEvents.ops_filter_dropdown.selection',
-      organization_id: parseInt(organization.id, 10),
+    trackAnalytics('performance_views.transactionEvents.ops_filter_dropdown.selection', {
+      organization,
       action: newFilter as string,
     });
 
@@ -100,7 +109,7 @@ function EventsContentWrapper(props: ChildProps) {
       eventsDisplayFilterName
     ].sort;
     const currentSort = eventView?.sorts?.[0];
-    let sortQuery = {};
+    let sortQuery: Record<string, string> = {};
 
     if (
       eventsFilterOptionSort?.kind === currentSort?.kind &&
@@ -115,33 +124,34 @@ function EventsContentWrapper(props: ChildProps) {
       ...sortQuery,
     };
 
-    if (newFilter === SpanOperationBreakdownFilter.None) {
+    if (newFilter === SpanOperationBreakdownFilter.NONE) {
       delete nextQuery.breakdown;
     }
-    browserHistory.push({
+    navigate({
       pathname: location.pathname,
       query: nextQuery,
     });
   };
 
   const onChangeEventsDisplayFilter = (newFilterName: EventsDisplayFilterName) => {
-    trackAnalyticsEvent({
-      eventName: 'Performance Views: Transaction Events Display Filter Dropdown',
-      eventKey: 'performance_views.transactionEvents.display_filter_dropdown.selection',
-      organization_id: parseInt(organization.id, 10),
-      action: newFilterName as string,
-    });
+    trackAnalytics(
+      'performance_views.transactionEvents.display_filter_dropdown.selection',
+      {
+        organization,
+        action: newFilterName as string,
+      }
+    );
 
     const nextQuery: Location['query'] = {
       ...removeHistogramQueryStrings(location, [ZOOM_START, ZOOM_END]),
       ...filterEventsDisplayToLocationQuery(newFilterName, spanOperationBreakdownFilter),
     };
 
-    if (newFilterName === EventsDisplayFilterName.p100) {
+    if (newFilterName === EventsDisplayFilterName.P100) {
       delete nextQuery.showTransaction;
     }
 
-    browserHistory.push({
+    navigate({
       pathname: location.pathname,
       query: nextQuery,
     });
@@ -163,9 +173,9 @@ function EventsContentWrapper(props: ChildProps) {
           );
         }
 
-        const percentiles: PercentileValues = tableData?.data?.[0];
+        const percentileData = tableData?.data?.[0];
+        const percentiles = mapPercentileValues(percentileData);
         const filteredEventView = getFilteredEventView(percentiles);
-
         return (
           <EventsContent
             location={location}
@@ -177,6 +187,8 @@ function EventsContentWrapper(props: ChildProps) {
             eventsDisplayFilterName={eventsDisplayFilterName}
             onChangeEventsDisplayFilter={onChangeEventsDisplayFilter}
             percentileValues={percentiles}
+            projectId={projectId}
+            projects={projects}
             webVital={webVital}
             setError={setError}
           />
@@ -205,15 +217,24 @@ function getWebVital(location: Location): WebVital | undefined {
   return undefined;
 }
 
-function generateEventView(location: Location, transactionName: string): EventView {
+function generateEventView({
+  location,
+  transactionName,
+}: {
+  location: Location;
+  organization: Organization;
+  transactionName: string;
+}): EventView {
   const query = decodeScalar(location.query.query, '');
   const conditions = new MutableSearch(query);
-  conditions
-    .setFilterValues('event.type', ['transaction'])
-    .setFilterValues('transaction', [transactionName]);
+
+  conditions.setFilterValues('event.type', ['transaction']);
+  conditions.setFilterValues('transaction', [transactionName]);
 
   Object.keys(conditions.filters).forEach(field => {
-    if (isAggregateField(field)) conditions.removeFilter(field);
+    if (isAggregateField(field)) {
+      conditions.removeFilter(field);
+    }
   });
 
   // Default fields for relative span view
@@ -226,7 +247,7 @@ function generateEventView(location: Location, transactionName: string): EventVi
     'timestamp',
   ];
   const breakdown = decodeFilterFromLocation(location);
-  if (breakdown !== SpanOperationBreakdownFilter.None) {
+  if (breakdown !== SpanOperationBreakdownFilter.NONE) {
     fields.splice(2, 1, `spans.${breakdown}`);
   } else {
     fields.push(...SPAN_OP_BREAKDOWN_FIELDS);
@@ -248,33 +269,6 @@ function generateEventView(location: Location, transactionName: string): EventVi
     },
     location
   );
-}
-
-function getPercentilesEventView(eventView: EventView): EventView {
-  const percentileColumns: QueryFieldValue[] = [
-    {
-      kind: 'function',
-      function: ['p100', '', undefined, undefined],
-    },
-    {
-      kind: 'function',
-      function: ['p99', '', undefined, undefined],
-    },
-    {
-      kind: 'function',
-      function: ['p95', '', undefined, undefined],
-    },
-    {
-      kind: 'function',
-      function: ['p75', '', undefined, undefined],
-    },
-    {
-      kind: 'function',
-      function: ['p50', '', undefined, undefined],
-    },
-  ];
-
-  return eventView.withColumns(percentileColumns);
 }
 
 export default withProjects(withOrganization(TransactionEvents));

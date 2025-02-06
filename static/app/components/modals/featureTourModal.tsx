@@ -1,17 +1,17 @@
-import * as React from 'react';
+import {Component, Fragment} from 'react';
 import styled from '@emotion/styled';
 
-import {ModalRenderProps, openModal} from 'app/actionCreators/modal';
-import Button from 'app/components/button';
-import ButtonBar from 'app/components/buttonBar';
-import {IconClose} from 'app/icons';
-import {t} from 'app/locale';
-import space from 'app/styles/space';
-import {callIfFunction} from 'app/utils/callIfFunction';
+import type {ModalRenderProps} from 'sentry/actionCreators/modal';
+import {openModal} from 'sentry/actionCreators/modal';
+import {Button, LinkButton} from 'sentry/components/button';
+import ButtonBar from 'sentry/components/buttonBar';
+import {IconClose} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
 
 export type TourStep = {
-  title: string;
   body: React.ReactNode;
+  title: string;
   actions?: React.ReactNode;
   image?: React.ReactNode;
 };
@@ -23,10 +23,18 @@ type ChildProps = {
 type Props = {
   children: (props: ChildProps) => React.ReactNode;
   /**
+   * Provide a URL for the done state to open in a new tab.
+   */
+  doneUrl: string;
+  /**
    * The list of tour steps.
    * The FeatureTourModal will manage state on the active step.
    */
   steps: TourStep[];
+  /**
+   * Customize the text shown on the done button.
+   */
+  doneText?: string;
   /**
    * Triggered when the tour is advanced.
    */
@@ -35,27 +43,19 @@ type Props = {
    * Triggered when the tour is closed by completion or IconClose
    */
   onCloseModal?: (currentIndex: number, durationOpen: number) => void;
-  /**
-   * Customize the text shown on the done button.
-   */
-  doneText?: string;
-  /**
-   * Provide a URL for the done state to open in a new tab.
-   */
-  doneUrl?: string;
 };
 
 type State = {
+  /**
+   * The last known step
+   */
+  current: number;
+
   /**
    * The timestamp when the modal was shown.
    * Used to calculate how long the modal was open
    */
   openedAt: number;
-
-  /**
-   * The last known step
-   */
-  current: number;
 };
 
 const defaultProps = {
@@ -72,7 +72,7 @@ const defaultProps = {
  * trigger re-renders in the modal contents. This requires a bit of duplicate state
  * to be managed around the current step.
  */
-class FeatureTourModal extends React.Component<Props, State> {
+class FeatureTourModal extends Component<Props, State> {
   static defaultProps = defaultProps;
 
   state: State = {
@@ -83,7 +83,7 @@ class FeatureTourModal extends React.Component<Props, State> {
   // Record the step change and call the callback this component was given.
   handleAdvance = (current: number, duration: number) => {
     this.setState({current});
-    callIfFunction(this.props.onAdvance, current, duration);
+    this.props.onAdvance?.(current, duration);
   };
 
   handleShow = () => {
@@ -110,7 +110,7 @@ class FeatureTourModal extends React.Component<Props, State> {
     const {onCloseModal} = this.props;
 
     const duration = Date.now() - this.state.openedAt;
-    callIfFunction(onCloseModal, this.state.current, duration);
+    onCloseModal?.(this.state.current, duration);
 
     // Reset the state now that the modal is closed, used to deduplicate close actions.
     this.setState({openedAt: 0, current: 0});
@@ -118,7 +118,7 @@ class FeatureTourModal extends React.Component<Props, State> {
 
   render() {
     const {children} = this.props;
-    return <React.Fragment>{children({showModal: this.handleShow})}</React.Fragment>;
+    return <Fragment>{children({showModal: this.handleShow})}</Fragment>;
   }
 }
 
@@ -133,7 +133,7 @@ type ContentsState = {
   openedAt: number;
 };
 
-class ModalContents extends React.Component<ContentsProps, ContentsState> {
+class ModalContents extends Component<ContentsProps, ContentsState> {
   static defaultProps = defaultProps;
 
   state: ContentsState = {
@@ -147,7 +147,7 @@ class ModalContents extends React.Component<ContentsProps, ContentsState> {
       prevState => ({current: prevState.current + 1}),
       () => {
         const duration = Date.now() - openedAt;
-        callIfFunction(onAdvance, this.state.current, duration);
+        onAdvance?.(this.state.current, duration);
       }
     );
   };
@@ -156,12 +156,18 @@ class ModalContents extends React.Component<ContentsProps, ContentsState> {
     const {Body, steps, doneText, doneUrl, closeModal} = this.props;
     const {current} = this.state;
 
-    const step = steps[current] !== undefined ? steps[current] : steps[steps.length - 1];
+    const step = steps[current] !== undefined ? steps[current] : steps[steps.length - 1]!;
     const hasNext = steps[current + 1] !== undefined;
 
     return (
-      <Body>
-        <CloseButton borderless size="zero" onClick={closeModal} icon={<IconClose />} />
+      <Body data-test-id="feature-tour">
+        <CloseButton
+          borderless
+          size="zero"
+          onClick={closeModal}
+          icon={<IconClose />}
+          aria-label={t('Close tour')}
+        />
         <TourContent>
           {step.image}
           <TourHeader>{step.title}</TourHeader>
@@ -169,24 +175,20 @@ class ModalContents extends React.Component<ContentsProps, ContentsState> {
           <TourButtonBar gap={1}>
             {step.actions && step.actions}
             {hasNext && (
-              <Button
-                data-test-id="next-step"
-                priority="primary"
-                onClick={this.handleAdvance}
-              >
+              <Button priority="primary" onClick={this.handleAdvance}>
                 {t('Next')}
               </Button>
             )}
             {!hasNext && (
-              <Button
+              <LinkButton
                 external
                 href={doneUrl}
-                data-test-id="complete-tour"
                 onClick={closeModal}
                 priority="primary"
+                aria-label={t('Complete tour')}
               >
                 {doneText}
-              </Button>
+              </LinkButton>
             )}
           </TourButtonBar>
           <StepCounter>{t('%s of %s', current + 1, steps.length)}</StepCounter>
@@ -220,7 +222,7 @@ const TourButtonBar = styled(ButtonBar)`
 const StepCounter = styled('div')`
   text-transform: uppercase;
   font-size: ${p => p.theme.fontSizeSmall};
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
   color: ${p => p.theme.gray300};
 `;
 

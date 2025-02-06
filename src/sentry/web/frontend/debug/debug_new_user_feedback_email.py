@@ -1,6 +1,8 @@
+from django.http import HttpRequest, HttpResponse
 from django.views.generic import View
 
-from sentry.models import Organization, Project
+from sentry.models.organization import Organization
+from sentry.models.project import Project
 from sentry.utils.http import absolute_uri
 from sentry.utils.samples import create_sample_event
 
@@ -8,7 +10,7 @@ from .mail import MailPreview
 
 
 class DebugNewUserFeedbackEmailView(View):
-    def get(self, request):
+    def get(self, request: HttpRequest) -> HttpResponse:
         org = Organization(id=1, slug="organization", name="My Company")
         project = Project(id=1, organization=org, slug="project", name="My Project")
 

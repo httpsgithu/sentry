@@ -1,125 +1,162 @@
-import {Component} from 'react';
-import {browserHistory, InjectedRouter} from 'react-router';
-import {Location} from 'history';
+import {useEffect, useRef, useState} from 'react';
+import * as Sentry from '@sentry/react';
+import type {Location} from 'history';
 import isEqual from 'lodash/isEqual';
 
-import {loadOrganizationTags} from 'app/actionCreators/tags';
-import {Client} from 'app/api';
-import Feature from 'app/components/acl/feature';
-import Alert from 'app/components/alert';
-import Button from 'app/components/button';
-import GlobalSdkUpdateAlert from 'app/components/globalSdkUpdateAlert';
-import NoProjectMessage from 'app/components/noProjectMessage';
-import GlobalSelectionHeader from 'app/components/organizations/globalSelectionHeader';
-import PageHeading from 'app/components/pageHeading';
-import SentryDocumentTitle from 'app/components/sentryDocumentTitle';
-import {ALL_ACCESS_PROJECTS} from 'app/constants/globalSelectionHeader';
-import {IconFlag} from 'app/icons';
-import {t} from 'app/locale';
-import {PageContent, PageHeader} from 'app/styles/organization';
-import {GlobalSelection, Organization, Project} from 'app/types';
-import {trackAnalyticsEvent} from 'app/utils/analytics';
-import EventView from 'app/utils/discover/eventView';
-import {PerformanceEventViewProvider} from 'app/utils/performance/contexts/performanceEventViewContext';
-import {decodeScalar} from 'app/utils/queryString';
-import {MutableSearch} from 'app/utils/tokenizeSearch';
-import withApi from 'app/utils/withApi';
-import withGlobalSelection from 'app/utils/withGlobalSelection';
-import withOrganization from 'app/utils/withOrganization';
-import withProjects from 'app/utils/withProjects';
+import {loadOrganizationTags} from 'sentry/actionCreators/tags';
+import PageFiltersContainer from 'sentry/components/organizations/pageFilters/container';
+import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
+import {ALL_ACCESS_PROJECTS} from 'sentry/constants/pageFilters';
+import {t} from 'sentry/locale';
+import type {PageFilters} from 'sentry/types/core';
+import type {InjectedRouter} from 'sentry/types/legacyReactRouter';
+import type {Project} from 'sentry/types/project';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import {browserHistory} from 'sentry/utils/browserHistory';
+import type {MEPState} from 'sentry/utils/performance/contexts/metricsEnhancedSetting';
+import {
+  canUseMetricsData,
+  METRIC_SEARCH_SETTING_PARAM,
+} from 'sentry/utils/performance/contexts/metricsEnhancedSetting';
+import {PageAlertProvider} from 'sentry/utils/performance/contexts/pageAlert';
+import {PerformanceEventViewProvider} from 'sentry/utils/performance/contexts/performanceEventViewContext';
+import useRouteAnalyticsEventNames from 'sentry/utils/routeAnalytics/useRouteAnalyticsEventNames';
+import useRouteAnalyticsParams from 'sentry/utils/routeAnalytics/useRouteAnalyticsParams';
+import useApi from 'sentry/utils/useApi';
+import useOrganization from 'sentry/utils/useOrganization';
+import usePrevious from 'sentry/utils/usePrevious';
+import useProjects from 'sentry/utils/useProjects';
+import withPageFilters from 'sentry/utils/withPageFilters';
 
-import LandingContent from './landing/content';
-import {DEFAULT_MAX_DURATION} from './trends/utils';
-import {DEFAULT_STATS_PERIOD, generatePerformanceEventView} from './data';
+import {getLandingDisplayFromParam} from './landing/utils';
+import {generatePerformanceEventView, getDefaultStatsPeriod} from './data';
 import {PerformanceLanding} from './landing';
-import Onboarding from './onboarding';
-import {addRoutePerformanceContext, getPerformanceTrendsUrl} from './utils';
+import {
+  addRoutePerformanceContext,
+  getSelectedProjectPlatforms,
+  handleTrendsClick,
+} from './utils';
 
 type Props = {
-  api: Client;
-  organization: Organization;
-  selection: GlobalSelection;
   location: Location;
   router: InjectedRouter;
-  projects: Project[];
-  loadingProjects: boolean;
+  selection: PageFilters;
   demoMode?: boolean;
 };
 
 type State = {
-  eventView: EventView;
-  error: string | undefined;
+  error?: string;
 };
-class PerformanceContent extends Component<Props, State> {
-  static getDerivedStateFromProps(nextProps: Readonly<Props>, prevState: State): State {
-    return {
-      ...prevState,
-      eventView: generatePerformanceEventView(
-        nextProps.organization,
-        nextProps.location,
-        nextProps.projects
-      ),
-    };
+
+function PerformanceContent({selection, location, demoMode, router}: Props) {
+  const api = useApi();
+  const organization = useOrganization();
+  const {projects, reloadProjects} = useProjects();
+  const mounted = useRef(false);
+  const previousDateTime = usePrevious(selection.datetime);
+  const [state, setState] = useState<State>({error: undefined});
+  const withStaticFilters = canUseMetricsData(organization);
+  const eventView = generatePerformanceEventView(
+    location,
+    projects,
+    {
+      withStaticFilters,
+    },
+    organization
+  );
+
+  function getOnboardingProject(): Project | undefined {
+    // XXX used by getsentry to bypass onboarding for the upsell demo state.
+    if (demoMode) {
+      return undefined;
+    }
+
+    if (projects.length === 0) {
+      return undefined;
+    }
+
+    // Current selection is 'my projects' or 'all projects'
+    if (eventView.project.length === 0 || eventView.project[0] === ALL_ACCESS_PROJECTS) {
+      const filtered = projects.filter(p => p.firstTransactionEvent === false);
+      if (filtered.length === projects.length) {
+        return filtered[0];
+      }
+    }
+
+    // Any other subset of projects.
+    const filtered = projects.filter(
+      p =>
+        eventView.project.includes(parseInt(p.id, 10)) &&
+        p.firstTransactionEvent === false
+    );
+    if (filtered.length === eventView.project.length) {
+      return filtered[0];
+    }
+
+    return undefined;
   }
 
-  state: State = {
-    eventView: generatePerformanceEventView(
-      this.props.organization,
-      this.props.location,
-      this.props.projects
-    ),
-    error: undefined,
-  };
+  const onboardingProject = getOnboardingProject();
 
-  componentDidMount() {
-    const {api, organization, selection} = this.props;
-    loadOrganizationTags(api, organization.slug, selection);
-    addRoutePerformanceContext(selection);
-    trackAnalyticsEvent({
-      eventKey: 'performance_views.overview.view',
-      eventName: 'Performance Views: Transaction overview view',
-      organization_id: parseInt(organization.id, 10),
-      show_onboarding: this.shouldShowOnboarding(),
-    });
-  }
+  useRouteAnalyticsEventNames(
+    'performance_views.overview.view',
+    'Performance Views: Transaction overview view'
+  );
 
-  componentDidUpdate(prevProps: Props) {
-    const {api, organization, selection} = this.props;
-    if (
-      !isEqual(prevProps.selection.projects, selection.projects) ||
-      !isEqual(prevProps.selection.datetime, selection.datetime)
-    ) {
+  useRouteAnalyticsParams({
+    project_platforms: getSelectedProjectPlatforms(location, projects),
+    show_onboarding: onboardingProject !== undefined,
+    tab: getLandingDisplayFromParam(location)?.field,
+  });
+
+  // Refetch the project metadata if the selected project does not have performance data, because
+  // we may have received performance data (and subsequently updated `Project.firstTransactionEvent`)
+  // after the initial project fetch.
+  useEffect(() => {
+    if (onboardingProject) {
+      reloadProjects();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onboardingProject?.id]);
+
+  useEffect(() => {
+    if (!mounted.current) {
+      loadOrganizationTags(api, organization.slug, selection);
+      addRoutePerformanceContext(selection);
+      mounted.current = true;
+      return;
+    }
+    if (!isEqual(previousDateTime, selection.datetime)) {
       loadOrganizationTags(api, organization.slug, selection);
       addRoutePerformanceContext(selection);
     }
-  }
+  }, [
+    selection.datetime,
+    previousDateTime,
+    selection,
+    api,
+    organization,
+    onboardingProject,
+    location,
+    projects,
+  ]);
 
-  renderError() {
-    const {error} = this.state;
-
-    if (!error) {
-      return null;
+  function setError(newError?: string) {
+    if (
+      typeof newError === 'object' ||
+      (Array.isArray(newError) && typeof newError[0] === 'object')
+    ) {
+      Sentry.withScope(scope => {
+        scope.setExtra('error', newError);
+        Sentry.captureException(new Error('setError failed with error type.'));
+      });
+      return;
     }
-
-    return (
-      <Alert type="error" icon={<IconFlag size="md" />}>
-        {error}
-      </Alert>
-    );
+    setState({...state, error: newError});
   }
 
-  setError = (error: string | undefined) => {
-    this.setState({error});
-  };
-
-  handleSearch = (searchQuery: string) => {
-    const {location, organization} = this.props;
-
-    trackAnalyticsEvent({
-      eventKey: 'performance_views.overview.search',
-      eventName: 'Performance Views: Transaction overview search',
-      organization_id: parseInt(organization.id, 10),
-    });
+  function handleSearch(searchQuery: string, currentMEPState?: MEPState) {
+    trackAnalytics('performance_views.overview.search', {organization});
 
     browserHistory.push({
       pathname: location.pathname,
@@ -127,173 +164,50 @@ class PerformanceContent extends Component<Props, State> {
         ...location.query,
         cursor: undefined,
         query: String(searchQuery).trim() || undefined,
+        [METRIC_SEARCH_SETTING_PARAM]: currentMEPState,
+        isDefaultQuery: false,
       },
     });
-  };
-
-  handleTrendsClick = () => {
-    const {location, organization} = this.props;
-
-    const newQuery = {
-      ...location.query,
-    };
-
-    const query = decodeScalar(location.query.query, '');
-    const conditions = new MutableSearch(query);
-
-    trackAnalyticsEvent({
-      eventKey: 'performance_views.change_view',
-      eventName: 'Performance Views: Change View',
-      organization_id: parseInt(organization.id, 10),
-      view_name: 'TRENDS',
-    });
-
-    const modifiedConditions = new MutableSearch([]);
-
-    if (conditions.hasFilter('tpm()')) {
-      modifiedConditions.setFilterValues('tpm()', conditions.getFilterValues('tpm()'));
-    } else {
-      modifiedConditions.setFilterValues('tpm()', ['>0.01']);
-    }
-    if (conditions.hasFilter('transaction.duration')) {
-      modifiedConditions.setFilterValues(
-        'transaction.duration',
-        conditions.getFilterValues('transaction.duration')
-      );
-    } else {
-      modifiedConditions.setFilterValues('transaction.duration', [
-        '>0',
-        `<${DEFAULT_MAX_DURATION}`,
-      ]);
-    }
-    newQuery.query = modifiedConditions.formatString();
-
-    browserHistory.push({
-      pathname: getPerformanceTrendsUrl(organization),
-      query: {...newQuery},
-    });
-  };
-
-  shouldShowOnboarding() {
-    const {projects, demoMode} = this.props;
-    const {eventView} = this.state;
-
-    // XXX used by getsentry to bypass onboarding for the upsell demo state.
-    if (demoMode) {
-      return false;
-    }
-
-    if (projects.length === 0) {
-      return false;
-    }
-
-    // Current selection is 'my projects' or 'all projects'
-    if (eventView.project.length === 0 || eventView.project === [ALL_ACCESS_PROJECTS]) {
-      return (
-        projects.filter(p => p.firstTransactionEvent === false).length === projects.length
-      );
-    }
-
-    // Any other subset of projects.
-    return (
-      projects.filter(
-        p =>
-          eventView.project.includes(parseInt(p.id, 10)) &&
-          p.firstTransactionEvent === false
-      ).length === eventView.project.length
-    );
   }
 
-  renderBody() {
-    const {organization, projects, selection} = this.props;
-    const eventView = this.state.eventView;
-    const showOnboarding = this.shouldShowOnboarding();
-
-    return (
-      <PageContent>
-        <NoProjectMessage organization={organization}>
-          <PageHeader>
-            <PageHeading>{t('Performance')}</PageHeading>
-            {!showOnboarding && (
-              <Button
-                priority="primary"
-                data-test-id="landing-header-trends"
-                onClick={this.handleTrendsClick}
-              >
-                {t('View Trends')}
-              </Button>
-            )}
-          </PageHeader>
-          <GlobalSdkUpdateAlert />
-          {this.renderError()}
-          {showOnboarding ? (
-            <Onboarding
-              organization={organization}
-              project={
-                selection.projects.length > 0
-                  ? // If some projects selected, use the first selection
-                    projects.find(
-                      project => selection.projects[0].toString() === project.id
-                    ) || projects[0]
-                  : // Otherwise, use the first project in the org
-                    projects[0]
-              }
-            />
-          ) : (
-            <LandingContent
-              eventView={eventView}
-              projects={projects}
-              organization={organization}
-              setError={this.setError}
-              handleSearch={this.handleSearch}
-            />
-          )}
-        </NoProjectMessage>
-      </PageContent>
-    );
-  }
-
-  renderLandingV3() {
-    return (
-      <PerformanceLanding
-        eventView={this.state.eventView}
-        setError={this.setError}
-        handleSearch={this.handleSearch}
-        handleTrendsClick={this.handleTrendsClick}
-        shouldShowOnboarding={this.shouldShowOnboarding()}
-        {...this.props}
-      />
-    );
-  }
-
-  render() {
-    const {organization} = this.props;
-
-    return (
-      <SentryDocumentTitle title={t('Performance')} orgSlug={organization.slug}>
-        <PerformanceEventViewProvider value={{eventView: this.state.eventView}}>
-          <GlobalSelectionHeader
+  return (
+    <SentryDocumentTitle title={t('Performance')} orgSlug={organization.slug}>
+      <PerformanceEventViewProvider value={{eventView}}>
+        <PageAlertProvider>
+          <PageFiltersContainer
             defaultSelection={{
               datetime: {
                 start: null,
                 end: null,
                 utc: false,
-                period: DEFAULT_STATS_PERIOD,
+                period: getDefaultStatsPeriod(organization),
               },
             }}
           >
-            <Feature features={['organizations:performance-landing-widgets']}>
-              {({hasFeature}) =>
-                hasFeature ? this.renderLandingV3() : this.renderBody()
+            <PerformanceLanding
+              router={router}
+              eventView={eventView}
+              setError={setError}
+              handleSearch={handleSearch}
+              handleTrendsClick={() =>
+                handleTrendsClick({
+                  location,
+                  organization,
+                  projectPlatforms: getSelectedProjectPlatforms(location, projects),
+                })
               }
-            </Feature>
-          </GlobalSelectionHeader>
-        </PerformanceEventViewProvider>
-      </SentryDocumentTitle>
-    );
-  }
+              onboardingProject={onboardingProject}
+              organization={organization}
+              location={location}
+              projects={projects}
+              selection={selection}
+              withStaticFilters={withStaticFilters}
+            />
+          </PageFiltersContainer>
+        </PageAlertProvider>
+      </PerformanceEventViewProvider>
+    </SentryDocumentTitle>
+  );
 }
 
-export default withApi(
-  withOrganization(withProjects(withGlobalSelection(PerformanceContent)))
-);
+export default withPageFilters(PerformanceContent);

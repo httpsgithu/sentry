@@ -1,23 +1,29 @@
 import {Component, Fragment} from 'react';
 
-import {addErrorMessage, addSuccessMessage} from 'app/actionCreators/indicator';
-import {ModalRenderProps, openModal} from 'app/actionCreators/modal';
-import {Client} from 'app/api';
-import IssueSyncListElement from 'app/components/issueSyncListElement';
-import NavTabs from 'app/components/navTabs';
-import {t, tct} from 'app/locale';
-import plugins from 'app/plugins';
-import {Group, Organization, Plugin, Project} from 'app/types';
-import withApi from 'app/utils/withApi';
-import withOrganization from 'app/utils/withOrganization';
+import {addErrorMessage, addSuccessMessage} from 'sentry/actionCreators/indicator';
+import type {ModalRenderProps} from 'sentry/actionCreators/modal';
+import {closeModal, openModal} from 'sentry/actionCreators/modal';
+import type {Client} from 'sentry/api';
+import IssueSyncListElement from 'sentry/components/issueSyncListElement';
+import NavTabs from 'sentry/components/navTabs';
+import {t, tct} from 'sentry/locale';
+import plugins from 'sentry/plugins';
+import type {Group} from 'sentry/types/group';
+import type {Plugin} from 'sentry/types/integrations';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import {getAnalyticsDataForGroup} from 'sentry/utils/events';
+import withApi from 'sentry/utils/withApi';
+import withOrganization from 'sentry/utils/withOrganization';
 
 type PluginIssue = {
   issue_id: string;
-  url: string;
   label: string;
+  url: string;
 };
 
-type TitledPlugin = Plugin & {
+export type TitledPlugin = Plugin & {
   // issue serializer adds more fields
   // TODO: should be able to use name instead of title
   title: string;
@@ -27,14 +33,49 @@ type Props = {
   api: Client;
   group: Group;
   organization: Organization;
-  project: Project;
   plugin: TitledPlugin;
+  project: Project;
 };
 
 type State = {
   issue: PluginIssue | null;
   pluginLoading: boolean;
 };
+
+export function openPluginActionModal({
+  project,
+  group,
+  organization,
+  plugin,
+  onModalClose,
+}: {
+  group: Group;
+  onModalClose: (data?: any) => void;
+  organization: Organization;
+  plugin: TitledPlugin;
+  project: Project;
+}) {
+  trackAnalytics('issue_details.external_issue_modal_opened', {
+    organization,
+    ...getAnalyticsDataForGroup(group),
+    external_issue_provider: plugin.slug,
+    external_issue_type: 'plugin',
+  });
+
+  openModal(
+    deps => (
+      <PluginActionsModal
+        {...deps}
+        project={project}
+        group={group}
+        organization={organization}
+        plugin={plugin}
+        onSuccess={onModalClose}
+      />
+    ),
+    {onClose: onModalClose}
+  );
+}
 
 class PluginActions extends Component<Props, State> {
   state: State = {
@@ -46,9 +87,9 @@ class PluginActions extends Component<Props, State> {
     this.loadPlugin(this.props.plugin);
   }
 
-  UNSAFE_componentWillReceiveProps(nextProps: Props) {
-    if (this.props.plugin.id !== nextProps.plugin.id) {
-      this.loadPlugin(nextProps.plugin);
+  componentDidUpdate(prevProps: Props) {
+    if (this.props.plugin.id !== prevProps.plugin.id) {
+      this.loadPlugin(this.props.plugin);
     }
   }
 
@@ -85,32 +126,26 @@ class PluginActions extends Component<Props, State> {
     );
   };
 
-  handleModalClose = (data?: any) =>
+  handleModalClose = (data?: any) => {
     this.setState({
       issue:
         data?.id && data?.link
           ? {issue_id: data.id, url: data.link, label: data.label}
           : null,
     });
+    closeModal();
+  };
 
   openModal = () => {
-    const {issue} = this.state;
-    const {project, group, organization} = this.props;
-    const plugin = {...this.props.plugin, issue};
+    const {project, group, organization, plugin} = this.props;
 
-    openModal(
-      deps => (
-        <PluginActionsModal
-          {...deps}
-          project={project}
-          group={group}
-          organization={organization}
-          plugin={plugin}
-          onSuccess={this.handleModalClose}
-        />
-      ),
-      {onClose: this.handleModalClose}
-    );
+    openPluginActionModal({
+      project,
+      group,
+      organization,
+      plugin,
+      onModalClose: this.handleModalClose,
+    });
   };
 
   render() {
@@ -132,10 +167,10 @@ class PluginActions extends Component<Props, State> {
 
 type ModalProps = ModalRenderProps & {
   group: Group;
-  project: Project;
-  organization: Organization;
-  plugin: TitledPlugin & {issue: PluginIssue | null};
   onSuccess: (data: any) => void;
+  organization: Organization;
+  plugin: TitledPlugin;
+  project: Project;
 };
 
 type ModalState = {
@@ -154,7 +189,7 @@ class PluginActionsModal extends Component<ModalProps, ModalState> {
     return (
       <Fragment>
         <Header closeButton>
-          {tct('[name] Issue', {name: plugin.name || plugin.title})}
+          <h4>{tct('[name] Issue', {name: plugin.name || plugin.title})}</h4>
         </Header>
         <NavTabs underlined>
           <li className={actionType === 'create' ? 'active' : ''}>

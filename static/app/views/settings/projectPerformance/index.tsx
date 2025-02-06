@@ -1,25 +1,21 @@
-import React from 'react';
-import {RouteComponentProps} from 'react-router';
-
-import Feature from 'app/components/acl/feature';
-import {Organization, Project} from 'app/types';
-import withOrganization from 'app/utils/withOrganization';
+import Feature from 'sentry/components/acl/feature';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 
 import ProjectPerformance from './projectPerformance';
 
-type Props = RouteComponentProps<{orgId: string; projectId: string}, {}> & {
+type Props = RouteComponentProps<{projectId: string}, {}> & {
   organization: Organization;
   project: Project;
 };
 
-class ProjectPerformanceContainer extends React.Component<Props> {
-  render() {
-    return (
-      <Feature features={['performance-view']}>
-        <ProjectPerformance {...this.props} />
-      </Feature>
-    );
-  }
+function ProjectPerformanceContainer(props: Props) {
+  return (
+    <Feature features="performance-view">
+      <ProjectPerformance {...props} />
+    </Feature>
+  );
 }
 
-export default withOrganization(ProjectPerformanceContainer);
+export default ProjectPerformanceContainer;

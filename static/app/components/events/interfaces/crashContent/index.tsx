@@ -1,69 +1,61 @@
-import * as React from 'react';
+import {getStacktracePlatform} from 'sentry/components/events/interfaces/utils';
+import type {ExceptionType, ExceptionValue} from 'sentry/types/event';
 
-import {ExceptionType, ExceptionValue, PlatformType} from 'app/types';
+import {ExceptionContent} from './exception';
+import {StackTraceContent} from './stackTrace';
 
-import Exception from './exception';
-import Stacktrace from './stacktrace';
-
-type ExceptionProps = React.ComponentProps<typeof Exception>;
+type ExceptionProps = React.ComponentProps<typeof ExceptionContent>;
 type Props = Pick<
   ExceptionProps,
   | 'stackType'
   | 'stackView'
-  | 'projectId'
+  | 'projectSlug'
   | 'event'
   | 'newestFirst'
   | 'groupingCurrentLevel'
-  | 'hasHierarchicalGrouping'
 > & {
   exception?: ExceptionType;
   stacktrace?: ExceptionValue['stacktrace'];
 };
 
-const CrashContent = ({
+export function CrashContent({
   event,
   stackView,
   stackType,
   newestFirst,
-  projectId,
+  projectSlug,
   groupingCurrentLevel,
-  hasHierarchicalGrouping,
   exception,
   stacktrace,
-}: Props) => {
-  const platform = (event.platform ?? 'other') as PlatformType;
-
+}: Props) {
   if (exception) {
     return (
-      <Exception
+      <ExceptionContent
         stackType={stackType}
         stackView={stackView}
-        projectId={projectId}
+        projectSlug={projectSlug}
         newestFirst={newestFirst}
         event={event}
-        platform={platform}
         values={exception.values}
         groupingCurrentLevel={groupingCurrentLevel}
-        hasHierarchicalGrouping={hasHierarchicalGrouping}
       />
     );
   }
 
   if (stacktrace) {
+    const platform = getStacktracePlatform(event, stacktrace);
+
     return (
-      <Stacktrace
+      <StackTraceContent
         stacktrace={stacktrace}
         stackView={stackView}
         newestFirst={newestFirst}
         event={event}
         platform={platform}
         groupingCurrentLevel={groupingCurrentLevel}
-        hasHierarchicalGrouping={hasHierarchicalGrouping}
       />
     );
   }
 
   return null;
-};
-
-export default CrashContent;
+}

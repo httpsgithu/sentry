@@ -1,11 +1,13 @@
+from __future__ import annotations
+
 import enum
 import logging
 
-from django.http import Http404
-
-from sentry.models import IdentityProvider, Integration, Organization
-from sentry.shared_integrations.exceptions import ApiError
-from sentry.utils.compat import filter
+from sentry.incidents.models.alert_rule import AlertRuleTriggerAction
+from sentry.incidents.models.incident import Incident, IncidentStatus
+from sentry.integrations.models.integration import Integration
+from sentry.integrations.services.integration import integration_service
+from sentry.models.organization import Organization
 
 from .client import MsTeamsClient, MsTeamsPreInstallClient, get_token_data
 
@@ -18,7 +20,7 @@ logger = logging.getLogger("sentry.integrations.msteams")
 # cards, may as well just do that here first.
 class ACTION_TYPE(str, enum.Enum):
     RESOLVE = "1"
-    IGNORE = "2"
+    ARCHIVE = "2"
     ASSIGN = "3"
     UNRESOLVE = "4"
     UNASSIGN = "5"
@@ -33,13 +35,36 @@ def channel_filter(channel, name):
         return name.lower() == "general"
 
 
-def get_channel_id(organization, integration_id, name):
-    try:
-        integration = Integration.objects.get(
-            provider="msteams", organizations=organization, id=integration_id
-        )
-    except Integration.DoesNotExist:
+def get_user_conversation_id(integration: Integration, user_id: str) -> str:
+    """
+    Get the user_conversation_id even if `integration.metadata.tenant_id` is not set.
+    """
+    client = MsTeamsClient(integration)
+
+    tenant_id = integration.metadata.get("tenant_id")
+
+    if not tenant_id:
+        # This is definitely an integration of `integration.metadata.installation_type` == `team`,
+        # so use the `integration.external_id` (team_id) to get the tenant_id.
+        members = client.get_member_list(integration.external_id).get("members")
+        tenant_id = members[0].get("tenantId")
+
+    conversation_id = client.get_user_conversation_id(user_id, tenant_id)
+
+    return conversation_id
+
+
+def get_channel_id(organization: Organization, integration_id: int, name: str) -> str | None:
+    integrations = integration_service.get_integrations(
+        providers=["msteams"],
+        organization_id=organization.id,
+        integration_ids=[integration_id],
+    )
+    if not integrations:
         return None
+
+    assert len(integrations) == 1, "Found multiple msteams integrations for org!"
+    integration = integrations[0]
 
     team_id = integration.external_id
     client = MsTeamsClient(integration)
@@ -73,36 +98,25 @@ def get_channel_id(organization, integration_id, name):
     return None
 
 
-def send_incident_alert_notification(action, incident, metric_value, method):
-    from .card_builder import build_incident_attachment
+def send_incident_alert_notification(
+    action: AlertRuleTriggerAction,
+    incident: Incident,
+    metric_value: float | None,
+    new_status: IncidentStatus,
+    notification_uuid: str | None = None,
+) -> bool:
+    from .card_builder.incident_attachment import build_incident_attachment
 
-    channel = action.target_identifier
-    integration = action.integration
-    attachment = build_incident_attachment(action, incident, metric_value, method)
-    client = MsTeamsClient(integration)
-    try:
-        client.send_card(channel, attachment)
-    except ApiError as e:
-        logger.info("rule.fail.msteams_post", extra={"error": str(e)})
+    if action.target_identifier is None:
+        raise ValueError("Can't send without `target_identifier`")
 
-
-def get_identity(user, organization_id, integration_id):
-    try:
-        organization = Organization.objects.get(id__in=user.get_orgs(), id=organization_id)
-    except Organization.DoesNotExist:
-        raise Http404
-
-    try:
-        integration = Integration.objects.get(id=integration_id, organizations=organization)
-    except Integration.DoesNotExist:
-        raise Http404
-
-    try:
-        idp = IdentityProvider.objects.get(external_id=integration.external_id, type="msteams")
-    except IdentityProvider.DoesNotExist:
-        raise Http404
-
-    return organization, integration, idp
+    attachment = build_incident_attachment(incident, new_status, metric_value, notification_uuid)
+    success = integration_service.send_msteams_incident_alert_notification(
+        integration_id=action.integration_id,
+        channel=action.target_identifier,
+        attachment=attachment,
+    )
+    return success
 
 
 def get_preinstall_client(service_url):

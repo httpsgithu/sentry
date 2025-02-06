@@ -1,7 +1,11 @@
+from unittest.mock import MagicMock
+
 from sentry.rules.actions.notify_event import NotifyEventAction
 from sentry.rules.actions.services import LegacyPluginService
 from sentry.testutils.cases import RuleTestCase
-from sentry.utils.compat.mock import MagicMock
+from sentry.testutils.skips import requires_snuba
+
+pytestmark = [requires_snuba]
 
 
 class NotifyEventActionTest(RuleTestCase):
@@ -14,7 +18,7 @@ class NotifyEventActionTest(RuleTestCase):
         rule = self.get_rule()
         rule.get_plugins = lambda: (LegacyPluginService(plugin),)
 
-        results = list(rule.after(event=event, state=self.get_state()))
+        results = list(rule.after(event=event))
 
         assert len(results) == 1
         assert plugin.should_notify.call_count == 1

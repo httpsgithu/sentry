@@ -1,15 +1,19 @@
 import styled from '@emotion/styled';
 
-type Props = {
+export interface ActivityBubbleProps extends React.HTMLAttributes<HTMLDivElement> {
   backgroundColor?: string;
   borderColor?: string;
-};
+}
 
 /**
  * This creates a bordered box that has a left pointing arrow
  * on the left-side at the top.
  */
-const ActivityBubble = styled('div')<Props>`
+const ActivityBubble = styled('div')<ActivityBubbleProps>`
+  display: flex;
+  justify-content: center;
+  flex-direction: column;
+  align-items: stretch;
   flex: 1;
   background-color: ${p => p.backgroundColor || p.theme.background};
   border: 1px solid ${p => p.borderColor || p.theme.border};
@@ -44,4 +48,4 @@ const ActivityBubble = styled('div')<Props>`
   }
 `;
 
-export default ActivityBubble;
+export {ActivityBubble};

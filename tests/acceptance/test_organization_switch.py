@@ -1,9 +1,15 @@
+import pytest
 from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.common.by import By
 
-from sentry.testutils import AcceptanceTestCase, SnubaTestCase
+from sentry.testutils.cases import AcceptanceTestCase, SnubaTestCase
+from sentry.testutils.silo import no_silo_test
 from sentry.utils.retries import TimedRetryPolicy
 
+pytestmark = pytest.mark.sentry_metrics
 
+
+@no_silo_test
 class OrganizationSwitchTest(AcceptanceTestCase, SnubaTestCase):
     def setUp(self):
         super().setUp()
@@ -32,30 +38,26 @@ class OrganizationSwitchTest(AcceptanceTestCase, SnubaTestCase):
         def navigate_to_issues_page(org_slug):
             issues_url = OrganizationSwitchTest.url_creator("issues", org_slug)
             self.browser.get(issues_url)
-            self.browser.wait_until_not(".loading-indicator")
+            self.browser.wait_until_not('[data-test-id="loading-indicator"]')
 
         @TimedRetryPolicy.wrap(timeout=20, exceptions=(TimeoutException,))
         def open_project_selector():
-            self.browser.click_when_visible(
-                selector='[data-test-id="global-header-project-selector"]'
-            )
-            # Check if the automplete-list has shown up, if that fails we
-            # want to retry this step.
-            self.browser.wait_until('[data-test-id="autocomplete-list"]')
+            self.browser.click(selector='[data-test-id="page-filter-project-selector"]')
 
         def get_project_elements_from_project_selector_dropdown():
-            selector = '[data-test-id="autocomplete-list"] [data-test-id="badge-display-name"]'
+            selector = '[data-test-id="menu-list-item-label"]'
             self.browser.wait_until(selector)
 
-            return self.browser.find_elements_by_css_selector(selector)
+            return self.browser.find_elements(by=By.CSS_SELECTOR, value=selector)
 
         transition_urls = [
             OrganizationSwitchTest.url_creator(page, self.organization.slug)
-            for page in ["issues", "releases" "discover", "user-feedback"]
+            for page in ["issues", "releases", "discover", "user-feedback"]
         ]
 
-        with self.settings(SENTRY_SINGLE_ORGANIZATION=False), self.feature(
-            "organizations:discover"
+        with (
+            self.settings(SENTRY_SINGLE_ORGANIZATION=False),
+            self.feature("organizations:discover"),
         ):
             for transition_url in transition_urls:
                 navigate_to_issues_page(self.organization.slug)
@@ -66,7 +68,7 @@ class OrganizationSwitchTest(AcceptanceTestCase, SnubaTestCase):
                 )
 
                 self.browser.get(transition_url)
-                self.browser.wait_until_not(".loading-indicator")
+                self.browser.wait_until_not('[data-test-id="loading-indicator"]')
 
                 navigate_to_issues_page(self.secondary_organization.slug)
                 open_project_selector()

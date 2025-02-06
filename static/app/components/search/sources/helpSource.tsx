@@ -1,34 +1,34 @@
-import * as React from 'react';
-import {withRouter, WithRouterProps} from 'react-router';
-import {
-  Result as SearchResult,
-  SentryGlobalSearch,
-  standardSDKSlug,
-} from '@sentry-internal/global-search';
+import {Component} from 'react';
+import type {Result as SearchResult} from '@sentry-internal/global-search';
+import {SentryGlobalSearch, standardSDKSlug} from '@sentry-internal/global-search';
 import dompurify from 'dompurify';
 import debounce from 'lodash/debounce';
 
-import {Organization, Project} from 'app/types';
-import parseHtmlMarks from 'app/utils/parseHtmlMarks';
-import withLatestContext from 'app/utils/withLatestContext';
+import type {WithRouterProps} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import parseHtmlMarks from 'sentry/utils/parseHtmlMarks';
+import withLatestContext from 'sentry/utils/withLatestContext';
+// eslint-disable-next-line no-restricted-imports
+import withSentryRouter from 'sentry/utils/withSentryRouter';
 
-import {ChildProps, Result, ResultItem} from './types';
+import type {ChildProps, Result, ResultItem} from './types';
 
 type Props = WithRouterProps & {
-  organization: Organization;
-  project: Project;
-  /**
-   * Specific platforms to filter reults to
-   */
-  platforms: string[];
-  /**
-   * The string to search the navigation routes for
-   */
-  query: string;
   /**
    * Render function that renders the global search result
    */
   children: (props: ChildProps) => React.ReactNode;
+  organization: Organization;
+  /**
+   * Specific platforms to filter results to
+   */
+  platforms: string[];
+  project: Project;
+  /**
+   * The string to search the navigation routes for
+   */
+  query: string;
 };
 
 type State = {
@@ -41,7 +41,7 @@ const MARK_TAGS = {
   highlightPostTag: '</mark>',
 };
 
-class HelpSource extends React.Component<Props, State> {
+class HelpSource extends Component<Props, State> {
   state: State = {
     loading: false,
     results: [],
@@ -53,21 +53,28 @@ class HelpSource extends React.Component<Props, State> {
     }
   }
 
-  componentDidUpdate(nextProps: Props) {
-    if (nextProps.query !== this.props.query) {
-      this.doSearch(nextProps.query);
+  componentDidUpdate(prevProps: Props) {
+    if (prevProps.query !== this.props.query) {
+      this.doSearch(this.props.query);
     }
   }
 
-  search = new SentryGlobalSearch(['docs', 'help-center', 'develop', 'blog']);
+  search = new SentryGlobalSearch(['docs', 'zendesk_sentry_articles', 'develop', 'blog']);
 
   async unbouncedSearch(query: string) {
     this.setState({loading: true});
     const {platforms = []} = this.props;
 
-    const searchResults = await this.search.query(query, {
-      platforms: platforms.map(platform => standardSDKSlug(platform)?.slug!),
-    });
+    const searchResults = await this.search.query(
+      query,
+      {
+        searchAllIndexes: true,
+        platforms: platforms.map(platform => standardSDKSlug(platform)?.slug!),
+      },
+      {
+        analyticsTags: ['source:dashboard'],
+      }
+    );
     const results = mapSearchResults(searchResults);
 
     this.setState({loading: false, results});
@@ -87,7 +94,7 @@ function mapSearchResults(results: SearchResult[]) {
   const items: Result[] = [];
 
   results.forEach(section => {
-    const sectionItems = section.hits.map<Result>(hit => {
+    const sectionItems = section.hits.map(hit => {
       const title = parseHtmlMarks({
         key: 'title',
         htmlString: hit.title ?? '',
@@ -109,13 +116,13 @@ function mapSearchResults(results: SearchResult[]) {
         to: hit.url,
       };
 
-      return {item, matches: [title, description], score: 1};
+      return {item, matches: [title, description], score: 1, refIndex: 0};
     });
 
     // The first element should indicate the section.
     if (sectionItems.length > 0) {
-      sectionItems[0].item.sectionHeading = section.name;
-      sectionItems[0].item.sectionCount = sectionItems.length;
+      sectionItems[0]!.item.sectionHeading = section.name;
+      sectionItems[0]!.item.sectionCount = sectionItems.length;
 
       items.push(...sectionItems);
       return;
@@ -130,11 +137,11 @@ function mapSearchResults(results: SearchResult[]) {
       empty: true,
     };
 
-    items.push({item: emptyHeaderItem, score: 1});
+    items.push({item: emptyHeaderItem, score: 1, refIndex: 0});
   });
 
   return items;
 }
 
 export {HelpSource};
-export default withLatestContext(withRouter(HelpSource));
+export default withLatestContext(withSentryRouter(HelpSource));

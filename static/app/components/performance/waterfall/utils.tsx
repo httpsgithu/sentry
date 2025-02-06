@@ -1,16 +1,21 @@
-import {DurationDisplay} from 'app/components/performance/waterfall/types';
-import CHART_PALETTE from 'app/constants/chartPalette';
-import space from 'app/styles/space';
-import {Theme} from 'app/utils/theme';
+import {css, type Theme} from '@emotion/react';
+import Color from 'color';
+
+import type {DurationDisplay} from 'sentry/components/performance/waterfall/types';
+import {CHART_PALETTE} from 'sentry/constants/chartPalette';
+import {space} from 'sentry/styles/space';
+
+import type {SpanBarType} from './constants';
+import {getSpanBarColors} from './constants';
 
 export const getBackgroundColor = ({
   showStriping,
   showDetail,
   theme,
 }: {
-  showStriping?: boolean;
-  showDetail?: boolean;
   theme: Theme;
+  showDetail?: boolean;
+  showStriping?: boolean;
 }) => {
   if (showDetail) {
     return theme.textColor;
@@ -23,18 +28,13 @@ export const getBackgroundColor = ({
   return theme.background;
 };
 
-type HatchProps = {
-  spanBarHatch: boolean;
-};
+export function getHatchPattern(spanBarType: SpanBarType | undefined, theme: Theme) {
+  if (spanBarType) {
+    const {primary, alternate} = getSpanBarColors(spanBarType, theme);
 
-export function getHatchPattern(
-  {spanBarHatch}: HatchProps,
-  primary: string,
-  alternate: string
-) {
-  if (spanBarHatch === true) {
-    return `
-      background-image: linear-gradient(135deg,
+    return css`
+      background-image: linear-gradient(
+        135deg,
         ${alternate},
         ${alternate} 2.5px,
         ${primary} 2.5px,
@@ -60,24 +60,44 @@ export function getHatchPattern(
 
 export const getDurationPillAlignment = ({
   durationDisplay,
-  theme,
-  spanBarHatch,
 }: {
   durationDisplay: DurationDisplay;
   theme: Theme;
-  spanBarHatch: boolean;
+  spanBarType?: SpanBarType;
 }) => {
   switch (durationDisplay) {
     case 'left':
-      return `right: calc(100% + ${space(0.5)});`;
+      return css`
+        right: calc(100% + ${space(0.5)});
+      `;
     case 'right':
-      return `left: calc(100% + ${space(0.75)});`;
+      return css`
+        left: calc(100% + ${space(0.75)});
+      `;
     default:
-      return `
+      return css`
         right: ${space(0.75)};
-        color: ${spanBarHatch === true ? theme.gray300 : theme.white};
       `;
   }
+};
+
+export const getDurationPillColors = ({
+  durationDisplay,
+  theme,
+  showDetail,
+  spanBarType,
+}: {
+  durationDisplay: DurationDisplay;
+  showDetail: boolean;
+  theme: Theme;
+  spanBarType?: SpanBarType;
+}) => {
+  if (durationDisplay === 'inset') {
+    const {alternate, insetTextColor} = getSpanBarColors(spanBarType, theme);
+    return `background: ${alternate}; color: ${insetTextColor};`;
+  }
+
+  return `color: ${showDetail ? theme.gray200 : theme.gray300};`;
 };
 
 export const getToggleTheme = ({
@@ -86,13 +106,25 @@ export const getToggleTheme = ({
   disabled,
   errored,
   isSpanGroupToggler,
+  spanBarType,
 }: {
-  theme: Theme;
-  isExpanded: boolean;
   disabled: boolean;
   errored: boolean;
+  isExpanded: boolean;
+  theme: Theme;
   isSpanGroupToggler?: boolean;
+  spanBarType?: SpanBarType;
 }) => {
+  if (spanBarType) {
+    const {primary} = getSpanBarColors(spanBarType, theme);
+    return css`
+      background: ${primary};
+      border: 2px solid ${theme.button.default.border};
+      color: ${theme.button.primary.color};
+      cursor: pointer;
+    `;
+  }
+
   const buttonTheme = isExpanded ? theme.button.default : theme.button.primary;
   const errorTheme = theme.button.danger;
 
@@ -109,26 +141,26 @@ export const getToggleTheme = ({
     : buttonTheme.color;
 
   if (isSpanGroupToggler) {
-    return `
-    background: ${theme.blue300};
-    border: 1px solid ${theme.button.default.border};
-    color: ${color};
-    cursor: pointer;
-  `;
+    return css`
+      background: ${theme.blue300};
+      border: 2px solid ${theme.button.default.border};
+      color: ${color};
+      cursor: pointer;
+    `;
   }
 
   if (disabled) {
-    return `
-    background: ${background};
-    border: 1px solid ${border};
-    color: ${color};
-    cursor: default;
-  `;
+    return css`
+      background: ${background};
+      border: 2px solid ${border};
+      color: ${color};
+      cursor: default;
+    `;
   }
 
-  return `
+  return css`
     background: ${background};
-    border: 1px solid ${border};
+    border: 2px solid ${border};
     color: ${color};
   `;
 };
@@ -137,8 +169,8 @@ export const getDurationDisplay = ({
   width,
   left,
 }: {
-  width: undefined | number;
   left: undefined | number;
+  width: undefined | number;
 }): DurationDisplay => {
   const spaceNeeded = 0.3;
 
@@ -156,25 +188,23 @@ export const getDurationDisplay = ({
 
 export const getHumanDuration = (duration: number): string => {
   // note: duration is assumed to be in seconds
-  const durationMS = duration * 1000;
-  return `${durationMS.toLocaleString(undefined, {
+  const durationMs = duration * 1000;
+  return `${durationMs.toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}ms`;
 };
 
-export const toPercent = (value: number) => `${(value * 100).toFixed(3)}%`;
-
 type Rect = {
+  height: number;
+  width: number;
   // x and y are left/top coords respectively
   x: number;
   y: number;
-  width: number;
-  height: number;
 };
 
 // get position of element relative to top/left of document
-const getOffsetOfElement = (element: Element) => {
+export const getOffsetOfElement = (element: Element) => {
   // left and top are relative to viewport
   const {left, top} = element.getBoundingClientRect();
 
@@ -203,21 +233,12 @@ export const rectOfContent = (element: Element): Rect => {
   };
 };
 
-export const clamp = (value: number, min: number, max: number): number => {
-  if (value < min) {
-    return min;
-  }
-  if (value > max) {
-    return max;
-  }
-  return value;
-};
-
 const getLetterIndex = (letter: string): number => {
   const index = 'abcdefghijklmnopqrstuvwxyz'.indexOf(letter) || 0;
   return index === -1 ? 0 : index;
 };
 
+// @ts-expect-error TS(7015): Element implicitly has an 'any' type because index... Remove this comment to see the full error message
 const colorsAsArray = Object.keys(CHART_PALETTE).map(key => CHART_PALETTE[17][key]);
 
 export const barColors = {
@@ -235,16 +256,26 @@ export const pickBarColor = (input: string | undefined): string => {
     return CHART_PALETTE[17][4];
   }
 
+  // @ts-expect-error TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
   if (barColors[input]) {
+    // @ts-expect-error TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
     return barColors[input];
   }
 
-  const letterIndex1 = getLetterIndex(input.slice(0, 1));
-  const letterIndex2 = getLetterIndex(input.slice(1, 2));
-  const letterIndex3 = getLetterIndex(input.slice(2, 3));
-  const letterIndex4 = getLetterIndex(input.slice(3, 4));
+  const letterIndex1 = getLetterIndex(input[0]!);
+  const letterIndex2 = getLetterIndex(input[1]!);
+  const letterIndex3 = getLetterIndex(input[2]!);
+  const letterIndex4 = getLetterIndex(input[3]!);
 
   return colorsAsArray[
     (letterIndex1 + letterIndex2 + letterIndex3 + letterIndex4) % colorsAsArray.length
   ];
+};
+
+export const lightenBarColor = (
+  input: string | undefined,
+  lightenRatio: number
+): string => {
+  const barColor = pickBarColor(input);
+  return Color(barColor).lighten(lightenRatio).string();
 };

@@ -1,27 +1,27 @@
 import './components/visualMap';
 
-import * as React from 'react';
-import {EChartOption} from 'echarts';
+import {forwardRef} from 'react';
+import type {HeatmapSeriesOption, VisualMapComponentOption} from 'echarts';
 
-import {ReactEchartsRef, Series} from 'app/types/echarts';
+import type {ReactEchartsRef, Series} from 'sentry/types/echarts';
 
 import HeatMapSeries from './series/heatMapSeries';
+import type {BaseChartProps} from './baseChart';
 import BaseChart from './baseChart';
 
-type ChartProps = React.ComponentProps<typeof BaseChart>;
+export interface HeatmapSeries
+  extends Series,
+    Omit<HeatmapSeriesOption, 'data' | 'name' | 'color' | 'id'> {
+  dataArray?: HeatmapSeriesOption['data'];
+}
 
-export type LineChartSeries = Series &
-  Omit<EChartOption.SeriesHeatmap, 'data' | 'name'> & {
-    dataArray?: EChartOption.SeriesHeatmap['data'];
-  };
+interface HeatmapProps extends Omit<BaseChartProps, 'series'> {
+  series: HeatmapSeries[];
+  visualMaps: VisualMapComponentOption[];
+  seriesOptions?: HeatmapSeriesOption;
+}
 
-type Props = Omit<ChartProps, 'series'> & {
-  series: LineChartSeries[];
-  seriesOptions?: EChartOption.SeriesHeatmap;
-  visualMaps: EChartOption.VisualMap[];
-};
-
-export default React.forwardRef<ReactEchartsRef, Props>((props, ref) => {
+export default forwardRef<ReactEchartsRef, HeatmapProps>((props, ref) => {
   const {series, seriesOptions, visualMaps, ...otherProps} = props;
   return (
     <BaseChart

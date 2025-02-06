@@ -1,20 +1,17 @@
-import flatMap from 'lodash/flatMap';
-import flatten from 'lodash/flatten';
-
-import FormSearchActions from 'app/actions/formSearchActions';
-import {FormSearchField} from 'app/stores/formSearchStore';
-import {Field, JsonFormObject} from 'app/views/settings/components/forms/type';
+import type {Field, JsonFormObject} from 'sentry/components/forms/types';
+import type {FormSearchField} from 'sentry/stores/formSearchStore';
+import FormSearchStore from 'sentry/stores/formSearchStore';
 
 type Params = {
-  route: string;
-  formGroups: JsonFormObject[];
   fields: Record<string, Field>;
+  formGroups: JsonFormObject[];
+  route: string;
 };
 /**
  * Creates a list of objects to be injected by a search source
  *
  * @param route The route a form field belongs on
- * @param formGroups An array of `FormGroup: {title: String, fields: [Field]}`
+ * @param formGroups An array of `FormGroup: {title: string, fields: [Field]}`
  * @param fields An object whose key is field name and value is a `Field`
  */
 const createSearchMap = ({
@@ -27,49 +24,46 @@ const createSearchMap = ({
   // If `formGroups` is defined, then return a flattened list of fields in all formGroups
   // Otherwise `fields` is a map of fieldName -> fieldObject -- create a list of fields
   const listOfFields = formGroups
-    ? flatMap(formGroups, formGroup => formGroup.fields)
+    ? formGroups.flatMap(formGroup => formGroup.fields)
     : Object.keys(fields).map(fieldName => fields[fieldName]);
 
-  return listOfFields.map(field => ({
+  return listOfFields.map<FormSearchField>(field => ({
     ...other,
     route,
-    title: typeof field !== 'function' ? field.label : undefined,
-    description: typeof field !== 'function' ? field.help : undefined,
-    field,
+    title: typeof field !== 'function' ? (field?.label as string) : undefined,
+    description: typeof field !== 'function' ? (field?.help as string) : undefined,
+    field: field!,
   }));
 };
 
 export function loadSearchMap() {
   // Load all form configuration files via webpack that export a named `route`
   // as well as either `fields` or `formGroups`
-  // @ts-ignore This fails on cloud builder, but not in CI...
-  const context = require.context('../data/forms', true, /\.[tj]sx?$/);
+  const context = require.context('../data/forms', true, /\.tsx?$/);
 
   // Get a list of all form fields defined in `../data/forms`
-  const allFormFields = flatten(
-    context
-      .keys()
-      .map(key => {
-        const mod = context(key);
+  const allFormFields: FormSearchField[] = context.keys().flatMap((key: any) => {
+    const mod = context(key);
 
-        // Since we're dynamically importing an entire directly, there could be malformed modules defined?
-        if (!mod) {
-          return null;
-        }
-        // Only look for module that have `route` exported
-        if (!mod.route) {
-          return null;
-        }
+    // Since we're dynamically importing an entire directly, there could be malformed modules defined?
+    // Only look for module that have `route` exported
+    if (!mod?.route) {
+      return [];
+    }
 
-        return createSearchMap({
-          // `formGroups` can be a default export or a named export :<
-          formGroups: mod.default || mod.formGroups,
-          fields: mod.fields,
-          route: mod.route,
-        });
-      })
-      .filter(i => !!i)
-  );
+    const searchMap = createSearchMap({
+      // `formGroups` can be a default export or a named export :<
+      formGroups: mod.default || mod.formGroups,
+      fields: mod.fields,
+      route: mod.route,
+    });
 
-  FormSearchActions.loadSearchMap(allFormFields);
+    if (searchMap !== null) {
+      return searchMap;
+    }
+
+    return [];
+  });
+
+  FormSearchStore.loadSearchMap(allFormFields);
 }

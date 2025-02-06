@@ -1,59 +1,66 @@
-import * as React from 'react';
 import styled from '@emotion/styled';
-import {LocationDescriptorObject} from 'history';
-import omit from 'lodash/omit';
+import type {LocationDescriptorObject} from 'history';
 
-import Link from 'app/components/links/link';
-import {IconArrow} from 'app/icons';
+import Link from 'sentry/components/links/link';
+import {IconArrow} from 'sentry/icons';
+import {useNavigate} from 'sentry/utils/useNavigate';
 
 export type Alignments = 'left' | 'right' | undefined;
 export type Directions = 'desc' | 'asc' | undefined;
 
 type Props = {
   align: Alignments;
-  title: React.ReactNode;
-  direction: Directions;
   canSort: boolean;
-
+  direction: Directions;
   generateSortLink: () => LocationDescriptorObject | undefined;
+  title: React.ReactNode;
   onClick?: (e: React.MouseEvent<HTMLAnchorElement>) => void;
+  replace?: boolean;
 };
 
-class SortLink extends React.Component<Props> {
-  renderArrow() {
-    const {direction} = this.props;
-    if (!direction) {
-      return null;
-    }
+function SortLink({
+  align,
+  title,
+  canSort,
+  generateSortLink,
+  onClick,
+  direction,
+  replace,
+}: Props) {
+  const target = generateSortLink();
+  const navigate = useNavigate();
 
-    if (direction === 'desc') {
-      return <StyledIconArrow size="xs" direction="down" />;
-    }
-    return <StyledIconArrow size="xs" direction="up" />;
+  if (!target || !canSort) {
+    return <StyledNonLink align={align}>{title}</StyledNonLink>;
   }
 
-  render() {
-    const {align, title, canSort, generateSortLink, onClick} = this.props;
+  const arrow = !direction ? null : (
+    <StyledIconArrow size="xs" direction={direction === 'desc' ? 'down' : 'up'} />
+  );
 
-    const target = generateSortLink();
-
-    if (!target || !canSort) {
-      return <StyledNonLink align={align}>{title}</StyledNonLink>;
+  const handleOnClick: React.MouseEventHandler<HTMLAnchorElement> = e => {
+    if (replace) {
+      e.preventDefault();
+      navigate(target, {replace: true});
     }
+    onClick?.(e);
+  };
 
-    return (
-      <StyledLink align={align} to={target} onClick={onClick}>
-        {title} {this.renderArrow()}
-      </StyledLink>
-    );
-  }
+  return (
+    <StyledLink align={align} to={target} onClick={handleOnClick}>
+      {title} {arrow}
+    </StyledLink>
+  );
 }
 
 type LinkProps = React.ComponentPropsWithoutRef<typeof Link>;
 type StyledLinkProps = LinkProps & {align: Alignments};
 
 const StyledLink = styled((props: StyledLinkProps) => {
-  const forwardProps = omit(props, ['align']);
+  // but prior to this style of destructure-omitting it, it was being omitted
+  // with lodash.omit. I mean keeping it omitted here just in case.
+  // @ts-expect-error TS(2339): Property 'css' does not exist on type 'StyledLinkP... Remove this comment to see the full error message
+  const {align: _align, css: _css, ...forwardProps} = props;
   return <Link {...forwardProps} />;
 })`
   display: block;

@@ -1,6 +1,4 @@
-import {Component} from 'react';
-
-import {t} from 'app/locale';
+import {t} from 'sentry/locale';
 
 import U2fInterface from './u2finterface';
 
@@ -14,30 +12,24 @@ const MESSAGES = {
   ),
 };
 
-type InterfaceProps = U2fInterface['props'];
+type InterfaceProps = React.ComponentProps<typeof U2fInterface>;
 
 type Props = Omit<InterfaceProps, 'silentIfUnsupported' | 'flowMode'> & {
-  displayMode: 'signin' | 'enroll' | 'sudo';
+  displayMode?: 'signin' | 'enroll' | 'sudo';
 };
 
-class U2fSign extends Component<Props> {
-  static defaultProps = {
-    displayMode: 'signin',
-  };
+function U2fSign({displayMode = 'signin', ...props}: Props) {
+  const flowMode = displayMode === 'enroll' ? 'enroll' : 'sign';
 
-  render() {
-    const {displayMode, ...props} = this.props;
-    const flowMode = displayMode === 'enroll' ? 'enroll' : 'sign';
-    return (
-      <U2fInterface
-        {...props}
-        silentIfUnsupported={displayMode === 'sudo'}
-        flowMode={flowMode}
-      >
-        <p>{MESSAGES[displayMode] || null}</p>
-      </U2fInterface>
-    );
-  }
+  return (
+    <U2fInterface
+      {...props}
+      silentIfUnsupported={displayMode === 'sudo'}
+      flowMode={flowMode}
+    >
+      <p>{MESSAGES[displayMode] ?? null}</p>
+    </U2fInterface>
+  );
 }
 
 export default U2fSign;

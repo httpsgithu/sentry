@@ -1,73 +1,81 @@
 import {Fragment} from 'react';
 import styled from '@emotion/styled';
 
-import GuideAnchor from 'app/components/assistant/guideAnchor';
-import ProjectsStore from 'app/stores/projectsStore';
-import overflowEllipsis from 'app/styles/overflowEllipsis';
-import {BaseGroup, GroupTombstone, Organization} from 'app/types';
-import {Event} from 'app/types/event';
-import {getTitle} from 'app/utils/events';
-import withOrganization from 'app/utils/withOrganization';
+import {space} from 'sentry/styles/space';
+import type {Event} from 'sentry/types/event';
+import type {BaseGroup, GroupTombstoneHelper} from 'sentry/types/group';
+import {getMessage, getTitle, isTombstone} from 'sentry/utils/events';
+import useOrganization from 'sentry/utils/useOrganization';
 
-import EventTitleTreeLabel from './eventTitleTreeLabel';
-import StacktracePreview from './stacktracePreview';
+import GroupPreviewTooltip from './groupPreviewTooltip';
 
-type Props = Partial<DefaultProps> & {
-  data: Event | BaseGroup | GroupTombstone;
-  organization: Organization;
-  hasGuideAnchor?: boolean;
-  withStackTracePreview?: boolean;
-  guideAnchorName?: string;
-  /* is issue breakdown? */
-  grouping?: boolean;
+interface EventOrGroupTitleProps {
+  data: Event | BaseGroup | GroupTombstoneHelper;
   className?: string;
-};
-
-type DefaultProps = {
-  guideAnchorName: string;
-};
+  query?: string;
+  withStackTracePreview?: boolean;
+}
 
 function EventOrGroupTitle({
-  guideAnchorName = 'issue_title',
-  organization,
   data,
   withStackTracePreview,
-  hasGuideAnchor,
-  grouping = false,
   className,
-}: Props) {
-  const event = data as Event;
-  const groupingCurrentLevel = (data as BaseGroup).metadata?.current_level;
+  query,
+}: EventOrGroupTitleProps) {
+  const organization = useOrganization({allowNull: true});
+  const {id, groupID} = data as Event;
 
-  const hasGroupingTreeUI = !!organization?.features.includes('grouping-tree-ui');
-  const hasGroupingStacktraceUI = !!organization?.features.includes(
-    'grouping-stacktrace-ui'
-  );
-  const {id, eventID, groupID, projectID} = event;
+  const {title, subtitle} = getTitle(data);
+  const titleLabel = title ?? '';
 
-  const {title, subtitle, treeLabel} = getTitle(event, organization?.features, grouping);
+  const hasNewLayout =
+    organization?.features.includes('issue-stream-table-layout') ?? false;
+
+  const secondaryTitle = hasNewLayout ? getMessage(data) : subtitle;
+
+  if (hasNewLayout) {
+    return (
+      <span className={className}>
+        {!isTombstone(data) && withStackTracePreview ? (
+          <GroupPreviewTooltip
+            groupId={groupID ? groupID : id}
+            issueCategory={data.issueCategory}
+            groupingCurrentLevel={data.metadata?.current_level}
+            query={query}
+          >
+            <Title data-issue-title-primary>{titleLabel}</Title>
+          </GroupPreviewTooltip>
+        ) : (
+          titleLabel
+        )}
+        {secondaryTitle && (
+          <Fragment>
+            <Spacer width={space(1)} />
+            <Message title={secondaryTitle}>{secondaryTitle}</Message>
+          </Fragment>
+        )}
+      </span>
+    );
+  }
 
   return (
-    <Wrapper className={className} hasGroupingTreeUI={hasGroupingTreeUI}>
-      <GuideAnchor disabled={!hasGuideAnchor} target={guideAnchorName} position="bottom">
-        <StyledStacktracePreview
-          organization={organization}
-          issueId={groupID ? groupID : id}
-          groupingCurrentLevel={groupingCurrentLevel}
-          // we need eventId and projectSlug only when hovering over Event, not Group
-          // (different API call is made to get the stack trace then)
-          eventId={eventID}
-          projectSlug={eventID ? ProjectsStore.getById(projectID)?.slug : undefined}
-          disablePreview={!withStackTracePreview}
-          hasGroupingStacktraceUI={hasGroupingStacktraceUI}
+    <Wrapper className={className}>
+      {!isTombstone(data) && withStackTracePreview ? (
+        <GroupPreviewTooltip
+          groupId={groupID ? groupID : id}
+          issueCategory={data.issueCategory}
+          groupingCurrentLevel={data.metadata?.current_level}
+          query={query}
         >
-          {treeLabel ? <EventTitleTreeLabel treeLabel={treeLabel} /> : title}
-        </StyledStacktracePreview>
-      </GuideAnchor>
-      {subtitle && (
+          {titleLabel}
+        </GroupPreviewTooltip>
+      ) : (
+        titleLabel
+      )}
+      {secondaryTitle && (
         <Fragment>
-          <Spacer />
-          <Subtitle title={subtitle}>{subtitle}</Subtitle>
+          <Spacer width="10px" />
+          <Subtitle title={secondaryTitle}>{secondaryTitle}</Subtitle>
           <br />
         </Fragment>
       )}
@@ -75,46 +83,38 @@ function EventOrGroupTitle({
   );
 }
 
-export default withOrganization(EventOrGroupTitle);
+export default EventOrGroupTitle;
 
 /**
  * &nbsp; is used instead of margin/padding to split title and subtitle
  * into 2 separate text nodes on the HTML AST. This allows the
  * title to be highlighted without spilling over to the subtitle.
  */
-const Spacer = () => <span style={{display: 'inline-block', width: 10}}>&nbsp;</span>;
+function Spacer({width}: {width: string}) {
+  return <span style={{display: 'inline-block', width}}>&nbsp;</span>;
+}
 
 const Subtitle = styled('em')`
+  ${p => p.theme.overflowEllipsis};
+  display: inline-block;
   color: ${p => p.theme.gray300};
   font-style: normal;
+  height: 100%;
 `;
 
-const StyledStacktracePreview = styled(StacktracePreview)<{
-  hasGroupingStacktraceUI: boolean;
-}>`
-  ${p =>
-    p.hasGroupingStacktraceUI &&
-    `
-      display: inline-flex;
-      overflow: hidden;
-      > span:first-child {
-        ${overflowEllipsis}
-      }
-    `}
+const Message = styled('span')`
+  font-weight: ${p => p.theme.fontWeightNormal};
+  font-size: ${p => p.theme.fontSizeMedium};
 `;
 
-const Wrapper = styled('span')<{hasGroupingTreeUI: boolean}>`
-  ${p =>
-    p.hasGroupingTreeUI &&
-    `
-      display: inline-grid;
-      grid-template-columns: auto max-content 1fr max-content;
-      align-items: flex-end;
-      line-height: 100%;
+const Title = styled('span')`
+  position: relative;
+  font-size: ${p => p.theme.fontSizeMedium};
+`;
 
-      ${Subtitle} {
-        ${overflowEllipsis};
-        display: inline-block;
-      }
-    `}
+const Wrapper = styled('span')`
+  display: inline-grid;
+  grid-template-columns: auto max-content 1fr max-content;
+
+  align-items: baseline;
 `;

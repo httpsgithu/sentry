@@ -1,7 +1,7 @@
+import type {Theme} from '@emotion/react';
 import {css} from '@emotion/react';
 
-import space from 'app/styles/space';
-import {Theme} from 'app/utils/theme';
+import {space} from 'sentry/styles/space';
 
 const bulletStyle = (theme: Theme) => css`
   padding-left: ${space(3)};
@@ -12,9 +12,9 @@ const bulletStyle = (theme: Theme) => css`
 `;
 
 type Options = {
-  isSolid?: boolean;
   // setting initialCounterValue to 0 means the first visible step is 1
   initialCounterValue?: number;
+  isSolid?: boolean;
 };
 
 const numericStyle = (
@@ -33,19 +33,21 @@ const numericStyle = (
       justify-content: center;
       text-align: center;
       left: 0;
+      line-height: 1;
       ${isSolid
         ? css`
             width: 24px;
             height: 24px;
-            font-weight: 500;
+            font-weight: ${theme.fontWeightNormal};
             font-size: ${theme.fontSizeSmall};
             background-color: ${theme.yellow300};
+            color: ${theme.black};
           `
         : css`
             top: 3px;
             width: 18px;
             height: 18px;
-            font-weight: 600;
+            font-weight: ${theme.fontWeightBold};
             font-size: 10px;
             border: 1px solid ${theme.gray500};
           `}

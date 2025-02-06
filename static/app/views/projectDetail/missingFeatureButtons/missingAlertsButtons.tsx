@@ -1,10 +1,8 @@
-import styled from '@emotion/styled';
-
-import Button from 'app/components/button';
-import ButtonBar from 'app/components/buttonBar';
-import CreateAlertButton from 'app/components/createAlertButton';
-import {t} from 'app/locale';
-import {Organization} from 'app/types';
+import {LinkButton} from 'sentry/components/button';
+import ButtonBar from 'sentry/components/buttonBar';
+import CreateAlertButton from 'sentry/components/createAlertButton';
+import {t} from 'sentry/locale';
+import type {Organization} from 'sentry/types/organization';
 
 const DOCS_URL = 'https://docs.sentry.io/product/alerts-notifications/metric-alerts/';
 
@@ -15,11 +13,11 @@ type Props = {
 
 function MissingAlertsButtons({organization, projectSlug}: Props) {
   return (
-    <StyledButtonBar gap={1}>
+    <ButtonBar gap={1}>
       <CreateAlertButton
         organization={organization}
         iconProps={{size: 'xs'}}
-        size="small"
+        size="sm"
         priority="primary"
         referrer="project_detail"
         projectSlug={projectSlug}
@@ -27,15 +25,11 @@ function MissingAlertsButtons({organization, projectSlug}: Props) {
       >
         {t('Create Alert')}
       </CreateAlertButton>
-      <Button size="small" external href={DOCS_URL}>
+      <LinkButton size="sm" external href={DOCS_URL}>
         {t('Learn More')}
-      </Button>
-    </StyledButtonBar>
+      </LinkButton>
+    </ButtonBar>
   );
 }
-
-const StyledButtonBar = styled(ButtonBar)`
-  grid-template-columns: minmax(auto, max-content) minmax(auto, max-content);
-`;
 
 export default MissingAlertsButtons;

@@ -2,7 +2,6 @@ from datetime import timedelta
 
 from django.urls import reverse
 
-from sentry.testutils.helpers.datetime import iso_format
 from sentry.utils.cursors import Cursor
 from sentry.utils.samples import load_data
 from tests.snuba.api.endpoints.test_organization_events_facets_performance import (
@@ -16,7 +15,7 @@ class OrganizationEventsFacetsPerformanceHistogramEndpointTest(
     feature_list = (
         "organizations:discover-basic",
         "organizations:global-views",
-        "organizations:performance-tag-page",
+        "organizations:performance-view",
     )
 
     def setUp(self):
@@ -26,7 +25,7 @@ class OrganizationEventsFacetsPerformanceHistogramEndpointTest(
 
         self.url = reverse(
             "sentry-api-0-organization-events-facets-performance-histogram",
-            kwargs={"organization_slug": self.project.organization.slug},
+            kwargs={"organization_id_or_slug": self.project.organization.slug},
         )
 
     # Function to set up some transactions for most tests
@@ -52,23 +51,22 @@ class OrganizationEventsFacetsPerformanceHistogramEndpointTest(
         self,
         name="exampleTransaction",
         duration=100,
-        tags=None,
         project_id=None,
         lcp=None,
         user_id=None,
+        *,
+        tags,
     ):
-        if tags is None:
-            tags = []
         if project_id is None:
             project_id = self.project.id
-        event = load_data("transaction").copy()
-        event.data["tags"].extend(tags)
+        event = load_data("transaction")
+        event["tags"].extend(tags)
         event.update(
             {
                 "transaction": name,
                 "event_id": f"{self._transaction_count:02x}".rjust(32, "0"),
-                "start_timestamp": iso_format(self.two_mins_ago - timedelta(seconds=duration)),
-                "timestamp": iso_format(self.two_mins_ago),
+                "start_timestamp": (self.two_mins_ago - timedelta(seconds=duration)).isoformat(),
+                "timestamp": self.two_mins_ago.isoformat(),
             }
         )
         if user_id:
@@ -115,9 +113,7 @@ class OrganizationEventsFacetsPerformanceHistogramEndpointTest(
         error_response = self.do_request(
             request,
             {
-                "organizations:discover-basic": True,
-                "organizations:global-views": True,
-                "organizations:performance-tag-page": False,
+                "organizations:performance-view": False,
             },
         )
         assert error_response.status_code == 404
@@ -132,7 +128,7 @@ class OrganizationEventsFacetsPerformanceHistogramEndpointTest(
             "per_page": 5,
         }
         # With feature access, no tag key
-        error_response = self.do_request(request, {"organizations:performance-tag-page": True})
+        error_response = self.do_request(request)
 
         assert error_response.status_code == 400, error_response.content
         assert error_response.data == {
@@ -150,14 +146,14 @@ class OrganizationEventsFacetsPerformanceHistogramEndpointTest(
             "query": "(color:red or color:blue)",
         }
         # With feature access, no tag key
-        error_response = self.do_request(request, {"organizations:performance-tag-page": True})
+        error_response = self.do_request(request)
 
         assert error_response.status_code == 400, error_response.content
         assert error_response.data == {"detail": "'tagKey' must be provided when using histograms."}
 
         # With feature access and tag key
         request["tagKey"] = "color"
-        data_response = self.do_request(request, {"organizations:performance-tag-page": True})
+        data_response = self.do_request(request)
 
         histogram_data = data_response.data["histogram"]["data"]
         assert len(histogram_data) == 2
@@ -188,7 +184,7 @@ class OrganizationEventsFacetsPerformanceHistogramEndpointTest(
             "query": "(color:teal or color:oak)",
         }
 
-        data_response = self.do_request(request, {"organizations:performance-tag-page": True})
+        data_response = self.do_request(request)
 
         histogram_data = data_response.data["histogram"]["data"]
         assert histogram_data == []
@@ -208,7 +204,7 @@ class OrganizationEventsFacetsPerformanceHistogramEndpointTest(
             "query": "(color:red or color:blue or color:green)",
         }
 
-        data_response = self.do_request(request, {"organizations:performance-tag-page": True})
+        data_response = self.do_request(request)
 
         histogram_data = data_response.data["histogram"]["data"]
         assert len(histogram_data) == 1
@@ -218,7 +214,7 @@ class OrganizationEventsFacetsPerformanceHistogramEndpointTest(
         assert histogram_data[0]["tags_key"] == "color"
 
         request["per_page"] = 3
-        data_response = self.do_request(request, {"organizations:performance-tag-page": True})
+        data_response = self.do_request(request)
 
         histogram_data = data_response.data["histogram"]["data"]
         assert len(histogram_data) == 3
@@ -250,13 +246,13 @@ class OrganizationEventsFacetsPerformanceHistogramEndpointTest(
             "query": "(color:red or color:blue or color:green or color:orange)",
         }
 
-        data_response = self.do_request(request, {"organizations:performance-tag-page": True})
+        data_response = self.do_request(request)
 
         assert data_response.data["tags"]["data"][2]["tags_value"] == "green"
 
         request["aggregateColumn"] = "measurements.lcp"
 
-        data_response = self.do_request(request, {"organizations:performance-tag-page": True})
+        data_response = self.do_request(request)
 
         tags_data = data_response.data["tags"]["data"]
         assert len(tags_data) == 3
@@ -293,7 +289,7 @@ class OrganizationEventsFacetsPerformanceHistogramEndpointTest(
             "query": "(user.id:555)",
         }
 
-        data_response = self.do_request(request, {"organizations:performance-tag-page": True})
+        data_response = self.do_request(request)
 
         histogram_data = data_response.data["histogram"]["data"]
         assert histogram_data[0]["count"] == 1
@@ -313,14 +309,14 @@ class OrganizationEventsFacetsPerformanceHistogramEndpointTest(
             "tagKey": "color",
         }
 
-        data_response = self.do_request(request, {"organizations:performance-tag-page": True})
+        data_response = self.do_request(request)
 
         tag_data = data_response.data["tags"]["data"]
         assert len(tag_data) == 3
 
         request["cursor"] = Cursor(0, 3)
 
-        data_response = self.do_request(request, {"organizations:performance-tag-page": True})
+        data_response = self.do_request(request)
 
         tag_data = data_response.data["tags"]["data"]
         assert len(tag_data) == 1
@@ -335,7 +331,7 @@ class OrganizationEventsFacetsPerformanceHistogramEndpointTest(
             "tagKey": "color",
         }
 
-        data_response = self.do_request(request, {"organizations:performance-tag-page": True})
+        data_response = self.do_request(request)
 
         tag_data = data_response.data["tags"]["data"]
         assert len(tag_data) == 1
@@ -344,7 +340,7 @@ class OrganizationEventsFacetsPerformanceHistogramEndpointTest(
 
         request["sort"] = "-aggregate"
 
-        data_response = self.do_request(request, {"organizations:performance-tag-page": True})
+        data_response = self.do_request(request)
 
         tag_data = data_response.data["tags"]["data"]
         assert len(tag_data) == 1
@@ -364,7 +360,7 @@ class OrganizationEventsFacetsPerformanceHistogramEndpointTest(
             "tagKey": "fruit",
         }
 
-        data_response = self.do_request(request, {"organizations:performance-tag-page": True})
+        data_response = self.do_request(request)
 
         histogram_data = data_response.data["histogram"]["data"]
         assert len(histogram_data) == 20

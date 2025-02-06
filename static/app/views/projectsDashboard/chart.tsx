@@ -1,26 +1,26 @@
-import * as React from 'react';
-import {withTheme} from '@emotion/react';
+import {Fragment} from 'react';
+import {useTheme} from '@emotion/react';
 
-import BaseChart from 'app/components/charts/baseChart';
-import {t} from 'app/locale';
-import {Project} from 'app/types';
-import {axisLabelFormatter} from 'app/utils/discover/charts';
-import {Theme} from 'app/utils/theme';
+import BaseChart from 'sentry/components/charts/baseChart';
+import {t} from 'sentry/locale';
+import type {Project} from 'sentry/types/project';
+import {axisLabelFormatter} from 'sentry/utils/discover/charts';
 
 import NoEvents from './noEvents';
 
 type BaseChartProps = React.ComponentProps<typeof BaseChart>;
 
 type Props = {
-  theme: Theme;
   firstEvent: boolean;
   stats: Project['stats'];
   transactionStats?: Project['transactionStats'];
 };
 
-const Chart = ({theme, firstEvent, stats, transactionStats}: Props) => {
+function Chart({firstEvent, stats, transactionStats}: Props) {
   const series: BaseChartProps['series'] = [];
   const hasTransactions = transactionStats !== undefined;
+
+  const theme = useTheme();
 
   if (transactionStats) {
     const transactionSeries = transactionStats.map(([timestamp, value]) => [
@@ -39,7 +39,9 @@ const Chart = ({theme, firstEvent, stats, transactionStats}: Props) => {
       itemStyle: {
         color: theme.gray200,
         opacity: 0.8,
-        emphasis: {
+      },
+      emphasis: {
+        itemStyle: {
           color: theme.gray200,
           opacity: 1.0,
         },
@@ -59,7 +61,9 @@ const Chart = ({theme, firstEvent, stats, transactionStats}: Props) => {
       itemStyle: {
         color: theme.purple300,
         opacity: 0.6,
-        emphasis: {
+      },
+      emphasis: {
+        itemStyle: {
           color: theme.purple300,
           opacity: 0.8,
         },
@@ -102,7 +106,6 @@ const Chart = ({theme, firstEvent, stats, transactionStats}: Props) => {
     },
     xAxes: Array.from(new Array(series.length)).map((_i, index) => ({
       gridIndex: index,
-      boundaryGap: true,
       axisLine: {
         show: false,
       },
@@ -138,7 +141,7 @@ const Chart = ({theme, firstEvent, stats, transactionStats}: Props) => {
         fontFamily: theme.text.family,
         inside: true,
         lineHeight: 12,
-        formatter: (value: number) => axisLabelFormatter(value, 'count()', true),
+        formatter: (value: number) => axisLabelFormatter(value, 'number', true),
         textBorderColor: theme.backgroundSecondary,
         textBorderWidth: 1,
       },
@@ -157,11 +160,11 @@ const Chart = ({theme, firstEvent, stats, transactionStats}: Props) => {
   };
 
   return (
-    <React.Fragment>
+    <Fragment>
       <BaseChart {...chartOptions} />
       {!firstEvent && <NoEvents seriesCount={series.length} />}
-    </React.Fragment>
+    </Fragment>
   );
-};
+}
 
-export default withTheme(Chart);
+export default Chart;

@@ -1,160 +1,290 @@
-import {Fragment, useEffect} from 'react';
-import LazyLoad from 'react-lazyload';
-import {RouteComponentProps} from 'react-router';
+import {Fragment, useEffect, useMemo, useState} from 'react';
+import LazyLoad, {forceCheck} from 'react-lazyload';
 import styled from '@emotion/styled';
 import {withProfiler} from '@sentry/react';
-import flatten from 'lodash/flatten';
+import debounce from 'lodash/debounce';
 import uniqBy from 'lodash/uniqBy';
 
-import {Client} from 'app/api';
-import Feature from 'app/components/acl/feature';
-import Button from 'app/components/button';
-import IdBadge from 'app/components/idBadge';
-import Link from 'app/components/links/link';
-import LoadingError from 'app/components/loadingError';
-import LoadingIndicator from 'app/components/loadingIndicator';
-import NoProjectMessage from 'app/components/noProjectMessage';
-import PageHeading from 'app/components/pageHeading';
-import SentryDocumentTitle from 'app/components/sentryDocumentTitle';
-import {IconAdd} from 'app/icons';
-import {t} from 'app/locale';
-import ProjectsStatsStore from 'app/stores/projectsStatsStore';
-import space from 'app/styles/space';
-import {Organization, TeamWithProjects} from 'app/types';
-import {sortProjects} from 'app/utils';
-import withApi from 'app/utils/withApi';
-import withOrganization from 'app/utils/withOrganization';
-import withTeamsForUser from 'app/utils/withTeamsForUser';
-import TeamInsightsHeaderTabs from 'app/views/teamInsights/headerTabs';
+import {LinkButton} from 'sentry/components/button';
+import ButtonBar from 'sentry/components/buttonBar';
+import * as Layout from 'sentry/components/layouts/thirds';
+import LoadingError from 'sentry/components/loadingError';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import NoProjectMessage from 'sentry/components/noProjectMessage';
+import {PageHeadingQuestionTooltip} from 'sentry/components/pageHeadingQuestionTooltip';
+import {canCreateProject} from 'sentry/components/projects/canCreateProject';
+import SearchBar from 'sentry/components/searchBar';
+import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
+import {DEFAULT_DEBOUNCE_DURATION} from 'sentry/constants';
+import {IconAdd, IconUser} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import ProjectsStatsStore from 'sentry/stores/projectsStatsStore';
+import {space} from 'sentry/styles/space';
+import type {Team} from 'sentry/types/organization';
+import type {Project, TeamWithProjects} from 'sentry/types/project';
+import {
+  onRenderCallback,
+  Profiler,
+  setGroupedEntityTag,
+} from 'sentry/utils/performanceForSentry';
+import {sortProjects} from 'sentry/utils/project/sortProjects';
+import {useLocation} from 'sentry/utils/useLocation';
+import {useNavigate} from 'sentry/utils/useNavigate';
+import useOrganization from 'sentry/utils/useOrganization';
+import useProjects from 'sentry/utils/useProjects';
+import {useTeamsById} from 'sentry/utils/useTeamsById';
+import {useUser} from 'sentry/utils/useUser';
+import {useUserTeams} from 'sentry/utils/useUserTeams';
+import TeamFilter from 'sentry/views/alerts/list/rules/teamFilter';
 
+import ProjectCard from './projectCard';
 import Resources from './resources';
-import TeamSection from './teamSection';
+import {getTeamParams} from './utils';
 
-type Props = {
-  api: Client;
-  organization: Organization;
-  teams: TeamWithProjects[];
-  loadingTeams: boolean;
-  error: Error | null;
-} & RouteComponentProps<{orgId: string}, {}>;
+function ProjectCardList({projects}: {projects: Project[]}) {
+  const organization = useOrganization();
+  const hasProjectAccess = organization.access.includes('project:read');
 
-function Dashboard({teams, params, organization, loadingTeams, error}: Props) {
+  // By default react-lazyload will only check for intesecting components on scroll
+  // This forceCheck call is necessary to recalculate when filtering projects
+  useEffect(() => {
+    forceCheck();
+  }, [projects]);
+
+  return (
+    <ProjectCards>
+      {sortProjects(projects).map(project => (
+        <LazyLoad
+          debounce={50}
+          height={330}
+          offset={400}
+          unmountIfInvisible
+          key={project.slug}
+        >
+          <ProjectCard
+            data-test-id={project.slug}
+            project={project}
+            hasProjectAccess={hasProjectAccess}
+          />
+        </LazyLoad>
+      ))}
+    </ProjectCards>
+  );
+}
+
+function addProjectsToTeams(teams: Team[], projects: Project[]): TeamWithProjects[] {
+  return teams.map(team => ({
+    ...team,
+    projects: projects.filter(project => project.teams.some(tm => tm.id === team.id)),
+  }));
+}
+
+function Dashboard() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const organization = useOrganization();
   useEffect(() => {
     return function cleanup() {
       ProjectsStatsStore.reset();
     };
   }, []);
+  const {teams: userTeams, isLoading: loadingTeams, isError} = useUserTeams();
+  const isAllTeams = location.query.team === '';
+  const selectedTeams = getTeamParams(location.query.team ?? 'myteams');
+  const {teams: allTeams} = useTeamsById({
+    ids: selectedTeams.filter(team => team !== 'myteams'),
+  });
+  const user = useUser();
+  const [projectQuery, setProjectQuery] = useState('');
+  const debouncedSearchQuery = useMemo(
+    () => debounce(handleSearch, DEFAULT_DEBOUNCE_DURATION),
+    []
+  );
+  const {projects, fetching, fetchError} = useProjects();
 
-  if (loadingTeams) {
+  const showNonMemberProjects = useMemo(() => {
+    const isOrgAdminOrManager =
+      organization.orgRole === 'owner' || organization.orgRole === 'manager';
+    const isOpenMembership = organization.features.includes('open-membership');
+
+    return user.isSuperuser || isOrgAdminOrManager || isOpenMembership;
+  }, [user, organization.orgRole, organization.features]);
+
+  if (loadingTeams || fetching) {
     return <LoadingIndicator />;
   }
 
-  if (error) {
+  if (isError || fetchError) {
     return <LoadingError message={t('An error occurred while fetching your projects')} />;
   }
 
-  const filteredTeams = teams.filter(team => team.projects.length);
-  filteredTeams.sort((team1, team2) => team1.slug.localeCompare(team2.slug));
+  const includeMyTeams = isAllTeams || selectedTeams.some(team => team === 'myteams');
+  const hasOtherTeams = selectedTeams.some(team => team !== 'myteams');
+  const myTeams = includeMyTeams ? userTeams : [];
+  const otherTeams = isAllTeams
+    ? allTeams
+    : hasOtherTeams
+      ? allTeams.filter(team => selectedTeams.includes(`${team.id}`))
+      : [];
+  const filteredTeams = [...myTeams, ...otherTeams].filter(team => {
+    if (showNonMemberProjects) {
+      return true;
+    }
 
-  const projects = uniqBy(flatten(teams.map(teamObj => teamObj.projects)), 'id');
-  const favorites = projects.filter(project => project.isBookmarked);
+    return team.isMember;
+  });
+  const filteredTeamsWithProjects = addProjectsToTeams(filteredTeams, projects);
 
-  const canCreateProjects = organization.access.includes('project:admin');
-  const hasTeamAdminAccess = organization.access.includes('team:admin');
+  const currentProjects = uniqBy(
+    filteredTeamsWithProjects.flatMap(team => team.projects),
+    'id'
+  );
+  setGroupedEntityTag('projects.total', 1000, projects.length);
 
-  const showEmptyMessage = projects.length === 0 && favorites.length === 0;
-  const showResources = projects.length === 1 && !projects[0].firstEvent;
+  const filteredProjects = currentProjects.filter(project =>
+    project.slug.includes(projectQuery)
+  );
 
-  if (showEmptyMessage) {
-    return (
-      <NoProjectMessage organization={organization} superuserNeedsToBeProjectMember />
-    );
+  const showResources = projects.length === 1 && !projects[0]!.firstEvent;
+
+  const canJoinTeam = organization.access.includes('team:read');
+  const canUserCreateProject = canCreateProject(organization);
+
+  function handleSearch(searchQuery: string) {
+    setProjectQuery(searchQuery);
+  }
+
+  function handleChangeFilter(activeFilters: string[]) {
+    navigate({
+      pathname: location.pathname,
+      query: {
+        ...location.query,
+        team: activeFilters.length > 0 ? activeFilters : '',
+      },
+    });
   }
 
   return (
     <Fragment>
       <SentryDocumentTitle title={t('Projects Dashboard')} orgSlug={organization.slug} />
-      {projects.length > 0 && (
-        <Fragment>
-          <ProjectsHeader>
-            <PageHeading>{t('Projects')}</PageHeading>
-            <Button
-              size="small"
-              disabled={!canCreateProjects}
+      <Layout.Header>
+        <Layout.HeaderContent>
+          <Layout.Title>
+            {t('Projects')}
+            <PageHeadingQuestionTooltip
+              docsUrl="https://docs.sentry.io/product/projects/"
+              title={t(
+                "A high-level overview of errors, transactions, and deployments filtered by teams you're part of."
+              )}
+            />
+          </Layout.Title>
+        </Layout.HeaderContent>
+        <Layout.HeaderActions>
+          <ButtonBar gap={1}>
+            <LinkButton
+              size="sm"
+              icon={<IconUser />}
               title={
-                !canCreateProjects
+                canJoinTeam ? undefined : t('You do not have permission to join a team.')
+              }
+              disabled={!canJoinTeam}
+              to={`/settings/${organization.slug}/teams/`}
+              data-test-id="join-team"
+            >
+              {t('Join a Team')}
+            </LinkButton>
+            <LinkButton
+              size="sm"
+              priority="primary"
+              disabled={!canUserCreateProject}
+              title={
+                !canUserCreateProject
                   ? t('You do not have permission to create projects')
                   : undefined
               }
               to={`/organizations/${organization.slug}/projects/new/`}
-              icon={<IconAdd size="xs" isCircled />}
+              icon={<IconAdd isCircled />}
               data-test-id="create-project"
             >
               {t('Create Project')}
-            </Button>
-          </ProjectsHeader>
-          <Feature organization={organization} features={['team-insights']}>
-            <TabsWrapper>
-              <TeamInsightsHeaderTabs organization={organization} activeTab="projects" />
-            </TabsWrapper>
-          </Feature>
-        </Fragment>
-      )}
+            </LinkButton>
+          </ButtonBar>
+        </Layout.HeaderActions>
+      </Layout.Header>
+      <Layout.Body>
+        <Layout.Main fullWidth>
+          <SearchAndSelectorWrapper>
+            <TeamFilter
+              selectedTeams={selectedTeams}
+              handleChangeFilter={handleChangeFilter}
+              hideUnassigned
+              hideOtherTeams={!showNonMemberProjects}
+            />
+            <StyledSearchBar
+              defaultQuery=""
+              placeholder={t('Search for projects by name')}
+              onChange={debouncedSearchQuery}
+              query={projectQuery}
+            />
+          </SearchAndSelectorWrapper>
 
-      {filteredTeams.map((team, index) => (
-        <LazyLoad key={team.slug} once debounce={50} height={300} offset={300}>
-          <TeamSection
-            orgId={params.orgId}
-            team={team}
-            showBorder={index !== teams.length - 1}
-            title={
-              hasTeamAdminAccess ? (
-                <TeamLink to={`/settings/${organization.slug}/teams/${team.slug}/`}>
-                  <IdBadge team={team} avatarSize={22} />
-                </TeamLink>
-              ) : (
-                <IdBadge team={team} avatarSize={22} />
-              )
-            }
-            projects={sortProjects(team.projects)}
-            access={new Set(organization.access)}
-          />
-        </LazyLoad>
-      ))}
+          <Profiler id="ProjectCardList" onRender={onRenderCallback}>
+            <ProjectCardList projects={filteredProjects} />
+          </Profiler>
+        </Layout.Main>
+      </Layout.Body>
       {showResources && <Resources organization={organization} />}
     </Fragment>
   );
 }
 
-const OrganizationDashboard = (props: Props) => (
-  <OrganizationDashboardWrapper>
-    <Dashboard {...props} />
-  </OrganizationDashboardWrapper>
-);
+function OrganizationDashboard() {
+  const organization = useOrganization();
+  return (
+    <Layout.Page>
+      <NoProjectMessage organization={organization}>
+        <Dashboard />
+      </NoProjectMessage>
+    </Layout.Page>
+  );
+}
 
-const TeamLink = styled(Link)`
+const SearchAndSelectorWrapper = styled('div')`
   display: flex;
-  align-items: center;
+  gap: ${space(2)};
+  justify-content: flex-end;
+  align-items: flex-end;
+  margin-bottom: ${space(2)};
+
+  @media (max-width: ${p => p.theme.breakpoints.small}) {
+    display: block;
+  }
+
+  @media (min-width: ${p => p.theme.breakpoints.xlarge}) {
+    display: flex;
+  }
 `;
 
-const ProjectsHeader = styled('div')`
-  padding: ${space(3)} ${space(4)} 0 ${space(4)};
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+const StyledSearchBar = styled(SearchBar)`
+  flex-grow: 1;
+
+  @media (max-width: ${p => p.theme.breakpoints.small}) {
+    margin-top: ${space(1)};
+  }
 `;
 
-const TabsWrapper = styled('div')`
-  padding: ${space(2)} ${space(4)} ${space(1)} ${space(4)};
+const ProjectCards = styled('div')`
+  display: grid;
+  gap: ${space(3)};
+  grid-template-columns: repeat(auto-fill, minmax(1fr, 400px));
+
+  @media (min-width: ${p => p.theme.breakpoints.small}) {
+    grid-template-columns: repeat(auto-fill, minmax(470px, 1fr));
+  }
+
+  @media (min-width: ${p => p.theme.breakpoints.medium}) {
+    grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
+  }
 `;
 
-const OrganizationDashboardWrapper = styled('div')`
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-`;
-
-export {Dashboard};
-export default withApi(
-  withOrganization(withTeamsForUser(withProfiler(OrganizationDashboard)))
-);
+export default withProfiler(OrganizationDashboard);

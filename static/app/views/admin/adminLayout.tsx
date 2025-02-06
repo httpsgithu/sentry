@@ -1,12 +1,13 @@
-import * as React from 'react';
-import DocumentTitle from 'react-document-title';
-import {RouteComponentProps} from 'react-router';
 import styled from '@emotion/styled';
 
-import SettingsLayout from 'app/views/settings/components/settingsLayout';
-import SettingsNavigation from 'app/views/settings/components/settingsNavigation';
+import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
+import {t} from 'sentry/locale';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import {BreadcrumbProvider} from 'sentry/views/settings/components/settingsBreadcrumb/context';
+import SettingsLayout from 'sentry/views/settings/components/settingsLayout';
+import SettingsNavigation from 'sentry/views/settings/components/settingsNavigation';
 
-const AdminNavigation = () => (
+const renderAdminNavigation = () => (
   <SettingsNavigation
     stickyTop="0"
     navigationObjects={[
@@ -42,13 +43,15 @@ type Props = {
 
 function AdminLayout({children, ...props}: Props) {
   return (
-    <DocumentTitle title="Sentry Admin">
+    <SentryDocumentTitle noSuffix title={t('Sentry Admin')}>
       <Page>
-        <SettingsLayout renderNavigation={AdminNavigation} {...props}>
-          {children}
-        </SettingsLayout>
+        <BreadcrumbProvider>
+          <SettingsLayout renderNavigation={renderAdminNavigation} {...props}>
+            {children}
+          </SettingsLayout>
+        </BreadcrumbProvider>
       </Page>
-    </DocumentTitle>
+    </SentryDocumentTitle>
   );
 }
 
@@ -57,5 +60,4 @@ export default AdminLayout;
 const Page = styled('div')`
   display: flex;
   flex-grow: 1;
-  margin-bottom: -20px;
 `;

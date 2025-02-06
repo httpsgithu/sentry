@@ -1,11 +1,10 @@
-import styled from '@emotion/styled';
+import {SecondaryNav} from 'sentry/components/nav/secondary';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import replaceRouterParams from 'sentry/utils/replaceRouterParams';
+import SettingsNavItem from 'sentry/views/settings/components/settingsNavItem';
+import type {NavigationGroupProps} from 'sentry/views/settings/types';
 
-import {trackAnalyticsEvent} from 'app/utils/analytics';
-import replaceRouterParams from 'app/utils/replaceRouterParams';
-import SettingsNavItem from 'app/views/settings/components/settingsNavItem';
-import {NavigationGroupProps} from 'app/views/settings/types';
-
-const SettingsNavigationGroup = (props: NavigationGroupProps) => {
+function SettingsNavigationGroup(props: NavigationGroupProps) {
   const {organization, project, name, items} = props;
 
   const navLinks = items.map(({path, title, index, show, badge, id, recordAnalytics}) => {
@@ -23,12 +22,10 @@ const SettingsNavigationGroup = (props: NavigationGroupProps) => {
 
     const handleClick = () => {
       // only call the analytics event if the URL is changing
-      if (recordAnalytics && to !== window.location.pathname) {
-        trackAnalyticsEvent({
-          organization_id: organization ? organization.id : null,
-          project_id: project && project.id,
-          eventName: 'Sidebar Item Clicked',
-          eventKey: 'sidebar.item_clicked',
+      if (recordAnalytics && to !== window.location.pathname && organization) {
+        trackAnalytics('sidebar.item_clicked', {
+          organization,
+          project_id: project?.id,
           sidebar_item_id: id,
           dest: path,
         });
@@ -52,24 +49,7 @@ const SettingsNavigationGroup = (props: NavigationGroupProps) => {
     return null;
   }
 
-  return (
-    <NavSection data-test-id={name}>
-      <SettingsHeading>{name}</SettingsHeading>
-      {navLinks}
-    </NavSection>
-  );
-};
-
-const NavSection = styled('div')`
-  margin-bottom: 20px;
-`;
-
-const SettingsHeading = styled('div')`
-  color: ${p => p.theme.subText};
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  margin-bottom: 20px;
-`;
+  return <SecondaryNav.Section title={name}>{navLinks}</SecondaryNav.Section>;
+}
 
 export default SettingsNavigationGroup;

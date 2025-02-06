@@ -1,24 +1,22 @@
-import * as React from 'react';
+import type {Theme} from '@emotion/react';
 import {css} from '@emotion/react';
 import styled from '@emotion/styled';
 
-import {Theme} from 'app/utils/theme';
-
 import SidebarMenuItemLink from './sidebarMenuItemLink';
-import {OrgSummary} from './sidebarOrgSummary';
+import SidebarOrgSummary from './sidebarOrgSummary';
 
 type Props = {
   children: React.ReactNode;
 } & React.ComponentProps<typeof SidebarMenuItemLink>;
 
-const SidebarMenuItem = ({to, children, href, ...props}: Props) => {
+function SidebarMenuItem({to, children, href, ...props}: Props) {
   const hasMenu = !to && !href;
   return (
     <StyledSidebarMenuItemLink to={to} href={href} {...props}>
       <MenuItemLabel hasMenu={hasMenu}>{children}</MenuItemLabel>
     </StyledSidebarMenuItemLink>
   );
-};
+}
 
 const menuItemStyles = (
   p: Omit<React.ComponentProps<typeof SidebarMenuItemLink>, 'children'> & {theme: Theme}
@@ -35,13 +33,13 @@ const menuItemStyles = (
 
   &:hover,
   &:active,
-  &.focus-visible {
+  &:focus-visible {
     background: ${p.theme.backgroundSecondary};
     color: ${p.theme.textColor};
     outline: none;
   }
 
-  ${OrgSummary} {
+  ${SidebarOrgSummary} {
     padding-left: 0;
     padding-right: 0;
   }

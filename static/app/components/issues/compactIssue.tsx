@@ -1,74 +1,70 @@
 import {Component, Fragment} from 'react';
 import styled from '@emotion/styled';
 
-import {bulkUpdate} from 'app/actionCreators/group';
-import {addLoadingMessage, clearIndicators} from 'app/actionCreators/indicator';
-import {Client} from 'app/api';
-import EventOrGroupTitle from 'app/components/eventOrGroupTitle';
-import ErrorLevel from 'app/components/events/errorLevel';
-import Link from 'app/components/links/link';
-import {PanelItem} from 'app/components/panels';
-import {IconChat, IconMute, IconStar} from 'app/icons';
-import {t} from 'app/locale';
-import GroupStore from 'app/stores/groupStore';
-import space from 'app/styles/space';
-import {BaseGroup, Organization} from 'app/types';
-import {getMessage} from 'app/utils/events';
-import {Aliases} from 'app/utils/theme';
-import withApi from 'app/utils/withApi';
-import withOrganization from 'app/utils/withOrganization';
+import {bulkUpdate} from 'sentry/actionCreators/group';
+import {addLoadingMessage, clearIndicators} from 'sentry/actionCreators/indicator';
+import type {Client} from 'sentry/api';
+import EventOrGroupTitle from 'sentry/components/eventOrGroupTitle';
+import ErrorLevel from 'sentry/components/events/errorLevel';
+import Link from 'sentry/components/links/link';
+import PanelItem from 'sentry/components/panels/panelItem';
+import {IconChat, IconMute, IconStar} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import GroupStore from 'sentry/stores/groupStore';
+import {space} from 'sentry/styles/space';
+import type {BaseGroup} from 'sentry/types/group';
+import type {Organization} from 'sentry/types/organization';
+import {getMessage} from 'sentry/utils/events';
+import type {Aliases} from 'sentry/utils/theme';
+import withApi from 'sentry/utils/withApi';
+import withOrganization from 'sentry/utils/withOrganization';
 
 type HeaderProps = {
-  organization: Organization;
-  projectId: string;
   data: BaseGroup;
+  organization: Organization;
   eventId?: string;
 };
 
-class CompactIssueHeader extends Component<HeaderProps> {
-  render() {
-    const {data, organization, projectId, eventId} = this.props;
+function CompactIssueHeader({data, organization, eventId}: HeaderProps) {
+  const basePath = `/organizations/${organization.slug}/issues/`;
 
-    const basePath = `/organizations/${organization.slug}/issues/`;
+  const issueLink = eventId
+    ? `${basePath}${data.id}/events/${eventId}/?referrer=compact-issue`
+    : `${basePath}${data.id}/?referrer=compact-issue`;
 
-    const issueLink = eventId
-      ? `/organizations/${organization.slug}/projects/${projectId}/events/${eventId}/`
-      : `${basePath}${data.id}/`;
+  const commentColor: keyof Aliases =
+    data.subscriptionDetails && data.subscriptionDetails.reason === 'mentioned'
+      ? 'success'
+      : 'textColor';
 
-    const commentColor: keyof Aliases =
-      data.subscriptionDetails && data.subscriptionDetails.reason === 'mentioned'
-        ? 'success'
-        : 'textColor';
-
-    return (
-      <Fragment>
-        <IssueHeaderMetaWrapper>
-          <StyledErrorLevel size="12px" level={data.level} title={data.level} />
-          <h3 className="truncate">
-            <IconLink to={issueLink || ''}>
-              {data.status === 'ignored' && <IconMute size="xs" />}
-              {data.isBookmarked && <IconStar isSolid size="xs" />}
-              <EventOrGroupTitle data={data} />
+  return (
+    <Fragment>
+      <IssueHeaderMetaWrapper>
+        <StyledErrorLevel size="12px" level={data.level} />
+        <h3 className="truncate">
+          <IconLink to={issueLink || ''}>
+            {data.status === 'ignored' && <IconMute size="xs" />}
+            {data.isBookmarked && <IconStar isSolid size="xs" />}
+            <EventOrGroupTitle data={data} />
+          </IconLink>
+        </h3>
+      </IssueHeaderMetaWrapper>
+      <div className="event-extra">
+        <span className="project-name">
+          <strong>{data.project.slug}</strong>
+        </span>
+        {data.numComments !== 0 && (
+          <span>
+            <IconLink to={`${basePath}${data.id}/activity/`} className="comments">
+              <IconChat size="xs" color={commentColor} />
+              <span className="tag-count">{data.numComments}</span>
             </IconLink>
-          </h3>
-        </IssueHeaderMetaWrapper>
-        <div className="event-extra">
-          <span className="project-name">
-            <strong>{data.project.slug}</strong>
           </span>
-          {data.numComments !== 0 && (
-            <span>
-              <IconLink to={`${basePath}${data.id}/activity/`} className="comments">
-                <IconChat size="xs" color={commentColor} />
-                <span className="tag-count">{data.numComments}</span>
-              </IconLink>
-            </span>
-          )}
-          <span className="culprit">{getMessage(data)}</span>
-        </div>
-      </Fragment>
-    );
-  }
+        )}
+        <span className="culprit">{getMessage(data)}</span>
+      </div>
+    </Fragment>
+  );
 }
 
 type GroupTypes = ReturnType<typeof GroupStore.get>;
@@ -86,8 +82,9 @@ type Props = {
   api: Client;
   id: string;
   organization: Organization;
-  eventId?: string;
+  children?: React.ReactNode;
   data?: BaseGroup;
+  eventId?: string;
 };
 
 type State = {
@@ -99,7 +96,7 @@ class CompactIssue extends Component<Props, State> {
     issue: this.props.data || GroupStore.get(this.props.id),
   };
 
-  componentWillReceiveProps(nextProps: Props) {
+  UNSAFE_componentWillReceiveProps(nextProps: Props) {
     if (nextProps.id !== this.props.id) {
       this.setState({
         issue: GroupStore.get(this.props.id),
@@ -176,7 +173,6 @@ class CompactIssue extends Component<Props, State> {
         <CompactIssueHeader
           data={issue}
           organization={organization}
-          projectId={issue.project.slug}
           eventId={this.props.eventId}
         />
         {this.props.children}
@@ -185,7 +181,6 @@ class CompactIssue extends Component<Props, State> {
   }
 }
 
-export {CompactIssue};
 export default withApi(withOrganization(CompactIssue));
 
 const IssueHeaderMetaWrapper = styled('div')`

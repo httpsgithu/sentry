@@ -17,7 +17,7 @@ will then be regenerated, and you should be able to merge without conflicts.
 
 
 # We check that the latest migration is the one stored in the lockfile
-def validate(migrations_filepath, latest_migration_by_app):
+def validate(migrations_filepath: str, latest_migration_by_app: dict[str, str]) -> None:
     infile = {}
     with open(migrations_filepath, encoding="utf-8") as file:
         for line in file:
@@ -29,7 +29,7 @@ def validate(migrations_filepath, latest_migration_by_app):
 
     for app_label, name in sorted(latest_migration_by_app.items()):
         if infile[app_label] != name:
-            print(  # noqa: B314
+            print(  # noqa: S002
                 f"ERROR: The latest migration does not match the one in the lockfile -> `{app_label}` app: {name} vs {infile[app_label]}"
             )
             # makemigrations.Command --check exits with 1 if a migration needs to be generated
@@ -52,7 +52,7 @@ class Command(makemigrations.Command):
         super().handle(*app_labels, **options)
         loader = MigrationLoader(None, ignore_no_migrations=True)
 
-        latest_migration_by_app = {}
+        latest_migration_by_app: dict[str, str] = {}
         for migration in loader.disk_migrations.values():
             name = migration.name
             app_label = migration.app_label
@@ -71,7 +71,7 @@ class Command(makemigrations.Command):
         if options.get("check_changes"):
             validate(migrations_filepath, latest_migration_by_app)
         else:
-            result = "\n".join(
+            result = "\n\n".join(
                 f"{app_label}: {name}"
                 for app_label, name in sorted(latest_migration_by_app.items())
             )

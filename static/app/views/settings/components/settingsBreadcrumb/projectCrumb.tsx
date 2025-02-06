@@ -1,38 +1,38 @@
-import {browserHistory, RouteComponentProps} from 'react-router';
 import styled from '@emotion/styled';
 
-import IdBadge from 'app/components/idBadge';
-import LoadingIndicator from 'app/components/loadingIndicator';
-import space from 'app/styles/space';
-import {Organization, Project} from 'app/types';
-import recreateRoute from 'app/utils/recreateRoute';
-import replaceRouterParams from 'app/utils/replaceRouterParams';
-import withLatestContext from 'app/utils/withLatestContext';
-import withProjects from 'app/utils/withProjects';
-import BreadcrumbDropdown from 'app/views/settings/components/settingsBreadcrumb/breadcrumbDropdown';
-import findFirstRouteWithoutRouteParam from 'app/views/settings/components/settingsBreadcrumb/findFirstRouteWithoutRouteParam';
-import MenuItem from 'app/views/settings/components/settingsBreadcrumb/menuItem';
+import IdBadge from 'sentry/components/idBadge';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import {space} from 'sentry/styles/space';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import recreateRoute from 'sentry/utils/recreateRoute';
+import replaceRouterParams from 'sentry/utils/replaceRouterParams';
+import {useNavigate} from 'sentry/utils/useNavigate';
+import useProjects from 'sentry/utils/useProjects';
+import withLatestContext from 'sentry/utils/withLatestContext';
 
-import {RouteWithName} from './types';
+import BreadcrumbDropdown from './breadcrumbDropdown';
+import findFirstRouteWithoutRouteParam from './findFirstRouteWithoutRouteParam';
+import MenuItem from './menuItem';
 import {CrumbLink} from '.';
 
 type Props = RouteComponentProps<{projectId?: string}, {}> & {
   organization: Organization;
   project: Project;
   projects: Project[];
-  routes: RouteWithName[];
-  route: RouteWithName;
 };
 
-const ProjectCrumb = ({
+function ProjectCrumb({
   organization: latestOrganization,
   project: latestProject,
-  projects,
   params,
   routes,
   route,
   ...props
-}: Props) => {
+}: Props) {
+  const navigate = useNavigate();
+  const {projects} = useProjects();
   const handleSelect = (item: {value: string}) => {
     // We have to make exceptions for routes like "Project Alerts Rule Edit" or "Client Key Details"
     // Since these models are project specific, we need to traverse up a route when switching projects
@@ -48,7 +48,7 @@ const ProjectCrumb = ({
       return;
     }
 
-    browserHistory.push(
+    navigate(
       recreateRoute(returnTo, {routes, params: {...params, projectId: item.value}})
     );
   };
@@ -100,10 +100,10 @@ const ProjectCrumb = ({
       {...props}
     />
   );
-};
+}
 
 export {ProjectCrumb};
-export default withProjects(withLatestContext(ProjectCrumb));
+export default withLatestContext(ProjectCrumb);
 
 // Set height of crumb because of spinner
 const SPINNER_SIZE = '24px';

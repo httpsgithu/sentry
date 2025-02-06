@@ -1,8 +1,11 @@
 from uuid import uuid1
 
-from sentry.models import Commit, GroupLink, GroupResolution, ReleaseCommit, Repository
-from sentry.testutils import APITestCase, SnubaTestCase
-from sentry.utils.compat import map
+from sentry.models.commit import Commit
+from sentry.models.grouplink import GroupLink
+from sentry.models.groupresolution import GroupResolution
+from sentry.models.releasecommit import ReleaseCommit
+from sentry.models.repository import Repository
+from sentry.testutils.cases import APITestCase, SnubaTestCase
 
 
 class OrganizationIssuesResolvedInReleaseEndpointTest(APITestCase, SnubaTestCase):
@@ -62,7 +65,7 @@ class OrganizationIssuesResolvedInReleaseEndpointTest(APITestCase, SnubaTestCase
         if environment_names:
             params["environment"] = environment_names
 
-        response = self.get_valid_response(self.org.slug, self.release.version, **params)
+        response = self.get_success_response(self.org.slug, self.release.version, **params)
         assert len(response.data) == len(expected_groups)
         expected = set(map(str, [g.id for g in expected_groups]))
         assert {item["id"] for item in response.data} == expected

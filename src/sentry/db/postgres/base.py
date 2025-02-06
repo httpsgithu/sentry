@@ -2,18 +2,18 @@ import psycopg2 as Database
 
 # Some of these imports are unused, but they are inherited from other engines
 # and should be available as part of the backend ``base.py`` namespace.
-from django.db.backends.postgresql_psycopg2.base import DatabaseWrapper
+from django.db.backends.postgresql.base import DatabaseWrapper as DjangoDatabaseWrapper
+from django.db.backends.postgresql.operations import DatabaseOperations
 
 from sentry.utils.strings import strip_lone_surrogates
 
-from .creation import SentryDatabaseCreation
 from .decorators import (
     auto_reconnect_connection,
     auto_reconnect_cursor,
     capture_transaction_exceptions,
-    less_shitty_error_messages,
+    more_better_error_messages,
 )
-from .operations import DatabaseOperations
+from .schema import DatabaseSchemaEditorProxy
 
 __all__ = ("DatabaseWrapper",)
 
@@ -45,9 +45,17 @@ def remove_surrogates(value):
 
 
 def clean_bad_params(params):
+    # Support dictionary of parameters for %(key)s placeholders
+    # in raw SQL queries.
+    if isinstance(params, dict):
+        for key, param in params.items():
+            if isinstance(param, (str, bytes)):
+                params[key] = remove_null(remove_surrogates(param))
+        return params
+
     params = list(params)
     for idx, param in enumerate(params):
-        if isinstance(param, ((str,), bytes)):
+        if isinstance(param, (str, bytes)):
             params[idx] = remove_null(remove_surrogates(param))
     return params
 
@@ -70,7 +78,7 @@ class CursorWrapper:
 
     @capture_transaction_exceptions
     @auto_reconnect_cursor
-    @less_shitty_error_messages
+    @more_better_error_messages
     def execute(self, sql, params=None):
         if params is not None:
             return self.cursor.execute(sql, clean_bad_params(params))
@@ -78,13 +86,14 @@ class CursorWrapper:
 
     @capture_transaction_exceptions
     @auto_reconnect_cursor
-    @less_shitty_error_messages
+    @more_better_error_messages
     def executemany(self, sql, paramlist=()):
         return self.cursor.executemany(sql, paramlist)
 
 
-class DatabaseWrapper(DatabaseWrapper):
-    creation_class = SentryDatabaseCreation
+class DatabaseWrapper(DjangoDatabaseWrapper):
+    SchemaEditorClass = DatabaseSchemaEditorProxy
+    queries_limit = 15000
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

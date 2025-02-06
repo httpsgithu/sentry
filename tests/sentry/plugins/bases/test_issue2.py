@@ -1,11 +1,17 @@
-from sentry.models import GroupMeta, User
+from unittest import mock
+
+import pytest
+
+from sentry.models.groupmeta import GroupMeta
 from sentry.plugins.base import plugins
-from sentry.plugins.bases import IssueTrackingPlugin2
-from sentry.testutils import TestCase
-from sentry.testutils.helpers.datetime import before_now, iso_format
+from sentry.plugins.bases.issue2 import IssueTrackingPlugin2
+from sentry.testutils.cases import TestCase
+from sentry.testutils.helpers.datetime import before_now
+from sentry.testutils.skips import requires_snuba
+from sentry.users.models.user import User
 from sentry.utils import json
-from sentry.utils.compat import mock
-from social_auth.models import UserSocialAuth
+
+pytestmark = [requires_snuba]
 
 
 class PluginWithFields(IssueTrackingPlugin2):
@@ -21,11 +27,6 @@ class PluginWithoutFields(IssueTrackingPlugin2):
 
 
 class IssueTrackingPlugin2Test(TestCase):
-    def test_issue_label_as_dict(self):
-        plugin = PluginWithFields()
-        result = plugin.get_issue_label(mock.Mock(), {"id": "1"})
-        assert result == "#1"
-
     def test_issue_label_legacy(self):
         plugin = PluginWithoutFields()
         result = plugin.get_issue_label(mock.Mock(), "1")
@@ -55,20 +56,22 @@ class GetAuthForUserTest(TestCase):
     def test_requires_auth_provider(self):
         user = self._get_mock_user()
         p = IssueTrackingPlugin2()
-        self.assertRaises(AssertionError, p.get_auth_for_user, user)
+        pytest.raises(AssertionError, p.get_auth_for_user, user)
 
     def test_returns_none_on_missing_identity(self):
         user = self._get_mock_user()
         p = IssueTrackingPlugin2()
         p.auth_provider = "test"
-        self.assertEquals(p.get_auth_for_user(user), None)
+        self.assertEqual(p.get_auth_for_user(user), None)
 
     def test_returns_identity(self):
-        user = User.objects.create(username="test", email="test@example.com")
-        auth = UserSocialAuth.objects.create(provider="test", user=user)
+        user = self.create_user(username="test", email="test@example.com")
+        auth = self.create_usersocialauth(user=user, provider="test")
         p = IssueTrackingPlugin2()
         p.auth_provider = "test"
-        self.assertEquals(p.get_auth_for_user(user), auth)
+        got_auth = p.get_auth_for_user(user)
+        assert got_auth is not None
+        assert got_auth.id == auth.id
 
 
 class IssuePlugin2GroupActionTest(TestCase):
@@ -76,7 +79,7 @@ class IssuePlugin2GroupActionTest(TestCase):
         super().setUp()
         self.project = self.create_project()
         self.plugin_instance = plugins.get(slug="issuetrackingplugin2")
-        min_ago = iso_format(before_now(minutes=1))
+        min_ago = before_now(minutes=1).isoformat()
         self.event = self.store_event(
             data={"timestamp": min_ago, "fingerprint": ["group-1"]}, project_id=self.project.id
         )
@@ -148,6 +151,6 @@ class IssuePlugin2GroupActionTest(TestCase):
         url = "/api/0/issues/%s/plugins/issuetrackingplugin2/create/" % group.id
         response = self.client.get(url, format="json")
         assert response.status_code == 400
-        assert response.data == {
+        assert response.json() == {
             "message": "Unable to create issues: there are " "no events associated with this group"
         }

@@ -1,31 +1,31 @@
-import * as React from 'react';
-import {keyframes, withTheme} from '@emotion/react';
+import {forwardRef, useMemo} from 'react';
+import {keyframes, useTheme} from '@emotion/react';
 import styled from '@emotion/styled';
 
-import {uniqueId} from 'app/utils/guid';
-import {Theme} from 'app/utils/theme';
+import {uniqueId} from 'sentry/utils/guid';
 
-import SvgIcon from './svgIcon';
+import type {SVGIconProps} from './svgIcon';
+import {SvgIcon} from './svgIcon';
 
 type WrappedProps = {
-  forwardRef: React.Ref<SVGSVGElement>;
-  theme: Theme;
+  forwardedRef: React.Ref<SVGSVGElement>;
 } & Props;
 
 function IconBusinessComponent({
   gradient = false,
   withShine = false,
-  forwardRef,
-  theme,
+  forwardedRef,
   ...props
 }: WrappedProps) {
-  const uid = React.useMemo(() => uniqueId(), []);
+  const theme = useTheme();
+
+  const uid = useMemo(() => uniqueId(), []);
   const maskId = `icon-business-mask-${uid}`;
   const gradientId = `icon-business-gradient-${uid}`;
   const shineId = `icon-business-shine-${uid}`;
 
   return (
-    <SvgIcon {...props} ref={forwardRef}>
+    <SvgIcon {...props} ref={forwardedRef}>
       <mask id={maskId}>
         <path
           fill="white"
@@ -42,7 +42,7 @@ function IconBusinessComponent({
         <stop offset="100%" stopColor="rgba(255, 255, 255, 0)" />
       </linearGradient>
       <rect
-        fill={gradient ? `url(#${gradientId})` : 'currentColor'}
+        fill={gradient ? `url(#${gradientId})` : 'inherit'}
         mask={`url(#${maskId})`}
         height="100%"
         width="100%"
@@ -57,9 +57,7 @@ function IconBusinessComponent({
   );
 }
 
-const ThemedIconBusiness = withTheme(IconBusinessComponent);
-
-type Props = {
+interface Props extends SVGIconProps {
   /**
    * Renders a pink purple gradient on the icon
    */
@@ -69,10 +67,10 @@ type Props = {
    * Adds an animated shine to the icon
    */
   withShine?: boolean;
-} & React.ComponentProps<typeof SvgIcon>;
+}
 
-const IconBusiness = React.forwardRef((props: Props, ref: React.Ref<SVGSVGElement>) => (
-  <ThemedIconBusiness {...props} forwardRef={ref} />
+const IconBusiness = forwardRef<SVGSVGElement, Props>((props, ref) => (
+  <IconBusinessComponent {...props} forwardedRef={ref} />
 ));
 
 IconBusiness.displayName = 'IconBusiness';

@@ -1,8 +1,8 @@
-import * as React from 'react';
 import styled from '@emotion/styled';
 import classNames from 'classnames';
 
-import ActionButton from './button';
+import {Button} from 'sentry/components/button';
+
 import ConfirmableAction from './confirmableAction';
 
 const StyledAction = styled('a')<{disabled?: boolean}>`
@@ -11,10 +11,17 @@ const StyledAction = styled('a')<{disabled?: boolean}>`
   ${p => p.disabled && 'cursor: not-allowed;'}
 `;
 
-const StyledActionButton = styled(ActionButton)`
+const StyledButton = styled(Button)<{
+  disabled?: boolean;
+  hasDropdown?: boolean;
+}>`
   display: flex;
   align-items: center;
+
   ${p => p.disabled && 'cursor: not-allowed;'}
+  ${p =>
+    p.hasDropdown &&
+    `border-radius: ${p.theme.borderRadius} 0 0 ${p.theme.borderRadius}`};
 `;
 
 type ConfirmableActionProps = React.ComponentProps<typeof ConfirmableAction>;
@@ -23,25 +30,24 @@ type CommonProps = Omit<
   ConfirmableActionProps,
   'onConfirm' | 'confirmText' | 'children' | 'stopPropagation' | 'priority'
 > & {
-  title: string;
-  onAction?: () => void;
-  children?: React.ReactNode;
-  disabled?: boolean;
+  children: React.ReactChild;
   className?: string;
-  shouldConfirm?: boolean;
-  confirmPriority?: ConfirmableActionProps['priority'];
   confirmLabel?: string;
+  confirmPriority?: ConfirmableActionProps['priority'];
+  disabled?: boolean;
+  onAction?: () => void;
+  shouldConfirm?: boolean;
+  title?: string;
 };
 
 type Props = CommonProps &
   ({type?: 'button'} & Partial<
-    Omit<React.ComponentProps<typeof StyledActionButton>, 'as'>
+    Omit<React.ComponentProps<typeof StyledButton>, 'as' | 'children' | 'ref'>
   >);
 
 export default function ActionLink({
   message,
   className,
-  title,
   onAction,
   type,
   confirmLabel,
@@ -53,7 +59,6 @@ export default function ActionLink({
   ...props
 }: Props) {
   const actionCommonProps = {
-    ['aria-label']: title,
     className: classNames(className, {disabled}),
     onClick: disabled ? undefined : onAction,
     disabled,
@@ -63,7 +68,7 @@ export default function ActionLink({
 
   const action =
     type === 'button' ? (
-      <StyledActionButton {...actionCommonProps} />
+      <StyledButton size="xs" {...actionCommonProps} />
     ) : (
       <StyledAction {...actionCommonProps} />
     );

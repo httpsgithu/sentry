@@ -1,10 +1,9 @@
 import {Fragment} from 'react';
 
-import Alert from 'app/components/alert';
-import ExternalLink from 'app/components/links/externalLink';
-import {IconInfo} from 'app/icons';
-import {tct} from 'app/locale';
-import {Project} from 'app/types';
+import {Alert} from 'sentry/components/alert';
+import ExternalLink from 'sentry/components/links/externalLink';
+import {tct} from 'sentry/locale';
+import type {Project} from 'sentry/types/project';
 
 const sentryStatusPageLink = 'https://status.sentry.io/';
 
@@ -16,7 +15,7 @@ type Props = {
 // This alert makes the user aware that one or more projects have been selected for the Low Priority Queue
 function GlobalEventProcessingAlert({className, projects}: Props) {
   const projectsInTheLowPriorityQueue = projects.filter(
-    project => project.eventProcessing.symbolicationDegraded
+    project => project?.eventProcessing?.symbolicationDegraded
   );
 
   if (!projectsInTheLowPriorityQueue.length) {
@@ -24,7 +23,7 @@ function GlobalEventProcessingAlert({className, projects}: Props) {
   }
 
   return (
-    <Alert className={className} type="info" icon={<IconInfo size="sm" />}>
+    <Alert className={className} type="info" showIcon>
       {projectsInTheLowPriorityQueue.length === 1
         ? tct(
             'Event Processing for this project is currently degraded. Events may appear with larger delays than usual or get dropped. Please check the [link:Status] page for a potential outage.',

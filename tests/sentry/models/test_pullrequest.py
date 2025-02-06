@@ -1,8 +1,11 @@
 from hashlib import sha1
 from uuid import uuid4
 
-from sentry.models import Commit, PullRequest, Repository
-from sentry.testutils import TestCase
+from sentry.models.commit import Commit
+from sentry.models.grouphistory import GroupHistory, GroupHistoryStatus
+from sentry.models.pullrequest import PullRequest
+from sentry.models.repository import Repository
+from sentry.testutils.cases import TestCase
 
 
 class FindReferencedGroupsTest(TestCase):
@@ -34,3 +37,7 @@ class FindReferencedGroupsTest(TestCase):
         groups = pr.find_referenced_groups()
         assert len(groups) == 1
         assert group2 in groups
+        assert GroupHistory.objects.filter(
+            group=group2,
+            status=GroupHistoryStatus.SET_RESOLVED_IN_PULL_REQUEST,
+        )

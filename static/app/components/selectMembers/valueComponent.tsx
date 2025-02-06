@@ -1,27 +1,21 @@
-import {Component} from 'react';
-
-import ActorAvatar from 'app/components/avatar/actorAvatar';
-import {Actor} from 'app/types';
+import ActorAvatar from 'sentry/components/avatar/actorAvatar';
+import type {Actor} from 'sentry/types/core';
 
 type Value = {
   actor: Actor;
 };
 
 type Props = {
-  value: Value;
   onRemove: (value: Value) => void;
+  value: Value;
 };
 
-export default class ValueComponent extends Component<Props> {
-  handleClick = () => {
-    this.props.onRemove(this.props.value);
-  };
-
-  render() {
-    return (
-      <a onClick={this.handleClick}>
-        <ActorAvatar actor={this.props.value.actor} size={28} />
-      </a>
-    );
-  }
+function ValueComponent({value, onRemove}: Props) {
+  return (
+    <a onClick={() => onRemove(value)}>
+      <ActorAvatar actor={value.actor} size={28} />
+    </a>
+  );
 }
+
+export default ValueComponent;

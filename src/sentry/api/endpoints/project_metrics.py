@@ -1,121 +1,131 @@
-from rest_framework.exceptions import ParseError
+from collections.abc import Mapping, Sequence
+from enum import Enum
+from typing import Optional, cast
+
+from rest_framework.request import Request
 from rest_framework.response import Response
 
-from sentry import features
-from sentry.api.bases.project import ProjectEndpoint
-from sentry.api.exceptions import ResourceDoesNotExist
-from sentry.snuba.metrics import (
-    InvalidField,
-    InvalidParams,
-    MockDataSource,
-    QueryDefinition,
-    SnubaDataSource,
+from sentry import audit_log
+from sentry.api.api_owners import ApiOwner
+from sentry.api.api_publish_status import ApiPublishStatus
+from sentry.api.base import region_silo_endpoint
+from sentry.api.bases import ProjectEndpoint
+from sentry.api.serializers import serialize
+from sentry.api.serializers.models.metrics_blocking import MetricBlockingSerializer
+from sentry.exceptions import InvalidParams
+from sentry.models.project import Project
+from sentry.sentry_metrics.visibility import (
+    MalformedBlockedMetricsPayloadError,
+    block_metric,
+    block_tags_of_metric,
+    unblock_metric,
+    unblock_tags_of_metric,
 )
+from sentry.sentry_metrics.visibility.metrics_blocking import MetricBlocking
+from sentry.snuba.metrics.naming_layer.mri import is_mri
+from sentry.utils import metrics
 
 
-def get_datasource(request):
-    if request.GET.get("datasource") == "snuba":
-        return SnubaDataSource()
+class MetricOperationType(Enum):
+    BLOCK_METRIC = "blockMetric"
+    BLOCK_TAGS = "blockTags"
+    UNBLOCK_METRIC = "unblockMetric"
+    UNBLOCK_TAGS = "unblockTags"
 
-    return MockDataSource()
+    @classmethod
+    def from_request(cls, request: Request) -> Optional["MetricOperationType"]:
+        operation_type = request.data.get("operationType")
+        if not operation_type:
+            return None
 
+        for operation in cls:
+            if operation.value == operation_type:
+                return operation
 
-class ProjectMetricsEndpoint(ProjectEndpoint):
-    """Get metric name, available operations and the metric unit"""
+        return None
 
-    def get(self, request, project):
-
-        if not features.has("organizations:metrics", project.organization, actor=request.user):
-            return Response(status=404)
-
-        metrics = get_datasource(request).get_metrics(project)
-        return Response(metrics, status=200)
-
-
-class ProjectMetricDetailsEndpoint(ProjectEndpoint):
-    """Get metric name, available operations, metric unit and available tags"""
-
-    def get(self, request, project, metric_name):
-
-        if not features.has("organizations:metrics", project.organization, actor=request.user):
-            return Response(status=404)
-
-        try:
-            metric = get_datasource(request).get_single_metric(project, metric_name)
-        except InvalidParams:
-            raise ResourceDoesNotExist(detail=f"metric '{metric_name}'")
-
-        return Response(metric, status=200)
+    @classmethod
+    def available_ops(cls) -> Sequence[str]:
+        return [operation.value for operation in cls]
 
 
-class ProjectMetricsTagsEndpoint(ProjectEndpoint):
-    """Get list of tag names for this project
+@region_silo_endpoint
+class ProjectMetricsVisibilityEndpoint(ProjectEndpoint):
+    publish_status = {"PUT": ApiPublishStatus.EXPERIMENTAL}
+    owner = ApiOwner.TELEMETRY_EXPERIENCE
 
-    If the ``metric`` query param is provided, only tags for a certain metric
-    are provided.
+    def _get_sanitized_tags(self, request: Request) -> Sequence[str]:
+        tags = request.data.get("tags")
+        if not tags:
+            raise InvalidParams("You must supply at least one tag to block")
 
-    If the ``metric`` query param is provided more than once, the *intersection*
-    of available tags is used.
+        # For now, we want to disallow any glob in the tags, since it might cause issues in Relay.
+        return [tag.replace("*", "") for tag in tags]
 
-    """
+    def _create_audit_log_entry(
+        self, event_id: str, metric_mri: str, tags: Sequence[str] | None, project: Project
+    ):
+        audit_data = {"metric_mri": metric_mri, "project_slug": project.slug}
+        if tags is not None:
+            audit_data["tags"] = tags
 
-    def get(self, request, project):
+        self.create_audit_entry(
+            request=self.request,
+            organization_id=project.organization_id,
+            target_object=project.id,
+            event=audit_log.get_event_id(event_id),
+            data=audit_data,
+        )
 
-        if not features.has("organizations:metrics", project.organization, actor=request.user):
-            return Response(status=404)
+    def _handle_by_operation_type(
+        self, request: Request, project: Project, metric_operation_type: MetricOperationType
+    ) -> MetricBlocking:
+        metric_mri = request.data.get("metricMri")
+        if not is_mri(metric_mri):
+            raise InvalidParams("You must supply a valid metric mri")
 
-        metric_names = request.GET.getlist("metric") or None
+        metric_mri = cast(str, metric_mri)
+        patched_metrics: Mapping[int, MetricBlocking] = {}
 
-        if not features.has("organizations:metrics", project.organization, actor=request.user):
-            return Response(status=404)
+        if metric_operation_type == MetricOperationType.BLOCK_METRIC:
+            patched_metrics = block_metric(metric_mri, [project])
+            self._create_audit_log_entry("METRIC_BLOCK", metric_mri, None, project)
+        elif metric_operation_type == MetricOperationType.UNBLOCK_METRIC:
+            patched_metrics = unblock_metric(metric_mri, [project])
+            self._create_audit_log_entry("METRIC_UNBLOCK", metric_mri, None, project)
+        elif metric_operation_type == MetricOperationType.BLOCK_TAGS:
+            tags = self._get_sanitized_tags(request)
+            patched_metrics = block_tags_of_metric(metric_mri, set(tags), [project])
+            self._create_audit_log_entry("METRIC_TAGS_BLOCK", metric_mri, tags, project)
+        elif metric_operation_type == MetricOperationType.UNBLOCK_TAGS:
+            tags = self._get_sanitized_tags(request)
+            patched_metrics = unblock_tags_of_metric(metric_mri, set(tags), [project])
+            self._create_audit_log_entry("METRIC_TAGS_UNBLOCK", metric_mri, tags, project)
 
-        try:
-            tag_names = get_datasource(request).get_tag_names(project, metric_names)
-        except InvalidParams as exc:
-            raise (ParseError(detail=str(exc)))
+        metrics.incr(
+            key="ddm.metrics_visibility.apply_operation",
+            amount=1,
+            tags={"operation_type": metric_operation_type.value},
+        )
 
-        return Response(tag_names, status=200)
+        return patched_metrics[project.id]
 
-
-class ProjectMetricsTagDetailsEndpoint(ProjectEndpoint):
-    """Get all existing tag values for a metric"""
-
-    def get(self, request, project, tag_name):
-
-        if not features.has("organizations:metrics", project.organization, actor=request.user):
-            return Response(status=404)
-
-        metric_names = request.GET.getlist("metric") or None
-
-        try:
-            tag_values = get_datasource(request).get_tag_values(project, tag_name, metric_names)
-        except InvalidParams as exc:
-            msg = str(exc)
-            # TODO: Use separate error type once we have real data
-            if "Unknown tag" in msg:
-                raise ResourceDoesNotExist(f"tag '{tag_name}'")
-            else:
-                raise ParseError(msg)
-
-        return Response(tag_values, status=200)
-
-
-class ProjectMetricsDataEndpoint(ProjectEndpoint):
-    """Get the time series data for one or more metrics.
-
-    The data can be filtered and grouped by tags.
-    Based on `OrganizationSessionsEndpoint`.
-    """
-
-    def get(self, request, project):
-
-        if not features.has("organizations:metrics", project.organization, actor=request.user):
-            return Response(status=404)
+    def put(self, request: Request, project: Project) -> Response:
+        metric_operation_type = MetricOperationType.from_request(request)
+        if not metric_operation_type:
+            raise InvalidParams(
+                f"You must supply a valid operation, which must be one of {MetricOperationType.available_ops()}"
+            )
 
         try:
-            query = QueryDefinition(request.GET, allow_minute_resolution=False)
-            data = get_datasource(request).get_series(project, query)
-        except (InvalidField, InvalidParams) as exc:
-            raise (ParseError(detail=str(exc)))
+            patched_metric = self._handle_by_operation_type(request, project, metric_operation_type)
+        except MalformedBlockedMetricsPayloadError:
+            # In case one metric fails to be inserted, we abort the entire insertion since the project options are
+            # likely to be corrupted.
+            return Response(
+                {"detail": "The blocked metrics settings are corrupted, try again"}, status=500
+            )
 
-        return Response(data, status=200)
+        return Response(
+            serialize(patched_metric, request.user, MetricBlockingSerializer()), status=200
+        )

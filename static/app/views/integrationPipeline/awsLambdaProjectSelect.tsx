@@ -1,25 +1,25 @@
-import * as React from 'react';
+import {Component, Fragment} from 'react';
 import styled from '@emotion/styled';
 import {Observer} from 'mobx-react';
 import * as qs from 'query-string';
 
-import {addLoadingMessage} from 'app/actionCreators/indicator';
-import Alert from 'app/components/alert';
-import List from 'app/components/list';
-import ListItem from 'app/components/list/listItem';
-import {t} from 'app/locale';
-import space from 'app/styles/space';
-import {Project} from 'app/types';
-import Form from 'app/views/settings/components/forms/form';
-import FormModel from 'app/views/settings/components/forms/model';
-import SentryProjectSelectorField from 'app/views/settings/components/forms/sentryProjectSelectorField';
+import {addLoadingMessage} from 'sentry/actionCreators/indicator';
+import {Alert} from 'sentry/components/alert';
+import SentryProjectSelectorField from 'sentry/components/forms/fields/sentryProjectSelectorField';
+import Form from 'sentry/components/forms/form';
+import FormModel from 'sentry/components/forms/model';
+import List from 'sentry/components/list';
+import ListItem from 'sentry/components/list/listItem';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {Project} from 'sentry/types/project';
 
 import FooterWithButtons from './components/footerWithButtons';
 import HeaderWithHelp from './components/headerWithHelp';
 
 type Props = {projects: Project[]};
 
-export default class AwsLambdaProjectSelect extends React.Component<Props> {
+export default class AwsLambdaProjectSelect extends Component<Props> {
   model = new FormModel();
 
   handleSubmit = (e: React.MouseEvent) => {
@@ -41,10 +41,10 @@ export default class AwsLambdaProjectSelect extends React.Component<Props> {
     const {projects} = this.props;
     // TODO: Add logic if no projects
     return (
-      <React.Fragment>
+      <Fragment>
         <HeaderWithHelp docsUrl="https://docs.sentry.io/product/integrations/cloud-monitoring/aws-lambda/" />
         <StyledList symbol="colored-numeric">
-          <React.Fragment />
+          <Fragment />
           <ListItem>
             <h3>{t('Select a project for your AWS Lambdas')}</h3>
             <Form model={this.model} hideFooter>
@@ -72,7 +72,7 @@ export default class AwsLambdaProjectSelect extends React.Component<Props> {
             />
           )}
         </Observer>
-      </React.Fragment>
+      </Fragment>
     );
   }
 }

@@ -1,18 +1,26 @@
-import exportGlobals from 'app/bootstrap/exportGlobals';
-import {OnSentryInitConfiguration, SentryInitRenderReactComponent} from 'app/types';
+import {createRoot} from 'react-dom/client';
+import throttle from 'lodash/throttle';
+
+import {exportedGlobals} from 'sentry/bootstrap/exportGlobals';
+import type {OnSentryInitConfiguration} from 'sentry/types/system';
+import {SentryInitRenderReactComponent} from 'sentry/types/system';
 
 import {renderDom} from './renderDom';
 import {renderOnDomReady} from './renderOnDomReady';
 
 const COMPONENT_MAP = {
   [SentryInitRenderReactComponent.INDICATORS]: () =>
-    import(/* webpackChunkName: "Indicators" */ 'app/components/indicators'),
+    import(/* webpackChunkName: "Indicators" */ 'sentry/components/indicators'),
   [SentryInitRenderReactComponent.SYSTEM_ALERTS]: () =>
-    import(/* webpackChunkName: "SystemAlerts" */ 'app/views/app/systemAlerts'),
+    import(/* webpackChunkName: "SystemAlerts" */ 'sentry/views/app/systemAlerts'),
   [SentryInitRenderReactComponent.SETUP_WIZARD]: () =>
-    import(/* webpackChunkName: "SetupWizard" */ 'app/views/setupWizard'),
+    import(/* webpackChunkName: "SetupWizard" */ 'sentry/views/setupWizard'),
   [SentryInitRenderReactComponent.U2F_SIGN]: () =>
-    import(/* webpackChunkName: "U2fSign" */ 'app/components/u2f/u2fsign'),
+    import(/* webpackChunkName: "U2fSign" */ 'sentry/components/u2f/u2fsign'),
+  [SentryInitRenderReactComponent.SU_STAFF_ACCESS_FORM]: () =>
+    import(
+      /* webpackChunkName: "SuperuserStaffAccessForm" */ 'sentry/components/superuserStaffAccessForm'
+    ),
 };
 
 async function processItem(initConfig: OnSentryInitConfiguration) {
@@ -27,15 +35,23 @@ async function processItem(initConfig: OnSentryInitConfiguration) {
     if (!input || !element) {
       return;
     }
+    const inputElem = document.querySelector(input);
+    const rootEl = document.querySelector(element);
+    if (!inputElem || !rootEl) {
+      return;
+    }
 
-    const passwordStrength = await import(
-      /* webpackChunkName: "PasswordStrength" */ 'app/components/passwordStrength'
+    const {PasswordStrength} = await import(
+      /* webpackChunkName: "PasswordStrength" */ 'sentry/components/passwordStrength'
     );
 
-    passwordStrength.attachTo({
-      input: document.querySelector(input),
-      element: document.querySelector(element),
-    });
+    const root = createRoot(rootEl);
+    inputElem.addEventListener(
+      'input',
+      throttle(e => {
+        root.render(<PasswordStrength value={e.target.value} />);
+      })
+    );
 
     return;
   }
@@ -61,7 +77,7 @@ async function processItem(initConfig: OnSentryInitConfiguration) {
    * for downstream consumers to use.
    */
   if (initConfig.name === 'onReady' && typeof initConfig.onReady === 'function') {
-    initConfig.onReady(exportGlobals);
+    initConfig.onReady(exportedGlobals);
   }
 }
 

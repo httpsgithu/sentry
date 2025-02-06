@@ -1,13 +1,14 @@
 import datetime
 import os
 from datetime import timedelta
+from unittest.mock import patch
 
 import pytest
 from django.test import SimpleTestCase
 from django.utils import timezone
-from freezegun import freeze_time
 
 from sentry.api.event_search import (
+    AggregateFilter,
     AggregateKey,
     SearchConfig,
     SearchFilter,
@@ -18,9 +19,10 @@ from sentry.api.event_search import (
 from sentry.constants import MODULE_ROOT
 from sentry.exceptions import InvalidSearchQuery
 from sentry.search.utils import parse_datetime_string, parse_duration, parse_numeric_value
+from sentry.testutils.helpers.datetime import freeze_time
 from sentry.utils import json
 
-fixture_path = "tests/fixtures/search-syntax"
+fixture_path = "fixtures/search-syntax"
 abs_fixtures_path = os.path.join(MODULE_ROOT, os.pardir, os.pardir, fixture_path)
 
 
@@ -91,6 +93,12 @@ def result_transformer(result):
         if token["type"] == "keyExplicitTag":
             return SearchKey(name=f"tags[{token['key']['value']}]")
 
+        if token["type"] == "keyExplicitStringTag":
+            return SearchKey(name=f"tags[{token['key']['value']},string]")
+
+        if token["type"] == "keyExplicitNumberTag":
+            return SearchKey(name=f"tags[{token['key']['value']},number]")
+
         if token["type"] == "keyAggregate":
             name = node_visitor(token["name"]).name
             # Consistent join aggregate function parameters
@@ -109,7 +117,12 @@ def result_transformer(result):
             return SearchValue(raw_value=[item["value"]["value"] for item in token["items"]])
 
         if token["type"] == "valueNumberList":
-            return SearchValue(raw_value=[item["value"]["rawValue"] for item in token["items"]])
+            return SearchValue(
+                raw_value=[
+                    parse_numeric_value(item["value"]["value"], item["value"]["unit"])
+                    for item in token["items"]
+                ]
+            )
 
         if token["type"] == "valueIso8601Date":
             return SearchValue(raw_value=parse_datetime_string(token["value"]))
@@ -121,7 +134,7 @@ def result_transformer(result):
             return SearchValue(raw_value=parse_duration(token["value"], token["unit"]))
 
         if token["type"] == "valueBoolean":
-            return SearchValue(raw_value=int(token["value"]))
+            return SearchValue(raw_value=int(token["value"].lower() in ("1", "true")))
 
         if token["type"] == "freeText":
             if token["quoted"]:
@@ -173,7 +186,7 @@ class ParseSearchQueryTest(SimpleTestCase):
             expect_error = True
 
         if expect_error:
-            with self.assertRaises(InvalidSearchQuery, msg=failure_help):
+            with pytest.raises(InvalidSearchQuery):
                 parse_search_query(query)
             return
 
@@ -190,8 +203,10 @@ shared_tests_skipped = [
     "timestamp_rollup",
     "has_tag",
     "not_has_tag",
+    "supported_tags",
     "invalid_aggregate_column_with_duration_filter",
     "invalid_numeric_aggregate_filter",
+    "disallow_wildcard_filter",
 ]
 
 register_fixture_tests(ParseSearchQueryTest, shared_tests_skipped)
@@ -220,19 +235,173 @@ class ParseSearchQueryBackendTest(SimpleTestCase):
             ),
         ]
 
+    @patch("sentry.search.events.builder.base.BaseQueryBuilder.get_field_type")
+    def test_size_filter(self, mock_type):
+        config = SearchConfig()
+        mock_type.return_value = "gigabyte"
+
+        assert parse_search_query("measurements.foo:>5gb measurements.bar:<3pb", config=config) == [
+            SearchFilter(
+                key=SearchKey(name="measurements.foo"),
+                operator=">",
+                value=SearchValue(5 * 1000**3),
+            ),
+            SearchFilter(
+                key=SearchKey(name="measurements.bar"),
+                operator="<",
+                value=SearchValue(3 * 1000**5),
+            ),
+        ]
+
+    @patch("sentry.search.events.builder.base.BaseQueryBuilder.get_field_type")
+    def test_ibyte_size_filter(self, mock_type):
+        config = SearchConfig()
+        mock_type.return_value = "gibibyte"
+
+        assert parse_search_query(
+            "measurements.foo:>5gib measurements.bar:<3pib", config=config
+        ) == [
+            SearchFilter(
+                key=SearchKey(name="measurements.foo"),
+                operator=">",
+                value=SearchValue(5 * 1024**3),
+            ),
+            SearchFilter(
+                key=SearchKey(name="measurements.bar"),
+                operator="<",
+                value=SearchValue(3 * 1024**5),
+            ),
+        ]
+
+    @patch("sentry.search.events.builder.base.BaseQueryBuilder.get_field_type")
+    def test_aggregate_size_filter(self, mock_type):
+        config = SearchConfig()
+        mock_type.return_value = "gigabyte"
+
+        assert parse_search_query(
+            "p50(measurements.foo):>5gb p100(measurements.bar):<3pb", config=config
+        ) == [
+            SearchFilter(
+                key=SearchKey(name="p50(measurements.foo)"),
+                operator=">",
+                value=SearchValue(5 * 1000**3),
+            ),
+            SearchFilter(
+                key=SearchKey(name="p100(measurements.bar)"),
+                operator="<",
+                value=SearchValue(3 * 1000**5),
+            ),
+        ]
+
+    @patch("sentry.search.events.builder.base.BaseQueryBuilder.get_field_type")
+    def test_aggregate_ibyte_size_filter(self, mock_type):
+        config = SearchConfig()
+        mock_type.return_value = "gibibyte"
+
+        assert parse_search_query(
+            "p50(measurements.foo):>5gib p100(measurements.bar):<3pib", config=config
+        ) == [
+            SearchFilter(
+                key=SearchKey(name="p50(measurements.foo)"),
+                operator=">",
+                value=SearchValue(5 * 1024**3),
+            ),
+            SearchFilter(
+                key=SearchKey(name="p100(measurements.bar)"),
+                operator="<",
+                value=SearchValue(3 * 1024**5),
+            ),
+        ]
+
+    @patch("sentry.search.events.builder.base.BaseQueryBuilder.get_field_type")
+    def test_duration_measurement_filter(self, mock_type):
+        config = SearchConfig()
+        mock_type.return_value = "second"
+
+        assert parse_search_query("measurements.foo:>5s measurements.bar:<3m", config=config) == [
+            SearchFilter(
+                key=SearchKey(name="measurements.foo"),
+                operator=">",
+                value=SearchValue(5 * 1000),
+            ),
+            SearchFilter(
+                key=SearchKey(name="measurements.bar"),
+                operator="<",
+                value=SearchValue(3 * 1000 * 60),
+            ),
+        ]
+
+    @patch("sentry.search.events.builder.base.BaseQueryBuilder.get_field_type")
+    def test_aggregate_duration_measurement_filter(self, mock_type):
+        config = SearchConfig()
+        mock_type.return_value = "minute"
+
+        assert parse_search_query(
+            "p50(measurements.foo):>5s p100(measurements.bar):<3m", config=config
+        ) == [
+            SearchFilter(
+                key=SearchKey(name="p50(measurements.foo)"),
+                operator=">",
+                value=SearchValue(5 * 1000),
+            ),
+            SearchFilter(
+                key=SearchKey(name="p100(measurements.bar)"),
+                operator="<",
+                value=SearchValue(3 * 1000 * 60),
+            ),
+        ]
+
+    @patch("sentry.search.events.builder.base.BaseQueryBuilder.get_field_type")
+    def test_numeric_measurement_filter(self, mock_type):
+        config = SearchConfig()
+        mock_type.return_value = "number"
+
+        assert parse_search_query("measurements.foo:>5k measurements.bar:<3m", config=config) == [
+            SearchFilter(
+                key=SearchKey(name="measurements.foo"),
+                operator=">",
+                value=SearchValue(5 * 1000),
+            ),
+            SearchFilter(
+                key=SearchKey(name="measurements.bar"),
+                operator="<",
+                value=SearchValue(3 * 1_000_000),
+            ),
+        ]
+
+    @patch("sentry.search.events.builder.base.BaseQueryBuilder.get_field_type")
+    def test_aggregate_numeric_measurement_filter(self, mock_type):
+        config = SearchConfig()
+        mock_type.return_value = "number"
+
+        assert parse_search_query(
+            "p50(measurements.foo):>5k p100(measurements.bar):<3m", config=config
+        ) == [
+            SearchFilter(
+                key=SearchKey(name="p50(measurements.foo)"),
+                operator=">",
+                value=SearchValue(5 * 1000),
+            ),
+            SearchFilter(
+                key=SearchKey(name="p100(measurements.bar)"),
+                operator="<",
+                value=SearchValue(3 * 1_000_000),
+            ),
+        ]
+
     def test_rel_time_filter(self):
         now = timezone.now()
         with freeze_time(now):
-            assert parse_search_query("first_seen:+7d") == [
+            assert parse_search_query("time:+7d") == [
                 SearchFilter(
-                    key=SearchKey(name="first_seen"),
+                    key=SearchKey(name="time"),
                     operator="<=",
                     value=SearchValue(raw_value=now - timedelta(days=7)),
                 )
             ]
-            assert parse_search_query("first_seen:-2w") == [
+            assert parse_search_query("time:-2w") == [
                 SearchFilter(
-                    key=SearchKey(name="first_seen"),
+                    key=SearchKey(name="time"),
                     operator=">=",
                     value=SearchValue(raw_value=now - timedelta(days=14)),
                 )
@@ -245,15 +414,15 @@ class ParseSearchQueryBackendTest(SimpleTestCase):
         now = timezone.now()
         with freeze_time(now):
             assert parse_search_query("last_seen():+7d") == [
-                SearchFilter(
-                    key=SearchKey(name="last_seen()"),
+                AggregateFilter(
+                    key=AggregateKey(name="last_seen()"),
                     operator="<=",
                     value=SearchValue(raw_value=now - timedelta(days=7)),
                 )
             ]
             assert parse_search_query("last_seen():-2w") == [
-                SearchFilter(
-                    key=SearchKey(name="last_seen()"),
+                AggregateFilter(
+                    key=AggregateKey(name="last_seen()"),
                     operator=">=",
                     value=SearchValue(raw_value=now - timedelta(days=14)),
                 )
@@ -263,49 +432,49 @@ class ParseSearchQueryBackendTest(SimpleTestCase):
             ]
 
     def test_specific_time_filter(self):
-        assert parse_search_query("first_seen:2018-01-01") == [
+        assert parse_search_query("time:2018-01-01") == [
             SearchFilter(
-                key=SearchKey(name="first_seen"),
+                key=SearchKey(name="time"),
                 operator=">=",
-                value=SearchValue(raw_value=datetime.datetime(2018, 1, 1, tzinfo=timezone.utc)),
+                value=SearchValue(raw_value=datetime.datetime(2018, 1, 1, tzinfo=datetime.UTC)),
             ),
             SearchFilter(
-                key=SearchKey(name="first_seen"),
+                key=SearchKey(name="time"),
                 operator="<",
-                value=SearchValue(raw_value=datetime.datetime(2018, 1, 2, tzinfo=timezone.utc)),
+                value=SearchValue(raw_value=datetime.datetime(2018, 1, 2, tzinfo=datetime.UTC)),
             ),
         ]
 
-        assert parse_search_query("first_seen:2018-01-01T05:06:07Z") == [
+        assert parse_search_query("time:2018-01-01T05:06:07Z") == [
             SearchFilter(
-                key=SearchKey(name="first_seen"),
+                key=SearchKey(name="time"),
                 operator=">=",
                 value=SearchValue(
-                    raw_value=datetime.datetime(2018, 1, 1, 5, 1, 7, tzinfo=timezone.utc)
+                    raw_value=datetime.datetime(2018, 1, 1, 5, 1, 7, tzinfo=datetime.UTC)
                 ),
             ),
             SearchFilter(
-                key=SearchKey(name="first_seen"),
+                key=SearchKey(name="time"),
                 operator="<",
                 value=SearchValue(
-                    raw_value=datetime.datetime(2018, 1, 1, 5, 12, 7, tzinfo=timezone.utc)
+                    raw_value=datetime.datetime(2018, 1, 1, 5, 12, 7, tzinfo=datetime.UTC)
                 ),
             ),
         ]
 
-        assert parse_search_query("first_seen:2018-01-01T05:06:07+00:00") == [
+        assert parse_search_query("time:2018-01-01T05:06:07+00:00") == [
             SearchFilter(
-                key=SearchKey(name="first_seen"),
+                key=SearchKey(name="time"),
                 operator=">=",
                 value=SearchValue(
-                    raw_value=datetime.datetime(2018, 1, 1, 5, 1, 7, tzinfo=timezone.utc)
+                    raw_value=datetime.datetime(2018, 1, 1, 5, 1, 7, tzinfo=datetime.UTC)
                 ),
             ),
             SearchFilter(
-                key=SearchKey(name="first_seen"),
+                key=SearchKey(name="time"),
                 operator="<",
                 value=SearchValue(
-                    raw_value=datetime.datetime(2018, 1, 1, 5, 12, 7, tzinfo=timezone.utc)
+                    raw_value=datetime.datetime(2018, 1, 1, 5, 12, 7, tzinfo=datetime.UTC)
                 ),
             ),
         ]
@@ -324,14 +493,14 @@ class ParseSearchQueryBackendTest(SimpleTestCase):
                 key=SearchKey(name="timestamp.to_hour"),
                 operator=">=",
                 value=SearchValue(
-                    raw_value=datetime.datetime(2018, 1, 1, 5, 1, 7, tzinfo=timezone.utc)
+                    raw_value=datetime.datetime(2018, 1, 1, 5, 1, 7, tzinfo=datetime.UTC)
                 ),
             ),
             SearchFilter(
                 key=SearchKey(name="timestamp.to_hour"),
                 operator="<",
                 value=SearchValue(
-                    raw_value=datetime.datetime(2018, 1, 1, 5, 12, 7, tzinfo=timezone.utc)
+                    raw_value=datetime.datetime(2018, 1, 1, 5, 12, 7, tzinfo=datetime.UTC)
                 ),
             ),
         ]
@@ -352,7 +521,7 @@ class ParseSearchQueryBackendTest(SimpleTestCase):
         ]
 
         # malformed key
-        with self.assertRaises(InvalidSearchQuery):
+        with pytest.raises(InvalidSearchQuery):
             parse_search_query('has:"hi there"')
 
     def test_not_has_tag(self):
@@ -383,10 +552,30 @@ class ParseSearchQueryBackendTest(SimpleTestCase):
             SearchFilter(key=SearchKey(name="message"), operator="=", value=SearchValue("text")),
         ]
 
+    def test_blocked_keys(self):
+        config = SearchConfig(blocked_keys=["bad_key"])
+
+        assert parse_search_query("some_key:123 bad_key:123 text") == [
+            SearchFilter(key=SearchKey(name="some_key"), operator="=", value=SearchValue("123")),
+            SearchFilter(key=SearchKey(name="bad_key"), operator="=", value=SearchValue("123")),
+            SearchFilter(key=SearchKey(name="message"), operator="=", value=SearchValue("text")),
+        ]
+
+        with pytest.raises(InvalidSearchQuery, match="Invalid key for this search: bad_key"):
+            assert parse_search_query("some_key:123 bad_key:123 text", config=config)
+
+        assert parse_search_query("some_key:123 some_other_key:456 text", config=config) == [
+            SearchFilter(key=SearchKey(name="some_key"), operator="=", value=SearchValue("123")),
+            SearchFilter(
+                key=SearchKey(name="some_other_key"), operator="=", value=SearchValue("456")
+            ),
+            SearchFilter(key=SearchKey(name="message"), operator="=", value=SearchValue("text")),
+        ]
+
     def test_invalid_aggregate_column_with_duration_filter(self):
         with self.assertRaisesMessage(
             InvalidSearchQuery,
-            expected_message="avg(stack.colno): column argument invalid: stack.colno is not a numeric column",
+            expected_message="avg: column argument invalid: stack.colno is not a numeric column",
         ):
             parse_search_query("avg(stack.colno):>500s")
 
@@ -396,57 +585,62 @@ class ParseSearchQueryBackendTest(SimpleTestCase):
         ):
             parse_search_query("min(measurements.size):3s")
 
+        with self.assertRaisesMessage(
+            InvalidSearchQuery, "is not a valid number suffix, must be k, m or b"
+        ):
+            parse_search_query("count_if(measurements.fcp, greater, 5s):3s")
+
     def test_is_query_unsupported(self):
-        with self.assertRaisesRegexp(
-            InvalidSearchQuery, ".*queries are not supported in this search.*"
+        with pytest.raises(
+            InvalidSearchQuery, match=".*queries are not supported in this search.*"
         ):
             parse_search_query("is:unassigned")
 
     def test_escaping_asterisk(self):
         # the asterisk is escaped with a preceding backslash, so it's a literal and not a wildcard
-        search_filter = parse_search_query(r"title:a\*b")
-        assert search_filter == [
+        search_filters = parse_search_query(r"title:a\*b")
+        assert search_filters == [
             SearchFilter(key=SearchKey(name="title"), operator="=", value=SearchValue(r"a\*b"))
         ]
-        search_filter = search_filter[0]
+        search_filter = search_filters[0]
         # the slash should be removed in the final value
         assert search_filter.value.value == "a*b"
 
         # the first and last asterisks arent escaped with a preceding backslash, so they're
         # wildcards and not literals
-        search_filter = parse_search_query(r"title:*\**")
-        assert search_filter == [
+        search_filters = parse_search_query(r"title:*\**")
+        assert search_filters == [
             SearchFilter(key=SearchKey(name="title"), operator="=", value=SearchValue(r"*\**"))
         ]
-        search_filter = search_filter[0]
+        search_filter = search_filters[0]
         assert search_filter.value.value == r"^.*\*.*$"
 
     @pytest.mark.xfail(reason="escaping backslashes is not supported yet")
     def test_escaping_backslashes(self):
-        search_filter = parse_search_query(r"title:a\\b")
-        assert search_filter == [
+        search_filters = parse_search_query(r"title:a\\b")
+        assert search_filters == [
             SearchFilter(key=SearchKey(name="title"), operator="=", value=SearchValue(r"a\\b"))
         ]
-        search_filter = search_filter[0]
+        search_filter = search_filters[0]
         # the extra slash should be removed in the final value
         assert search_filter.value.value == r"a\b"
 
     @pytest.mark.xfail(reason="escaping backslashes is not supported yet")
     def test_trailing_escaping_backslashes(self):
-        search_filter = parse_search_query(r"title:a\\")
-        assert search_filter == [
+        search_filters = parse_search_query(r"title:a\\")
+        assert search_filters == [
             SearchFilter(key=SearchKey(name="title"), operator="=", value=SearchValue(r"a\\"))
         ]
-        search_filter = search_filter[0]
+        search_filter = search_filters[0]
         # the extra slash should be removed in the final value
         assert search_filter.value.value == "a\\"
 
     def test_escaping_quotes(self):
-        search_filter = parse_search_query(r"title:a\"b")
-        assert search_filter == [
+        search_filters = parse_search_query(r"title:a\"b")
+        assert search_filters == [
             SearchFilter(key=SearchKey(name="title"), operator="=", value=SearchValue(r'a"b'))
         ]
-        search_filter = search_filter[0]
+        search_filter = search_filters[0]
         # the slash should be removed in the final value
         assert search_filter.value.value == 'a"b'
 
@@ -476,3 +670,80 @@ class ParseSearchQueryBackendTest(SimpleTestCase):
 def test_search_value(raw, result):
     search_value = SearchValue(raw)
     assert search_value.value == result
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "event.type:=transaction",
+        "!event.type:[transaction]",
+        "event.type:[transaction, event]",
+        "event.type:[1, 2]",
+        "transaction.duration:>=1.0",
+        "transaction.duration:>1.0",
+        "transaction.duration:=1.0",
+        "transaction.duration:<=1.0",
+        "transaction.duration:<1.0",
+    ],
+)
+def test_search_filter_to_query_string(query):
+    """
+    Does a round trip (from query string to tokens and back to query string)
+    """
+
+    filters = parse_search_query(query)
+    assert len(filters) == 1
+    actual = filters[0].to_query_string()
+    assert actual == query
+
+
+@pytest.mark.parametrize(
+    "value,expected_query_string",
+    [
+        (1, "1"),
+        ("abc", "abc"),
+        ([1, 2, 3], "[1, 2, 3]"),
+        (["a", "b", "c"], "[a, b, c]"),
+        (datetime.datetime(2023, 10, 15, 11, 12, 13), "2023-10-15T11:12:13"),
+    ],
+)
+def test_search_value_to_query_string(value, expected_query_string):
+    """
+    Test turning a QueryValue back to a string usable in a query string
+    """
+
+    search_value = SearchValue(value)
+    actual = search_value.to_query_string()
+
+    assert actual == expected_query_string
+
+
+@pytest.mark.parametrize(
+    ["value", "expected_kind", "expected_value"],
+    [
+        (1, "other", 1),
+        ("1", "other", "1"),
+        ("*", "suffix", ""),  # consider special casing this
+        ("*foo", "suffix", "foo"),
+        ("foo*", "prefix", "foo"),
+        ("*foo*", "infix", "foo"),
+        (r"\*foo", "other", r"*foo"),
+        (r"\\*foo", "other", r"^\\.*foo$"),
+        (r"foo\*", "other", r"foo*"),
+        (r"foo\\*", "prefix", r"foo\\"),
+        ("*f*o*o*", "other", "^.*f.*o.*o.*$"),
+        (r"*foo\*", "suffix", r"foo*"),
+        (r"*foo\\*", "infix", r"foo\\"),
+        pytest.param("*Case*", "infix", "Case", id="infix casing is kept"),
+        pytest.param("*Case", "suffix", "case", id="suffix is lower cased"),
+        pytest.param("Case*", "prefix", "case", id="prefix is lower cased"),
+    ],
+)
+def test_search_value_classify_and_format_wildcard(value, expected_kind, expected_value):
+    """
+    Test classifying the wildcard type into one of prefix/suffix/infix/other
+    and formatting the value according to the classification results.
+    """
+    search_value = SearchValue(value)
+    kind, wildcard = search_value.classify_and_format_wildcard()
+    assert (kind, wildcard) == (expected_kind, expected_value)

@@ -1,26 +1,23 @@
-import * as React from 'react';
+import {useEffect} from 'react';
 import styled from '@emotion/styled';
 
-import Link from 'app/components/links/link';
-import Panel from 'app/components/panels/panel';
-import {IconSentry} from 'app/icons';
-import space from 'app/styles/space';
+import Link from 'sentry/components/links/link';
+import Panel from 'sentry/components/panels/panel';
+import {IconSentry} from 'sentry/icons';
+import {space} from 'sentry/styles/space';
+import {AppBodyContent} from 'sentry/views/app/appBodyContent';
 
 const BODY_CLASSES = ['narrow'];
 
-class Layout extends React.Component {
-  componentDidMount() {
+function Layout({children}: any) {
+  useEffect(() => {
     document.body.classList.add(...BODY_CLASSES);
-  }
+    return () => document.body.classList.remove(...BODY_CLASSES);
+  }, []);
 
-  componentWillUnmount() {
-    document.body.classList.remove(...BODY_CLASSES);
-  }
-
-  render() {
-    const {children} = this.props;
-    return (
-      <div className="app">
+  return (
+    <div className="app">
+      <AppBodyContent>
         <AuthContainer>
           <div className="pattern-bg" />
           <AuthPanel>
@@ -30,9 +27,9 @@ class Layout extends React.Component {
             <div>{children}</div>
           </AuthPanel>
         </AuthContainer>
-      </div>
-    );
-  }
+      </AppBodyContent>
+    </div>
+  );
 }
 
 const AuthContainer = styled('div')`
@@ -67,7 +64,7 @@ const AuthSidebar = styled('div')`
 const SentryButton = styled(
   (p: Omit<React.ComponentPropsWithoutRef<typeof Link>, 'to'>) => (
     <Link to="/" {...p}>
-      <IconSentry size="24px" />
+      <IconSentry size="lg" />
     </Link>
   )
 )`

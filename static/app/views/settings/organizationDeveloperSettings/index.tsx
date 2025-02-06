@@ -1,100 +1,103 @@
-import {RouteComponentProps} from 'react-router';
+import {Fragment, useState} from 'react';
+import styled from '@emotion/styled';
 
-import {removeSentryApp} from 'app/actionCreators/sentryApps';
-import Access from 'app/components/acl/access';
-import AlertLink from 'app/components/alertLink';
-import Button from 'app/components/button';
-import {Panel, PanelBody, PanelHeader} from 'app/components/panels';
-import {IconAdd} from 'app/icons';
-import {t} from 'app/locale';
-import {Organization, SentryApp} from 'app/types';
-import routeTitleGen from 'app/utils/routeTitle';
-import withOrganization from 'app/utils/withOrganization';
-import AsyncView from 'app/views/asyncView';
-import EmptyMessage from 'app/views/settings/components/emptyMessage';
-import SettingsPageHeader from 'app/views/settings/components/settingsPageHeader';
-import SentryApplicationRow from 'app/views/settings/organizationDeveloperSettings/sentryApplicationRow';
+import {removeSentryApp} from 'sentry/actionCreators/sentryApps';
+import EmptyMessage from 'sentry/components/emptyMessage';
+import ExternalLink from 'sentry/components/links/externalLink';
+import LoadingError from 'sentry/components/loadingError';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import NavTabs from 'sentry/components/navTabs';
+import Panel from 'sentry/components/panels/panel';
+import PanelBody from 'sentry/components/panels/panelBody';
+import PanelHeader from 'sentry/components/panels/panelHeader';
+import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
+import {t, tct} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {SentryApp} from 'sentry/types/integrations';
+import {
+  platformEventLinkMap,
+  PlatformEvents,
+} from 'sentry/utils/analytics/integrations/platformAnalyticsEvents';
+import {trackIntegrationAnalytics} from 'sentry/utils/integrationUtil';
+import {useApiQuery} from 'sentry/utils/queryClient';
+import useApi from 'sentry/utils/useApi';
+import {useLocation} from 'sentry/utils/useLocation';
+import useOrganization from 'sentry/utils/useOrganization';
+import SettingsPageHeader from 'sentry/views/settings/components/settingsPageHeader';
+import SentryApplicationRow from 'sentry/views/settings/organizationDeveloperSettings/sentryApplicationRow';
+import CreateIntegrationButton from 'sentry/views/settings/organizationIntegrations/createIntegrationButton';
+import ExampleIntegrationButton from 'sentry/views/settings/organizationIntegrations/exampleIntegrationButton';
 
-type Props = Omit<AsyncView['props'], 'params'> & {
-  organization: Organization;
-} & RouteComponentProps<{orgId: string}, {}>;
+type Tab = 'public' | 'internal';
 
-type State = AsyncView['state'] & {
-  applications: SentryApp[];
-};
+function OrganizationDeveloperSettings() {
+  const location = useLocation();
+  const organization = useOrganization();
+  const api = useApi({persistInFlight: true});
 
-class OrganizationDeveloperSettings extends AsyncView<Props, State> {
-  getTitle() {
-    const {orgId} = this.props.params;
-    return routeTitleGen(t('Developer Settings'), orgId, false);
+  const value =
+    ['public', 'internal'].find(tab => tab === location?.query?.type) || 'internal';
+  const analyticsView = 'developer_settings';
+  const tabs: Array<[id: Tab, label: string]> = [
+    ['internal', t('Internal Integration')],
+    ['public', t('Public Integration')],
+  ];
+
+  const [tab, setTab] = useState<Tab>(value as Tab);
+  const [applicationsState, setApplicationsState] = useState<SentryApp[] | undefined>(
+    undefined
+  );
+
+  const {
+    data: fetchedApplications,
+    isPending,
+    isError,
+    refetch,
+  } = useApiQuery<SentryApp[]>([`/organizations/${organization.slug}/sentry-apps/`], {
+    staleTime: 0,
+  });
+
+  if (isPending) {
+    return <LoadingIndicator />;
   }
 
-  getEndpoints(): ReturnType<AsyncView['getEndpoints']> {
-    const {orgId} = this.props.params;
-
-    return [['applications', `/organizations/${orgId}/sentry-apps/`]];
+  if (isError) {
+    return <LoadingError onRetry={refetch} />;
   }
 
-  removeApp = (app: SentryApp) => {
-    const apps = this.state.applications.filter(a => a.slug !== app.slug);
-    removeSentryApp(this.api, app).then(
-      () => {
-        this.setState({applications: apps});
-      },
+  const applications = applicationsState ?? fetchedApplications;
+
+  const removeApp = (app: SentryApp) => {
+    const apps = applications.filter(a => a.slug !== app.slug);
+    removeSentryApp(api, app).then(
+      () => setApplicationsState(apps),
       () => {}
     );
   };
 
-  renderApplicationRow = (app: SentryApp) => {
-    const {organization} = this.props;
+  const renderApplicationRow = (app: SentryApp) => {
     return (
       <SentryApplicationRow
         key={app.uuid}
         app={app}
         organization={organization}
-        onRemoveApp={this.removeApp}
+        onRemoveApp={removeApp}
       />
     );
   };
 
-  renderInternalIntegrations() {
-    const {orgId} = this.props.params;
-    const {organization} = this.props;
-    const integrations = this.state.applications.filter(
+  const renderInternalIntegrations = () => {
+    const integrations = applications.filter(
       (app: SentryApp) => app.status === 'internal'
     );
     const isEmpty = integrations.length === 0;
 
-    const permissionTooltipText = t(
-      'Manager or Owner permissions required to add an internal integration.'
-    );
-
-    const action = (
-      <Access organization={organization} access={['org:write']}>
-        {({hasAccess}) => (
-          <Button
-            priority="primary"
-            disabled={!hasAccess}
-            title={!hasAccess ? permissionTooltipText : undefined}
-            size="small"
-            to={`/settings/${orgId}/developer-settings/new-internal/`}
-            icon={<IconAdd size="xs" isCircled />}
-          >
-            {t('New Internal Integration')}
-          </Button>
-        )}
-      </Access>
-    );
-
     return (
       <Panel>
-        <PanelHeader hasButtons>
-          {t('Internal Integrations')}
-          {action}
-        </PanelHeader>
+        <PanelHeader>{t('Internal Integrations')}</PanelHeader>
         <PanelBody>
           {!isEmpty ? (
-            integrations.map(this.renderApplicationRow)
+            integrations.map(renderApplicationRow)
           ) : (
             <EmptyMessage>
               {t('No internal integrations have been created yet.')}
@@ -103,44 +106,18 @@ class OrganizationDeveloperSettings extends AsyncView<Props, State> {
         </PanelBody>
       </Panel>
     );
-  }
+  };
 
-  renderExernalIntegrations() {
-    const {orgId} = this.props.params;
-    const {organization} = this.props;
-    const integrations = this.state.applications.filter(app => app.status !== 'internal');
+  const renderPublicIntegrations = () => {
+    const integrations = applications.filter(app => app.status !== 'internal');
     const isEmpty = integrations.length === 0;
-
-    const permissionTooltipText = t(
-      'Manager or Owner permissions required to add a public integration.'
-    );
-
-    const action = (
-      <Access organization={organization} access={['org:write']}>
-        {({hasAccess}) => (
-          <Button
-            priority="primary"
-            disabled={!hasAccess}
-            title={!hasAccess ? permissionTooltipText : undefined}
-            size="small"
-            to={`/settings/${orgId}/developer-settings/new-public/`}
-            icon={<IconAdd size="xs" isCircled />}
-          >
-            {t('New Public Integration')}
-          </Button>
-        )}
-      </Access>
-    );
 
     return (
       <Panel>
-        <PanelHeader hasButtons>
-          {t('Public Integrations')}
-          {action}
-        </PanelHeader>
+        <PanelHeader>{t('Public Integrations')}</PanelHeader>
         <PanelBody>
           {!isEmpty ? (
-            integrations.map(this.renderApplicationRow)
+            integrations.map(renderApplicationRow)
           ) : (
             <EmptyMessage>
               {t('No public integrations have been created yet.')}
@@ -149,22 +126,72 @@ class OrganizationDeveloperSettings extends AsyncView<Props, State> {
         </PanelBody>
       </Panel>
     );
-  }
+  };
 
-  renderBody() {
-    return (
-      <div>
-        <SettingsPageHeader title={t('Developer Settings')} />
-        <AlertLink href="https://docs.sentry.io/product/integrations/integration-platform/">
-          {t(
-            'Have questions about the Integration Platform? Learn more about it in our docs.'
-          )}
-        </AlertLink>
-        {this.renderExernalIntegrations()}
-        {this.renderInternalIntegrations()}
-      </div>
-    );
-  }
+  const renderTabContent = () => {
+    switch (tab) {
+      case 'internal':
+        return renderInternalIntegrations();
+      case 'public':
+      default:
+        return renderPublicIntegrations();
+    }
+  };
+
+  return (
+    <div>
+      <SentryDocumentTitle title={t('Custom Integrations')} orgSlug={organization.slug} />
+      <SettingsPageHeader
+        title={t('Custom Integrations')}
+        body={
+          <Fragment>
+            {t(
+              'Create integrations that interact with Sentry using the REST API and webhooks. '
+            )}
+            <br />
+            {tct('For more information [link: see our docs].', {
+              link: (
+                <ExternalLink
+                  href={platformEventLinkMap[PlatformEvents.DOCS]}
+                  onClick={() => {
+                    trackIntegrationAnalytics(PlatformEvents.DOCS, {
+                      organization,
+                      view: analyticsView,
+                    });
+                  }}
+                />
+              ),
+            })}
+          </Fragment>
+        }
+        action={
+          <ActionContainer>
+            <ExampleIntegrationButton
+              analyticsView={analyticsView}
+              style={{marginRight: space(1)}}
+            />
+            <CreateIntegrationButton analyticsView={analyticsView} />
+          </ActionContainer>
+        }
+      />
+      <NavTabs underlined>
+        {tabs.map(([type, label]) => (
+          <li
+            key={type}
+            className={tab === type ? 'active' : ''}
+            onClick={() => setTab(type)}
+          >
+            <a>{label}</a>
+          </li>
+        ))}
+      </NavTabs>
+      {renderTabContent()}
+    </div>
+  );
 }
 
-export default withOrganization(OrganizationDeveloperSettings);
+const ActionContainer = styled('div')`
+  display: flex;
+`;
+
+export default OrganizationDeveloperSettings;

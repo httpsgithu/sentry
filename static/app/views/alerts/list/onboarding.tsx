@@ -1,11 +1,10 @@
-import * as React from 'react';
 import styled from '@emotion/styled';
 
 import emptyStateImg from 'sentry-images/spot/alerts-empty-state.svg';
 
-import ButtonBar from 'app/components/buttonBar';
-import OnboardingPanel from 'app/components/onboardingPanel';
-import {t} from 'app/locale';
+import ButtonBar from 'sentry/components/buttonBar';
+import OnboardingPanel from 'sentry/components/onboardingPanel';
+import {t} from 'sentry/locale';
 
 type Props = {
   actions: React.ReactNode;
@@ -26,7 +25,7 @@ function Onboarding({actions}: Props) {
 }
 
 const AlertsImage = styled('img')`
-  @media (min-width: ${p => p.theme.breakpoints[0]}) {
+  @media (min-width: ${p => p.theme.breakpoints.small}) {
     user-select: none;
     position: absolute;
     top: 0;
@@ -34,18 +33,18 @@ const AlertsImage = styled('img')`
     width: 220px;
     margin-top: auto;
     margin-bottom: auto;
-    transform: translateX(-50%);
+    transform: translateX(-40%);
     left: 50%;
   }
 
-  @media (min-width: ${p => p.theme.breakpoints[2]}) {
-    transform: translateX(-60%);
-    width: 280px;
+  @media (min-width: ${p => p.theme.breakpoints.large}) {
+    transform: translateX(-50%);
+    width: 300px;
   }
 
-  @media (min-width: ${p => p.theme.breakpoints[3]}) {
-    transform: translateX(-75%);
-    width: 320px;
+  @media (min-width: ${p => p.theme.breakpoints.xlarge}) {
+    transform: translateX(-65%);
+    width: 420px;
   }
 `;
 

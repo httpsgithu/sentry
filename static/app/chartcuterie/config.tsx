@@ -9,7 +9,14 @@
  */
 
 import {discoverCharts} from './discover';
-import {ChartcuterieConfig, ChartType, RenderConfig, RenderDescriptor} from './types';
+import {metricAlertCharts} from './metricAlert';
+import {performanceCharts} from './performance';
+import type {
+  ChartcuterieConfig,
+  ChartType,
+  RenderConfig,
+  RenderDescriptor,
+} from './types';
 
 /**
  * All registered style descriptors
@@ -31,5 +38,7 @@ const register = (renderDescriptor: RenderDescriptor<ChartType>) =>
   renderConfig.set(renderDescriptor.key, renderDescriptor);
 
 discoverCharts.forEach(register);
+metricAlertCharts.forEach(register);
+performanceCharts.forEach(register);
 
 export default config;

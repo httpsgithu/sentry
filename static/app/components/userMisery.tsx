@@ -1,18 +1,16 @@
-import * as React from 'react';
-
-import ScoreBar from 'app/components/scoreBar';
-import Tooltip from 'app/components/tooltip';
-import CHART_PALETTE from 'app/constants/chartPalette';
-import {tct} from 'app/locale';
-import {defined} from 'app/utils';
+import ScoreBar from 'sentry/components/scoreBar';
+import {Tooltip} from 'sentry/components/tooltip';
+import {CHART_PALETTE} from 'sentry/constants/chartPalette';
+import {tct} from 'sentry/locale';
+import {defined} from 'sentry/utils';
 
 type Props = {
-  bars: number;
   barHeight: number;
-  userMisery: number;
+  bars: number;
+  miserableUsers: number | undefined;
   miseryLimit: number | undefined;
   totalUsers: number | undefined;
-  miserableUsers: number | undefined;
+  userMisery: number;
 };
 
 function UserMisery(props: Props) {
@@ -38,9 +36,18 @@ function UserMisery(props: Props) {
     );
   } else if (defined(miseryLimit)) {
     title = tct(
-      'User Misery score is [userMisery], representing users who waited more than more than [duration]ms (4x the response time threshold)',
+      'User Misery score is [userMisery], representing users who waited more than [duration]ms (4x the response time threshold)',
       {
         duration: 4 * miseryLimit,
+        userMisery: userMisery.toFixed(3),
+      }
+    );
+  } else if (defined(miserableUsers) && defined(totalUsers)) {
+    title = tct(
+      'User Misery score is [userMisery], meaning [miserableUsers] out of [totalUsers] unique users had a miserable experience.',
+      {
+        miserableUsers,
+        totalUsers,
         userMisery: userMisery.toFixed(3),
       }
     );
@@ -49,9 +56,16 @@ function UserMisery(props: Props) {
       userMisery: userMisery.toFixed(3),
     });
   }
+
   return (
     <Tooltip title={title} containerDisplayMode="block">
-      <ScoreBar size={barHeight} score={score} palette={palette} radius={0} />
+      <ScoreBar
+        size={barHeight}
+        score={score}
+        palette={palette}
+        radius={0}
+        data-test-id={`score-bar-${score}`}
+      />
     </Tooltip>
   );
 }

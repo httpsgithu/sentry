@@ -1,18 +1,20 @@
 import {Fragment} from 'react';
-import DocumentTitle from 'react-document-title';
 
-import {Panel, PanelBody, PanelHeader} from 'app/components/panels';
-import {t} from 'app/locale';
+import Panel from 'sentry/components/panels/panel';
+import PanelBody from 'sentry/components/panels/panelBody';
+import PanelHeader from 'sentry/components/panels/panelHeader';
+import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
+import {t} from 'sentry/locale';
 
 import ApiChart from './apiChart';
 import EventChart from './eventChart';
 
-const AdminOverview = () => {
+function AdminOverview() {
   const resolution = '1h';
   const since = new Date().getTime() / 1000 - 3600 * 24 * 7;
 
   return (
-    <DocumentTitle title="Admin Overview - Sentry">
+    <SentryDocumentTitle title={t('Admin Overview')}>
       <Fragment>
         <h3>{t('System Overview')}</h3>
 
@@ -30,8 +32,8 @@ const AdminOverview = () => {
           </PanelBody>
         </Panel>
       </Fragment>
-    </DocumentTitle>
+    </SentryDocumentTitle>
   );
-};
+}
 
 export default AdminOverview;

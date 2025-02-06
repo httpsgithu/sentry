@@ -1,5 +1,6 @@
 import styled from '@emotion/styled';
-import {Change, diffChars, diffLines, diffWords} from 'diff';
+import type {Change} from 'diff';
+import {diffChars, diffLines, diffWords} from 'diff';
 
 const diffFnMap = {
   chars: diffChars,
@@ -10,11 +11,11 @@ const diffFnMap = {
 type Props = {
   base: string;
   target: string;
-  type?: keyof typeof diffFnMap;
   className?: string;
+  type?: keyof typeof diffFnMap;
 };
 
-const SplitDiff = ({className, type = 'lines', base, target}: Props) => {
+function SplitDiff({className, type = 'lines', base, target}: Props) {
   const diffFn = diffFnMap[type];
 
   const baseLines = base.split('\n');
@@ -28,7 +29,7 @@ const SplitDiff = ({className, type = 'lines', base, target}: Props) => {
   );
 
   return (
-    <SplitTable className={className}>
+    <SplitTable className={className} data-test-id="split-diff">
       <SplitBody>
         {results.map((line, j) => {
           const highlightAdded = line.find(result => result.added);
@@ -67,7 +68,7 @@ const SplitDiff = ({className, type = 'lines', base, target}: Props) => {
       </SplitBody>
     </SplitTable>
   );
-};
+}
 
 const SplitTable = styled('table')`
   table-layout: fixed;
@@ -80,7 +81,7 @@ const SplitBody = styled('tbody')`
   font-size: ${p => p.theme.fontSizeSmall};
 `;
 
-const Cell = styled('td')<{isRemoved?: Change; isAdded?: Change}>`
+const Cell = styled('td')<{isAdded?: Change; isRemoved?: Change}>`
   vertical-align: top;
   ${p => p.isRemoved && `background-color: ${p.theme.diff.removedRow}`};
   ${p => p.isAdded && `background-color: ${p.theme.diff.addedRow}`};
@@ -95,7 +96,7 @@ const Line = styled('div')`
   flex-wrap: wrap;
 `;
 
-const Word = styled('span')<{isRemoved?: boolean; isAdded?: boolean}>`
+const Word = styled('span')<{isAdded?: boolean; isRemoved?: boolean}>`
   white-space: pre-wrap;
   word-break: break-all;
   ${p => p.isRemoved && `background-color: ${p.theme.diff.removed}`};

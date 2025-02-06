@@ -1,30 +1,29 @@
-import * as React from 'react';
-import styled from '@emotion/styled';
+import {useEffect} from 'react';
 
-import Feature from 'app/components/acl/feature';
-import GlobalSelectionHeader from 'app/components/organizations/globalSelectionHeader';
-import {PageContent} from 'app/styles/organization';
-import withGlobalSelection from 'app/utils/withGlobalSelection';
+import NoProjectMessage from 'sentry/components/noProjectMessage';
+import PageFiltersContainer from 'sentry/components/organizations/pageFilters/container';
+import normalizeUrl from 'sentry/utils/url/normalizeUrl';
+import {useNavigate} from 'sentry/utils/useNavigate';
+import useOrganization from 'sentry/utils/useOrganization';
 
-const Body = styled('div')`
-  background-color: ${p => p.theme.backgroundSecondary};
-  flex-direction: column;
-  flex: 1;
-`;
+function MonitorsContainer({children}: {children?: React.ReactNode}) {
+  const organization = useOrganization();
+  const navigate = useNavigate();
 
-const MonitorsContainer: React.FC = ({children}) => (
-  <Feature features={['monitors']} renderDisabled>
-    <GlobalSelectionHeader
-      showEnvironmentSelector={false}
-      showDateSelector={false}
-      resetParamsOnChange={['cursor']}
-    >
-      <PageContent>
-        <Body>{children}</Body>
-      </PageContent>
-    </GlobalSelectionHeader>
-  </Feature>
-);
+  useEffect(() => {
+    if (organization.features.includes('insights-crons')) {
+      navigate(
+        normalizeUrl(`/organizations/${organization.slug}/insights/backend/crons/`),
+        {replace: true}
+      );
+    }
+  });
 
-export default withGlobalSelection(MonitorsContainer);
-export {MonitorsContainer};
+  return (
+    <NoProjectMessage organization={organization}>
+      <PageFiltersContainer>{children}</PageFiltersContainer>
+    </NoProjectMessage>
+  );
+}
+
+export default MonitorsContainer;

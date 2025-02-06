@@ -1,56 +1,18 @@
-from copy import deepcopy
+from functools import cached_property
 
-from django.urls import reverse
 from django.utils import timezone
-from exam import fixture
 
 from sentry.assistant import manager
-from sentry.models import AssistantActivity
-from sentry.testutils import APITestCase
+from sentry.models.assistant import AssistantActivity
+from sentry.testutils.cases import APITestCase
+from sentry.testutils.silo import control_silo_test
 
 
+@control_silo_test
 class AssistantActivityTest(APITestCase):
-    def setUp(self):
-        super().setUp()
-        self.login_as(user=self.user)
-        self.path = reverse("sentry-api-0-assistant")
-        self.guides = manager.all()
-
-    def test_invalid_inputs(self):
-        # Missing status
-        resp = self.client.put(self.path, {"guide_id": 1})
-        assert resp.status_code == 400
-
-        # Invalid guide id
-        resp = self.client.put(self.path, {"guide_id": 1938, "status": "dismissed"})
-        assert resp.status_code == 400
-
-        # Invalid status
-        resp = self.client.put(self.path, {"guide_id": 1, "status": "whats_my_name_again"})
-        assert resp.status_code == 400
-
-    def test_activity(self):
-        guides_with_seen = deepcopy(manager.all())
-        for g in guides_with_seen:
-            guides_with_seen[g]["seen"] = False
-
-        resp = self.client.get(self.path)
-        assert resp.status_code == 200
-        assert resp.data == guides_with_seen
-
-        # Dismiss the guide and make sure it is not returned again.
-        resp = self.client.put(self.path, {"guide_id": 3, "status": "dismissed"})
-        assert resp.status_code == 201
-        resp = self.client.get(self.path)
-        guides_with_seen["issue_stream"]["seen"] = True
-        assert resp.status_code == 200
-        assert resp.data == guides_with_seen
-
-
-class AssistantActivityV2Test(APITestCase):
     endpoint = "sentry-api-0-assistant"
 
-    @fixture
+    @cached_property
     def guides(self):
         return manager.all()
 
@@ -60,7 +22,7 @@ class AssistantActivityV2Test(APITestCase):
         self.login_as(user=self.user)
 
     def test_simple(self):
-        resp = self.get_response(qs_params={"v2": 1})
+        resp = self.get_response()
         assert resp.status_code == 200
 
         assert len(resp.data) == len(manager.all())
@@ -70,27 +32,28 @@ class AssistantActivityV2Test(APITestCase):
     def test_dismissed(self):
         guide = "issue_stream"
         AssistantActivity.objects.create(
-            user=self.user, guide_id=self.guides[guide]["id"], dismissed_ts=timezone.now()
+            user=self.user, guide_id=self.guides[guide], dismissed_ts=timezone.now()
         )
-        resp = self.get_response(qs_params={"v2": 1})
+        resp = self.get_response()
         assert resp.status_code == 200
         assert {"guide": guide, "seen": True} in resp.data
 
     def test_viewed(self):
         guide = "issue_stream"
         AssistantActivity.objects.create(
-            user=self.user, guide_id=self.guides[guide]["id"], viewed_ts=timezone.now()
+            user=self.user, guide_id=self.guides[guide], viewed_ts=timezone.now()
         )
-        resp = self.get_response(qs_params={"v2": 1})
+        resp = self.get_response()
         assert resp.status_code == 200
         assert {"guide": guide, "seen": True} in resp.data
 
 
-class AssistantActivityV2UpdateTest(APITestCase):
+@control_silo_test
+class AssistantActivityUpdateTest(APITestCase):
     endpoint = "sentry-api-0-assistant"
     method = "put"
 
-    @fixture
+    @cached_property
     def guides(self):
         return manager.all()
 
@@ -117,7 +80,7 @@ class AssistantActivityV2UpdateTest(APITestCase):
         resp = self.get_response(guide=guide, status="dismissed")
         assert resp.status_code == 201
 
-        activity = AssistantActivity.objects.get(user=self.user, guide_id=self.guides[guide]["id"])
+        activity = AssistantActivity.objects.get(user=self.user, guide_id=self.guides[guide])
         assert activity.dismissed_ts
         assert not activity.viewed_ts
 
@@ -126,6 +89,16 @@ class AssistantActivityV2UpdateTest(APITestCase):
         resp = self.get_response(guide=guide, status="viewed")
         assert resp.status_code == 201
 
-        activity = AssistantActivity.objects.get(user=self.user, guide_id=self.guides[guide]["id"])
+        activity = AssistantActivity.objects.get(user=self.user, guide_id=self.guides[guide])
         assert activity.viewed_ts
         assert not activity.dismissed_ts
+
+    def test_restart(self):
+        guide = "issue_stream"
+        resp = self.get_response(guide=guide, status="viewed")
+        assert resp.status_code == 201
+
+        self.get_response(guide=guide, status="restart")
+        assert not AssistantActivity.objects.filter(
+            user=self.user, guide_id=self.guides[guide]
+        ).exists()

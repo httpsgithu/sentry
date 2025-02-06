@@ -1,70 +1,153 @@
-import {Component, Fragment} from 'react';
+import {Fragment} from 'react';
+import {css} from '@emotion/react';
 import styled from '@emotion/styled';
-import {Location} from 'history';
+import type {Location} from 'history';
 
-import PanelTable, {PanelTableHeader} from 'app/components/panels/panelTable';
-import space from 'app/styles/space';
-import {Organization} from 'app/types';
-import {TableData, TableDataRow} from 'app/utils/discover/discoverQuery';
-import {getFieldRenderer} from 'app/utils/discover/fieldRenderers';
-import {fieldAlignment} from 'app/utils/discover/fields';
-import withOrganization from 'app/utils/withOrganization';
-import {decodeColumnOrder} from 'app/views/eventsV2/utils';
+import type {PanelTableProps} from 'sentry/components/panels/panelTable';
+import {PanelTable, PanelTableHeader} from 'sentry/components/panels/panelTable';
+import {Tooltip} from 'sentry/components/tooltip';
+import Truncate from 'sentry/components/truncate';
+import {space} from 'sentry/styles/space';
+import type {Organization} from 'sentry/types/organization';
+import type {TableData, TableDataRow} from 'sentry/utils/discover/discoverQuery';
+import type {MetaType} from 'sentry/utils/discover/eventView';
+import type EventView from 'sentry/utils/discover/eventView';
+import {getFieldRenderer} from 'sentry/utils/discover/fieldRenderers';
+import {fieldAlignment} from 'sentry/utils/discover/fields';
+import useOrganization from 'sentry/utils/useOrganization';
+import useProjects from 'sentry/utils/useProjects';
+import {TransactionLink} from 'sentry/views/discover/table/tableView';
+import TopResultsIndicator from 'sentry/views/discover/table/topResultsIndicator';
+import {
+  decodeColumnOrder,
+  getTargetForTransactionSummaryLink,
+} from 'sentry/views/discover/utils';
 
 type Props = {
-  organization: Organization;
-  location: Location;
-  loading: boolean;
+  eventView: EventView;
+  fieldAliases: string[];
   fields: string[];
+  loading: boolean;
+  location: Location;
   title: string;
-  metadata: TableData['meta'] | undefined;
-  data: TableData['data'] | undefined;
   className?: string;
+  data?: TableData['data'];
+  fieldHeaderMap?: Record<string, string>;
+  getCustomFieldRenderer?: (
+    field: string,
+    meta: MetaType,
+    organization?: Organization
+  ) => ReturnType<typeof getFieldRenderer> | null;
+  loader?: PanelTableProps['loader'];
+  metadata?: TableData['meta'];
+  minColumnWidth?: string;
+  stickyHeaders?: boolean;
+  topResultsIndicators?: number;
 };
 
-class SimpleTableChart extends Component<Props> {
-  renderRow(
+function SimpleTableChart({
+  className,
+  loading,
+  eventView,
+  fields,
+  metadata,
+  data,
+  title,
+  fieldHeaderMap,
+  stickyHeaders,
+  getCustomFieldRenderer,
+  topResultsIndicators,
+  location,
+  fieldAliases,
+  loader,
+  minColumnWidth,
+}: Props) {
+  const organization = useOrganization();
+  const {projects} = useProjects();
+  function renderRow(
     index: number,
     row: TableDataRow,
     tableMeta: NonNullable<TableData['meta']>,
     columns: ReturnType<typeof decodeColumnOrder>
   ) {
-    const {location, organization} = this.props;
+    return columns.map((column, columnIndex) => {
+      const fieldRenderer =
+        getCustomFieldRenderer?.(column.key, tableMeta, organization) ??
+        getFieldRenderer(column.key, tableMeta);
 
-    return columns.map(column => {
-      const fieldRenderer = getFieldRenderer(column.name, tableMeta);
-      const rendered = fieldRenderer(row, {organization, location});
-      return <TableCell key={`${index}:${column.name}`}>{rendered}</TableCell>;
+      const unit = tableMeta.units?.[column.key];
+      let cell = fieldRenderer(row, {organization, location, eventView, unit});
+
+      if (column.key === 'transaction' && row.transaction) {
+        cell = (
+          <TransactionLink
+            to={getTargetForTransactionSummaryLink(
+              row,
+              organization,
+              projects,
+              eventView,
+              location
+            )}
+          >
+            {cell}
+          </TransactionLink>
+        );
+      }
+
+      return (
+        <TableCell key={`${index}-${columnIndex}:${column.name}`}>
+          {topResultsIndicators && columnIndex === 0 && (
+            <TopResultsIndicator count={topResultsIndicators} index={index} />
+          )}
+          {cell}
+        </TableCell>
+      );
     });
   }
 
-  render() {
-    const {className, loading, fields, metadata, data, title} = this.props;
-    const meta = metadata ?? {};
-    const columns = decodeColumnOrder(fields.map(field => ({field})));
-    return (
-      <Fragment>
-        {title && <h4>{title}</h4>}
-        <StyledPanelTable
-          className={className}
-          isLoading={loading}
-          headers={columns.map((column, index) => {
-            const align = fieldAlignment(column.name, column.type, meta);
-            return (
-              <HeadCell key={index} align={align}>
-                {column.name}
-              </HeadCell>
-            );
-          })}
-          isEmpty={!data?.length}
-          disablePadding
-        >
-          {data?.map((row, index) => this.renderRow(index, row, meta, columns))}
-        </StyledPanelTable>
-      </Fragment>
-    );
-  }
+  const meta = metadata ?? {};
+  const columns = decodeColumnOrder(
+    fields.map((field, index) => ({field, alias: fieldAliases[index]}))
+  );
+
+  return (
+    <Fragment>
+      {title && <h4>{title}</h4>}
+      <StyledPanelTable
+        css={css`
+          grid-template-columns: repeat(
+            ${columns.length},
+            ${minColumnWidth ? `minmax(${minColumnWidth}, auto)` : 'auto'}
+          );
+        `}
+        className={className}
+        isLoading={loading}
+        loader={loader}
+        headers={columns.map((column, index) => {
+          const align = fieldAlignment(column.name, column.type, meta);
+          const header =
+            column.column.alias || (fieldHeaderMap?.[column.key] ?? column.name);
+          return (
+            <HeadCell key={index} align={align}>
+              <Tooltip title={header}>
+                <StyledTruncate value={header} maxLength={30} expandable={false} />
+              </Tooltip>
+            </HeadCell>
+          );
+        })}
+        isEmpty={!data?.length}
+        stickyHeaders={stickyHeaders}
+        disablePadding
+      >
+        {data?.map((row, index) => renderRow(index, row, meta, columns))}
+      </StyledPanelTable>
+    </Fragment>
+  );
 }
+
+const StyledTruncate = styled(Truncate)`
+  white-space: nowrap;
+`;
 
 const StyledPanelTable = styled(PanelTable)`
   border-radius: 0;
@@ -73,7 +156,7 @@ const StyledPanelTable = styled(PanelTable)`
   border-bottom: 0;
 
   margin: 0;
-  ${/* sc-selector */ PanelTableHeader} {
+  ${PanelTableHeader} {
     height: min-content;
   }
 `;
@@ -86,8 +169,8 @@ const HeadCell = styled('div')<HeadCellProps>`
   padding: ${space(1)} ${space(3)};
 `;
 
-const TableCell = styled('div')`
+export const TableCell = styled('div')`
   padding: ${space(1)} ${space(3)};
 `;
 
-export default withOrganization(SimpleTableChart);
+export default SimpleTableChart;

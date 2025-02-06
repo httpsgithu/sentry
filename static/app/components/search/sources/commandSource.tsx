@@ -1,25 +1,29 @@
-import * as React from 'react';
-import {PlainRoute} from 'react-router';
+import {Component} from 'react';
 
-import {openHelpSearchModal, openSudo} from 'app/actionCreators/modal';
-import Access from 'app/components/acl/access';
-import {toggleLocaleDebug} from 'app/locale';
-import ConfigStore from 'app/stores/configStore';
-import {createFuzzySearch} from 'app/utils/createFuzzySearch';
+import {openHelpSearchModal} from 'sentry/actionCreators/modal';
+import {openSudo} from 'sentry/actionCreators/sudoModal';
+import Access from 'sentry/components/acl/access';
+import {NODE_ENV, USING_CUSTOMER_DOMAIN} from 'sentry/constants';
+import {t, toggleLocaleDebug} from 'sentry/locale';
+import ConfigStore from 'sentry/stores/configStore';
+import type {PlainRoute} from 'sentry/types/legacyReactRouter';
+import type {Fuse} from 'sentry/utils/fuzzySearch';
+import {createFuzzySearch} from 'sentry/utils/fuzzySearch';
+import {removeBodyTheme} from 'sentry/utils/removeBodyTheme';
 
-import {ChildProps, Result} from './types';
+import type {ChildProps, ResultItem} from './types';
 
 type Action = {
-  title: string;
+  action: () => void;
   description: string;
   requiresSuperuser: boolean;
-  action: () => void;
+  title: string;
 };
 
 const ACTIONS: Action[] = [
   {
-    title: 'Open Sudo Modal',
-    description: 'Open Sudo Modal to re-identify yourself.',
+    title: t('Open Sudo Modal'),
+    description: t('Open Sudo Modal to re-identify yourself.'),
     requiresSuperuser: false,
     action: () =>
       openSudo({
@@ -28,26 +32,29 @@ const ACTIONS: Action[] = [
   },
 
   {
-    title: 'Open Superuser Modal',
-    description: 'Open Superuser Modal to re-identify yourself.',
+    title: t('Open Superuser Modal'),
+    description: t('Open Superuser Modal to re-identify yourself.'),
     requiresSuperuser: true,
     action: () =>
       openSudo({
-        superuser: true,
+        isSuperuser: true,
+        needsReload: true,
       }),
   },
 
   {
-    title: 'Toggle dark mode',
-    description: 'Toggle dark mode (superuser only atm)',
-    requiresSuperuser: true,
-    action: () =>
-      ConfigStore.set('theme', ConfigStore.get('theme') === 'dark' ? 'light' : 'dark'),
+    title: t('Toggle dark mode'),
+    description: t('Toggle dark mode (superuser only atm)'),
+    requiresSuperuser: false,
+    action: () => {
+      removeBodyTheme();
+      ConfigStore.set('theme', ConfigStore.get('theme') === 'dark' ? 'light' : 'dark');
+    },
   },
 
   {
-    title: 'Toggle Translation Markers',
-    description: 'Toggles translation markers on or off in the application',
+    title: t('Toggle Translation Markers'),
+    description: t('Toggles translation markers on or off in the application'),
     requiresSuperuser: true,
     action: () => {
       toggleLocaleDebug();
@@ -56,8 +63,8 @@ const ACTIONS: Action[] = [
   },
 
   {
-    title: 'Search Documentation and FAQ',
-    description: 'Open the Documentation and FAQ search modal.',
+    title: t('Search Documentation and FAQ'),
+    description: t('Open the Documentation and FAQ search modal.'),
     requiresSuperuser: false,
     action: () => {
       openHelpSearchModal();
@@ -65,31 +72,53 @@ const ACTIONS: Action[] = [
   },
 ];
 
+// Add a command palette option for opening in production when using dev-ui
+if (NODE_ENV === 'development' && window?.__initialData?.isSelfHosted === false) {
+  const customerUrl = new URL(
+    USING_CUSTOMER_DOMAIN && window?.__initialData?.customerDomain?.organizationUrl
+      ? window.__initialData.customerDomain.organizationUrl
+      : window.__initialData?.links?.sentryUrl
+  );
+
+  ACTIONS.push({
+    title: t('Open in Production'),
+    description: t('Open the current page in sentry.io'),
+    requiresSuperuser: false,
+    action: () => {
+      const url = new URL(window.location.toString());
+      url.host = customerUrl.host;
+      url.protocol = customerUrl.protocol;
+      url.port = '';
+      window.open(url.toString(), '_blank');
+    },
+  });
+}
+
 type Props = {
+  children: (props: ChildProps) => React.ReactElement;
+  isSuperuser: boolean;
   /**
    * search term
    */
   query: string;
-  isSuperuser: boolean;
-  children: (props: ChildProps) => React.ReactElement;
-  /**
-   * fuse.js options
-   */
-  searchOptions?: Fuse.FuseOptions<Action>;
   /**
    * Array of routes to search
    */
   searchMap?: PlainRoute[];
+  /**
+   * fuse.js options
+   */
+  searchOptions?: Fuse.IFuseOptions<Action>;
 };
 
 type State = {
-  fuzzy: null | Fuse<Action, Fuse.FuseOptions<Action>>;
+  fuzzy: null | Fuse<Action>;
 };
 
 /**
  * This source is a hardcoded list of action creators and/or routes maybe
  */
-class CommandSource extends React.Component<Props, State> {
+class CommandSource extends Component<Props, State> {
   static defaultProps = {
     searchMap: [],
     searchOptions: {},
@@ -115,24 +144,23 @@ class CommandSource extends React.Component<Props, State> {
 
   render() {
     const {searchMap, query, isSuperuser, children} = this.props;
+    const {fuzzy} = this.state;
 
-    let results: Result[] = [];
-    if (this.state.fuzzy) {
-      const rawResults = this.state.fuzzy.search<Action, true, true>(query);
-      results = rawResults
+    const results =
+      fuzzy
+        ?.search(query)
         .filter(({item}) => !item.requiresSuperuser || isSuperuser)
-        .map<Result>(value => {
+        .map(value => {
           const {item, ...rest} = value;
           return {
             item: {
               ...item,
               sourceType: 'command',
               resultType: 'command',
-            },
+            } as ResultItem,
             ...rest,
           };
-        });
-    }
+        }) ?? [];
 
     return children({
       isLoading: searchMap === null,
@@ -141,11 +169,12 @@ class CommandSource extends React.Component<Props, State> {
   }
 }
 
-const CommandSourceWithFeature = (props: Omit<Props, 'isSuperuser'>) => (
-  <Access isSuperuser>
-    {({hasSuperuser}) => <CommandSource {...props} isSuperuser={hasSuperuser} />}
-  </Access>
-);
-
+function CommandSourceWithFeature(props: Omit<Props, 'isSuperuser'>) {
+  return (
+    <Access access={[]} isSuperuser>
+      {({hasSuperuser}) => <CommandSource {...props} isSuperuser={hasSuperuser} />}
+    </Access>
+  );
+}
 export default CommandSourceWithFeature;
 export {CommandSource};

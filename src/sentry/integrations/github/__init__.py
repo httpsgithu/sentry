@@ -1,3 +1,5 @@
-from sentry.utils.imports import import_submodules
+from sentry.rules import rules
 
-import_submodules(globals(), __name__, __path__)
+from .actions.create_ticket import GitHubCreateTicketAction
+
+rules.add(GitHubCreateTicketAction)

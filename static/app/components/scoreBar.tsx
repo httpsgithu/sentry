@@ -1,19 +1,19 @@
 import styled from '@emotion/styled';
 
-import theme from 'app/utils/theme';
+import theme from 'sentry/utils/theme';
 
 type Props = {
   score: number;
+  className?: string;
+  palette?: readonly string[];
+  paletteClassNames?: string[];
+  radius?: number;
   size?: number;
   thickness?: number;
-  radius?: number;
-  palette?: Readonly<string[]>;
-  className?: string;
-  paletteClassNames?: string[];
   vertical?: boolean;
 };
 
-const BaseScoreBar = ({
+function BaseScoreBar({
   score,
   className,
   vertical,
@@ -21,7 +21,8 @@ const BaseScoreBar = ({
   thickness = 4,
   radius = 3,
   palette = theme.similarity.colors,
-}: Props) => {
+  ...props
+}: Props) {
   const maxScore = palette.length;
 
   // Make sure score is between 0 and maxScore
@@ -38,7 +39,7 @@ const BaseScoreBar = ({
   };
 
   return (
-    <div className={className}>
+    <div className={className} {...props}>
       {[...Array(scoreInBounds)].map((_j, i) => (
         <Bar {...barProps} key={i} color={palette[paletteIndex]} />
       ))}
@@ -47,7 +48,7 @@ const BaseScoreBar = ({
       ))}
     </div>
   );
-};
+}
 
 const ScoreBar = styled(BaseScoreBar)`
   display: flex;

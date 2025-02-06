@@ -1,12 +1,12 @@
-import DateTime from 'app/components/dateTime';
-import Duration from 'app/components/duration';
-import {BannerContainer, BannerSummary} from 'app/components/events/styles';
-import {IconMute} from 'app/icons';
-import {t} from 'app/locale';
-import {ResolutionStatusDetails} from 'app/types';
+import {DateTime} from 'sentry/components/dateTime';
+import Duration from 'sentry/components/duration';
+import {BannerContainer, BannerSummary} from 'sentry/components/events/styles';
+import {IconMute} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import type {IgnoredStatusDetails} from 'sentry/types/group';
 
 type Props = {
-  statusDetails: ResolutionStatusDetails;
+  statusDetails: IgnoredStatusDetails;
 };
 
 function MutedBox({statusDetails}: Props) {
@@ -21,7 +21,8 @@ function MutedBox({statusDetails}: Props) {
           <DateTime date={ignoreUntil} />
         </strong>
       );
-    } else if (ignoreCount && ignoreWindow) {
+    }
+    if (ignoreCount && ignoreWindow) {
       return t(
         'This issue has been ignored until it occurs %s time(s) in %s',
         <strong>{ignoreCount.toLocaleString()}</strong>,
@@ -29,12 +30,14 @@ function MutedBox({statusDetails}: Props) {
           <Duration seconds={ignoreWindow * 60} />
         </strong>
       );
-    } else if (ignoreCount) {
+    }
+    if (ignoreCount) {
       return t(
         'This issue has been ignored until it occurs %s more time(s)',
         <strong>{ignoreCount.toLocaleString()}</strong>
       );
-    } else if (ignoreUserCount && ignoreUserWindow) {
+    }
+    if (ignoreUserCount && ignoreUserWindow) {
       return t(
         'This issue has been ignored until it affects %s user(s) in %s',
         <strong>{ignoreUserCount.toLocaleString()}</strong>,
@@ -42,7 +45,8 @@ function MutedBox({statusDetails}: Props) {
           <Duration seconds={ignoreUserWindow * 60} />
         </strong>
       );
-    } else if (ignoreUserCount) {
+    }
+    if (ignoreUserCount) {
       return t(
         'This issue has been ignored until it affects %s more user(s)',
         <strong>{ignoreUserCount.toLocaleString()}</strong>
@@ -55,7 +59,7 @@ function MutedBox({statusDetails}: Props) {
   return (
     <BannerContainer priority="default">
       <BannerSummary>
-        <IconMute color="red300" size="sm" />
+        <IconMute color="dangerText" size="sm" />
         <span>
           {renderReason()}&nbsp;&mdash;&nbsp;
           {t(

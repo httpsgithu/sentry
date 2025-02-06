@@ -1,25 +1,24 @@
-import {Component, ComponentClass, ReactPortal} from 'react';
-import ReactDOM from 'react-dom';
+import {Component} from 'react';
+import {createPortal} from 'react-dom';
 import {Manager, Popper, Reference} from 'react-popper';
-import {browserHistory} from 'react-router';
 import styled from '@emotion/styled';
-import {Location, LocationDescriptorObject} from 'history';
-import * as PopperJS from 'popper.js';
+import type {Location, LocationDescriptorObject} from 'history';
 
-import {GetActorPropsFn} from 'app/components/dropdownMenu';
-import MenuItem from 'app/components/menuItem';
-import Radio from 'app/components/radio';
-import {t} from 'app/locale';
-import {TableData} from 'app/utils/discover/discoverQuery';
-import EventView from 'app/utils/discover/eventView';
+import type {GetActorPropsFn} from 'sentry/components/deprecatedDropdownMenu';
+import MenuItem from 'sentry/components/menuItem';
+import Radio from 'sentry/components/radio';
+import {t} from 'sentry/locale';
+import {browserHistory} from 'sentry/utils/browserHistory';
+import type {TableData} from 'sentry/utils/discover/discoverQuery';
+import type EventView from 'sentry/utils/discover/eventView';
 
 export type TitleProps = Partial<ReturnType<GetActorPropsFn>>;
 
 type Props = {
-  title: ComponentClass<TitleProps>;
   eventView: EventView;
-  tableMeta: TableData['meta'];
   location: Location;
+  tableMeta: TableData['meta'];
+  title: React.ComponentType<TitleProps>;
 };
 
 type State = {
@@ -27,19 +26,6 @@ type State = {
 };
 
 class OperationSort extends Component<Props, State> {
-  constructor(props: Props) {
-    super(props);
-
-    let portal = document.getElementById('transaction-events-portal');
-    if (!portal) {
-      portal = document.createElement('div');
-      portal.setAttribute('id', 'transaction-events-portal');
-      document.body.appendChild(portal);
-    }
-    this.portalEl = portal;
-    this.menuEl = null;
-  }
-
   state: State = {
     isOpen: false,
   };
@@ -55,11 +41,9 @@ class OperationSort extends Component<Props, State> {
 
   componentWillUnmount() {
     document.removeEventListener('click', this.handleClickOutside, true);
-    this.portalEl.remove();
   }
 
-  private portalEl: Element;
-  private menuEl: Element | null;
+  private menuEl: Element | null = null;
 
   handleClickOutside = (event: MouseEvent) => {
     if (!this.menuEl) {
@@ -78,7 +62,7 @@ class OperationSort extends Component<Props, State> {
     this.setState(({isOpen}) => ({isOpen: !isOpen}));
   };
 
-  generateSortLink(field): LocationDescriptorObject | undefined {
+  generateSortLink(field: any): LocationDescriptorObject | undefined {
     const {eventView, tableMeta, location} = this.props;
     if (!tableMeta) {
       return undefined;
@@ -93,7 +77,7 @@ class OperationSort extends Component<Props, State> {
     };
   }
 
-  renderMenuItem(operation, title) {
+  renderMenuItem(operation: any, title: any) {
     const {eventView} = this.props;
     return (
       <DropdownMenuItem>
@@ -105,7 +89,9 @@ class OperationSort extends Component<Props, State> {
               checked={eventView.sorts.some(({field}) => field === operation)}
               onClick={() => {
                 const sortLink = this.generateSortLink({field: operation});
-                if (sortLink) browserHistory.push(sortLink);
+                if (sortLink) {
+                  browserHistory.push(sortLink);
+                }
               }}
             />
             <span>{title}</span>
@@ -127,18 +113,19 @@ class OperationSort extends Component<Props, State> {
   }
 
   renderMenu() {
-    const modifiers: PopperJS.Modifiers = {
-      hide: {
+    const modifiers = [
+      {
+        name: 'hide',
         enabled: false,
       },
-      preventOverflow: {
-        padding: 10,
+      {
+        name: 'preventOverflow',
         enabled: true,
-        boundariesElement: 'viewport',
+        options: {padding: 10},
       },
-    };
+    ];
 
-    return ReactDOM.createPortal(
+    return createPortal(
       <Popper placement="top" modifiers={modifiers}>
         {({ref: popperRef, style, placement}) => (
           <DropdownWrapper
@@ -153,14 +140,14 @@ class OperationSort extends Component<Props, State> {
           </DropdownWrapper>
         )}
       </Popper>,
-      this.portalEl
+      document.body
     );
   }
 
   render() {
     const {title: Title} = this.props;
     const {isOpen} = this.state;
-    const menu: ReactPortal | null = isOpen ? this.renderMenu() : null;
+    const menu: React.ReactPortal | null = isOpen ? this.renderMenu() : null;
 
     return (
       <Manager>
@@ -181,7 +168,9 @@ const DropdownWrapper = styled('div')`
   /* Adapted from the dropdown-menu class */
   border: none;
   border-radius: 2px;
-  box-shadow: 0 0 0 1px rgba(52, 60, 69, 0.2), 0 1px 3px rgba(70, 82, 98, 0.25);
+  box-shadow:
+    0 0 0 1px rgba(52, 60, 69, 0.2),
+    0 1px 3px rgba(70, 82, 98, 0.25);
   background-clip: padding-box;
   background-color: ${p => p.theme.background};
   width: 220px;
@@ -260,11 +249,11 @@ const MenuItemContent = styled('div')`
 const RadioLabel = styled('label')`
   display: grid;
   cursor: pointer;
-  grid-gap: 0.25em 0.5em;
+  gap: 0.25em 0.5em;
   grid-template-columns: max-content auto;
   align-items: center;
   outline: none;
-  font-weight: normal;
+  font-weight: ${p => p.theme.fontWeightNormal};
   margin: 0;
 `;
 

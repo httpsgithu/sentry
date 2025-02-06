@@ -1,28 +1,30 @@
 import {PureComponent} from 'react';
-import {RouteComponentProps} from 'react-router';
 import {css} from '@emotion/react';
 import styled from '@emotion/styled';
 
-import Access from 'app/components/acl/access';
-import ExternalLink from 'app/components/links/externalLink';
-import Link from 'app/components/links/link';
-import Switch from 'app/components/switchButton';
-import {t} from 'app/locale';
-import PluginIcon from 'app/plugins/components/pluginIcon';
-import {Organization, Plugin, Project} from 'app/types';
-import getDynamicText from 'app/utils/getDynamicText';
-import {trackIntegrationAnalytics} from 'app/utils/integrationUtil';
-import recreateRoute from 'app/utils/recreateRoute';
-import withOrganization from 'app/utils/withOrganization';
+import Access from 'sentry/components/acl/access';
+import ExternalLink from 'sentry/components/links/externalLink';
+import Link from 'sentry/components/links/link';
+import Switch from 'sentry/components/switchButton';
+import {t} from 'sentry/locale';
+import PluginIcon from 'sentry/plugins/components/pluginIcon';
+import type {Plugin} from 'sentry/types/integrations';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import getDynamicText from 'sentry/utils/getDynamicText';
+import {trackIntegrationAnalytics} from 'sentry/utils/integrationUtil';
+import recreateRoute from 'sentry/utils/recreateRoute';
+import withOrganization from 'sentry/utils/withOrganization';
 
 const grayText = css`
   color: #979ba0;
 `;
 
 type Props = {
+  onChange: (id: string, enabled: boolean) => void;
   organization: Organization;
   project: Project;
-  onChange: (id: string, enabled: boolean) => void;
 } & Plugin &
   Pick<RouteComponentProps<{}, {}>, 'params' | 'routes'>;
 
@@ -40,12 +42,21 @@ class ProjectPluginRow extends PureComponent<Props> {
   };
 
   render() {
-    const {id, name, slug, version, author, hasConfiguration, enabled, canDisable} =
-      this.props;
+    const {
+      id,
+      name,
+      slug,
+      version,
+      author,
+      hasConfiguration,
+      enabled,
+      canDisable,
+      project,
+    } = this.props;
 
     const configureUrl = recreateRoute(id, this.props);
     return (
-      <Access access={['project:write']}>
+      <Access access={['project:write']} project={project}>
         {({hasAccess}) => {
           const LinkOrSpan = hasAccess ? Link : 'span';
 

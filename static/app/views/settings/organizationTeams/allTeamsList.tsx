@@ -1,33 +1,25 @@
 import {Fragment} from 'react';
 import styled from '@emotion/styled';
 
-import {openCreateTeamModal} from 'app/actionCreators/modal';
-import Button from 'app/components/button';
-import {tct} from 'app/locale';
-import {Organization, Team} from 'app/types';
-import EmptyMessage from 'app/views/settings/components/emptyMessage';
-import TextBlock from 'app/views/settings/components/text/textBlock';
+import {openCreateTeamModal} from 'sentry/actionCreators/modal';
+import {Button} from 'sentry/components/button';
+import EmptyMessage from 'sentry/components/emptyMessage';
+import {t, tct} from 'sentry/locale';
+import type {Organization, Team} from 'sentry/types/organization';
+import TextBlock from 'sentry/views/settings/components/text/textBlock';
 
 import AllTeamsRow from './allTeamsRow';
 
 type Props = {
-  urlPrefix: string;
   access: Record<string, any>;
-  organization: Organization;
-  teamList: Array<Team>;
   openMembership: boolean;
+  organization: Organization;
+  teamList: Team[];
 };
 
-function AllTeamsList({
-  organization,
-  urlPrefix,
-  openMembership,
-  teamList,
-  access,
-}: Props) {
+function AllTeamsList({organization, openMembership, teamList, access}: Props) {
   const teamNodes = teamList.map(team => (
     <AllTeamsRow
-      urlPrefix={urlPrefix}
       team={team}
       organization={organization}
       openMembership={openMembership}
@@ -52,6 +44,7 @@ function AllTeamsList({
                         organization,
                       })
                     }
+                    aria-label={t('Create team')}
                   />
                 ),
               })
@@ -67,5 +60,5 @@ function AllTeamsList({
 export default AllTeamsList;
 
 const StyledButton = styled(Button)`
-  font-size: ${p => p.theme.fontSizeLarge};
+  font-size: ${p => p.theme.fontSizeMedium};
 `;

@@ -1,20 +1,22 @@
 import omit from 'lodash/omit';
 import moment from 'moment-timezone';
 
-import {getTraceDateTimeRange} from 'app/components/events/interfaces/spans/utils';
-import {ALL_ACCESS_PROJECTS} from 'app/constants/globalSelectionHeader';
-import {OrganizationSummary} from 'app/types';
-import {Event, EventTransaction} from 'app/types/event';
-import {trackAnalyticsEvent} from 'app/utils/analytics';
-import EventView from 'app/utils/discover/eventView';
-import {DiscoverQueryProps} from 'app/utils/discover/genericDiscoverQuery';
-import {
+import {getTraceDateTimeRange} from 'sentry/components/events/interfaces/spans/utils';
+import {ALL_ACCESS_PROJECTS} from 'sentry/constants/pageFilters';
+import type {Event, EventTransaction} from 'sentry/types/event';
+import type {OrganizationSummary} from 'sentry/types/organization';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import EventView from 'sentry/utils/discover/eventView';
+import type {DiscoverQueryProps} from 'sentry/utils/discover/genericDiscoverQuery';
+import type {
   QuickTrace,
   QuickTraceEvent,
+  TraceError,
   TraceFull,
   TraceFullDetailed,
   TraceLite,
-} from 'app/utils/performance/quickTrace/types';
+} from 'sentry/utils/performance/quickTrace/types';
+import type {TraceRoot} from 'sentry/views/performance/traceDetails/types';
 
 export function isTransaction(event: Event): event is EventTransaction {
   return event.type === 'transaction';
@@ -30,11 +32,8 @@ export function isCurrentEvent(
 ): boolean {
   if (isTransaction(currentEvent)) {
     return event.event_id === currentEvent.id;
-  } else {
-    return (
-      event.errors !== undefined && event.errors.some(e => e.event_id === currentEvent.id)
-    );
   }
+  return event.errors?.some(e => e.event_id === currentEvent.id) ?? false;
 }
 
 type PathNode = {
@@ -106,29 +105,29 @@ function simplifyEvent(event: TraceFull): QuickTraceEvent {
 
 type ParsedQuickTrace = {
   /**
-   * `null` represents the lack of a root. It may still have a parent
-   */
-  root: QuickTraceEvent | null;
-  /**
    * `[]` represents the lack of ancestors in a full trace navigator
    * `null` represents the uncertainty of ancestors in a lite trace navigator
    */
   ancestors: QuickTraceEvent[] | null;
   /**
-   * `null` represents either the lack of a direct parent or the uncertainty
-   * of what the parent is
-   */
-  parent: QuickTraceEvent | null;
-  current: QuickTraceEvent;
-  /**
    * `[]` represents the lack of children in a full/lite trace navigator
    */
   children: QuickTraceEvent[];
+  current: QuickTraceEvent;
   /**
    * `[]` represents the lack of descendants in a full trace navigator
    * `null` represents the uncertainty of descendants in a lite trace navigator
    */
   descendants: QuickTraceEvent[] | null;
+  /**
+   * `null` represents either the lack of a direct parent or the uncertainty
+   * of what the parent is
+   */
+  parent: QuickTraceEvent | null;
+  /**
+   * `null` represents the lack of a root. It may still have a parent
+   */
+  root: QuickTraceEvent | null;
 };
 
 export function parseQuickTrace(
@@ -174,18 +173,20 @@ export function parseQuickTrace(
         e.generation === 0
     ) ?? null;
 
-  const isChildren = e => e.parent_event_id === current.event_id;
+  const isChildren = (e: any) => e.parent_event_id === current.event_id;
 
-  const isDescendant = e =>
-    // the current generation needs to be known to determine a descendant
+  const isDescendant = (
+    e: any // the current generation needs to be known to determine a descendant
+  ) =>
     current.generation !== null &&
     // the event's generation needs to be known to determine a descendant
     e.generation !== null &&
     // a descendant is the generation after the direct children
     current.generation + 1 < e.generation;
 
-  const isAncestor = e =>
-    // the current generation needs to be known to determine an ancestor
+  const isAncestor = (
+    e: any // the current generation needs to be known to determine an ancestor
+  ) =>
     current.generation !== null &&
     // the event's generation needs to be known to determine an ancestor
     e.generation !== null &&
@@ -230,7 +231,10 @@ function sortTraceLite(trace: TraceLite): TraceLite {
   return trace.sort((a, b) => b['transaction.duration'] - a['transaction.duration']);
 }
 
-export function getTraceRequestPayload({eventView, location}: DiscoverQueryProps) {
+export function getTraceRequestPayload({
+  eventView,
+  location,
+}: Pick<DiscoverQueryProps, 'eventView' | 'location'>) {
   return omit(eventView.getEventsAPIPayload(location), ['field', 'sort', 'per_page']);
 }
 
@@ -239,9 +243,9 @@ export function makeEventView({
   end,
   statsPeriod,
 }: {
-  start?: string;
   end?: string;
-  statsPeriod?: string;
+  start?: string;
+  statsPeriod?: string | null;
 }) {
   return EventView.fromSavedQuery({
     id: undefined,
@@ -255,11 +259,11 @@ export function makeEventView({
     environment: [],
     start,
     end,
-    range: statsPeriod,
+    range: statsPeriod ?? undefined,
   });
 }
 
-export function getTraceTimeRangeFromEvent(event: Event): {start: string; end: string} {
+export function getTraceTimeRangeFromEvent(event: Event): {end: string; start: string} {
   const start = isTransaction(event)
     ? event.startTimestamp
     : moment(event.dateReceived ? event.dateReceived : event.dateCreated).valueOf() /
@@ -303,19 +307,33 @@ export function filterTrace(
   );
 }
 
-export function isTraceFull(transaction): transaction is TraceFull {
-  return Boolean((transaction as TraceFull).event_id);
+export function isTraceTransaction<U extends TraceFull | TraceFullDetailed>(
+  transaction: TraceRoot | TraceError | QuickTraceEvent | U
+): transaction is U {
+  return 'transaction' in transaction;
 }
 
-export function isTraceFullDetailed(transaction): transaction is TraceFullDetailed {
-  return Boolean((transaction as TraceFullDetailed).event_id);
+export function isTraceError(
+  transaction: TraceRoot | TraceError | TraceFullDetailed | QuickTraceEvent
+): transaction is TraceError {
+  return 'event_type' in transaction && transaction.event_type === 'error';
+}
+
+export function isTraceRoot(
+  transaction: TraceRoot | TraceError | TraceFullDetailed
+): transaction is TraceRoot {
+  return 'traceSlug' in transaction;
+}
+
+export function isTraceSplitResult<U extends object, V extends object>(
+  result: U | V
+): result is U {
+  return 'transactions' in result;
 }
 
 function handleProjectMeta(organization: OrganizationSummary, projects: number) {
-  trackAnalyticsEvent({
-    eventKey: 'quick_trace.connected_services',
-    eventName: 'Quick Trace: Connected Services',
-    organization_id: parseInt(organization.id, 10),
+  trackAnalytics('quick_trace.connected_services', {
+    organization: organization.id,
     projects,
   });
 }

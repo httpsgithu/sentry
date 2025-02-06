@@ -1,12 +1,13 @@
-import {Location} from 'history';
+import type {Location} from 'history';
 
-import {t} from 'app/locale';
-import {Organization, Project} from 'app/types';
-import EventView from 'app/utils/discover/eventView';
-import {decodeScalar} from 'app/utils/queryString';
-import {MutableSearch} from 'app/utils/tokenizeSearch';
-import withOrganization from 'app/utils/withOrganization';
-import withProjects from 'app/utils/withProjects';
+import {t} from 'sentry/locale';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import EventView from 'sentry/utils/discover/eventView';
+import {decodeScalar} from 'sentry/utils/queryString';
+import {MutableSearch} from 'sentry/utils/tokenizeSearch';
+import withOrganization from 'sentry/utils/withOrganization';
+import withProjects from 'sentry/utils/withProjects';
 
 import PageLayout from '../pageLayout';
 import Tab from '../tabs';
@@ -27,11 +28,10 @@ function TransactionTags(props: Props) {
       location={location}
       organization={organization}
       projects={projects}
-      tab={Tab.Tags}
+      tab={Tab.TAGS}
       getDocumentTitle={getDocumentTitle}
       generateEventView={generateEventView}
       childComponent={TagsPageContent}
-      features={['performance-tag-page']}
     />
   );
 }
@@ -47,9 +47,19 @@ function getDocumentTitle(transactionName: string): string {
   return [t('Summary'), t('Tags')].join(' \u2014 ');
 }
 
-function generateEventView(location: Location, transactionName: string): EventView {
-  const query = decodeScalar(location.query.query, '');
+function generateEventView({
+  location,
+  transactionName,
+}: {
+  location: Location;
+  transactionName: string;
+}): EventView {
+  const query = `(${decodeScalar(location.query.query, '')})`;
   const conditions = new MutableSearch(query);
+
+  conditions.setFilterValues('event.type', ['transaction']);
+  conditions.setFilterValues('transaction', [transactionName]);
+
   const eventView = EventView.fromNewQueryWithLocation(
     {
       id: undefined,
@@ -62,8 +72,6 @@ function generateEventView(location: Location, transactionName: string): EventVi
     location
   );
 
-  eventView.additionalConditions.setFilterValues('event.type', ['transaction']);
-  eventView.additionalConditions.setFilterValues('transaction', [transactionName]);
   return eventView;
 }
 

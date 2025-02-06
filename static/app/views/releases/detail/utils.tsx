@@ -1,37 +1,28 @@
-import {Location} from 'history';
+import type {Theme} from '@emotion/react';
+import type {Location} from 'history';
 import pick from 'lodash/pick';
-import moment from 'moment';
+import type {Moment} from 'moment-timezone';
+import moment from 'moment-timezone';
 
-import MarkLine from 'app/components/charts/components/markLine';
-import {parseStatsPeriod} from 'app/components/organizations/timeRangeSelector/utils';
-import {DEFAULT_STATS_PERIOD} from 'app/constants';
-import {URL_PARAM} from 'app/constants/globalSelectionHeader';
-import {t} from 'app/locale';
-import {
+import MarkLine from 'sentry/components/charts/components/markLine';
+import {parseStatsPeriod} from 'sentry/components/timeRangeSelector/utils';
+import {URL_PARAM} from 'sentry/constants/pageFilters';
+import {t} from 'sentry/locale';
+import type {Series} from 'sentry/types/echarts';
+import type {
   Commit,
   CommitFile,
   FilesByRepository,
-  GlobalSelection,
-  Organization,
-  ReleaseComparisonChartType,
-  ReleaseProject,
-  ReleaseWithHealth,
   Repository,
-} from 'app/types';
-import {Series} from 'app/types/echarts';
-import {getUtcDateString} from 'app/utils/dates';
-import EventView from 'app/utils/discover/eventView';
-import {decodeList} from 'app/utils/queryString';
-import {Theme} from 'app/utils/theme';
-import {MutableSearch} from 'app/utils/tokenizeSearch';
-import {isProjectMobileForReleases} from 'app/views/releases/list';
+} from 'sentry/types/integrations';
+import type {ReleaseProject, ReleaseWithHealth} from 'sentry/types/release';
+import {ReleaseComparisonChartType} from 'sentry/types/release';
+import {decodeList} from 'sentry/utils/queryString';
 
-import {getReleaseBounds, getReleaseParams} from '../utils';
+import {getReleaseBounds, getReleaseParams, isMobileRelease} from '../utils';
 import {commonTermsDescription, SessionTerm} from '../utils/sessionTerm';
 
-export type CommitsByRepository = {
-  [key: string]: Commit[];
-};
+type CommitsByRepository = Record<string, Commit[]>;
 
 /**
  * Convert list of individual file changes into a per-file summary grouped by repository
@@ -44,18 +35,21 @@ export function getFilesByRepository(fileList: CommitFile[]) {
       filesByRepository[repoName] = {};
     }
 
-    if (!filesByRepository[repoName].hasOwnProperty(filename)) {
-      filesByRepository[repoName][filename] = {
+    if (!filesByRepository[repoName]!.hasOwnProperty(filename)) {
+      // @ts-expect-error TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+      filesByRepository[repoName]![filename] = {
         authors: {},
         types: new Set(),
       };
     }
 
     if (author.email) {
-      filesByRepository[repoName][filename].authors[author.email] = author;
+      // @ts-expect-error TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+      filesByRepository[repoName]![filename].authors[author.email] = author;
     }
 
-    filesByRepository[repoName][filename].types.add(type);
+    // @ts-expect-error TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+    filesByRepository[repoName]![filename].types.add(type);
 
     return filesByRepository;
   }, {});
@@ -65,14 +59,14 @@ export function getFilesByRepository(fileList: CommitFile[]) {
  * Convert list of individual commits into a summary grouped by repository
  */
 export function getCommitsByRepository(commitList: Commit[]): CommitsByRepository {
-  return commitList.reduce((commitsByRepository, commit) => {
+  return commitList.reduce<CommitsByRepository>((commitsByRepository, commit) => {
     const repositoryName = commit.repository?.name ?? t('unknown');
 
     if (!commitsByRepository.hasOwnProperty(repositoryName)) {
       commitsByRepository[repositoryName] = [];
     }
 
-    commitsByRepository[repositoryName].push(commit);
+    commitsByRepository[repositoryName]!.push(commit);
 
     return commitsByRepository;
   }, {});
@@ -84,8 +78,8 @@ export function getCommitsByRepository(commitList: Commit[]): CommitsByRepositor
 
 type GetQueryProps = {
   location: Location;
-  perPage?: number;
   activeRepository?: Repository;
+  perPage?: number;
 };
 
 export function getQuery({location, perPage = 40, activeRepository}: GetQueryProps) {
@@ -98,48 +92,21 @@ export function getQuery({location, perPage = 40, activeRepository}: GetQueryPro
     return query;
   }
 
-  return {...query, repo_name: activeRepository.name};
+  return {
+    ...query,
+    repo_id: activeRepository.externalId,
+    repo_name: activeRepository.name,
+  };
 }
 
 /**
  * Get repositories to render according to the activeRepository
  */
-export function getReposToRender(repos: Array<string>, activeRepository?: Repository) {
+export function getReposToRender(repos: string[], activeRepository?: Repository) {
   if (!activeRepository) {
     return repos;
   }
   return [activeRepository.name];
-}
-
-/**
- * Get high level transaction information for this release
- */
-export function getReleaseEventView(
-  selection: GlobalSelection,
-  version: string,
-  _organization: Organization
-): EventView {
-  const {projects, environments, datetime} = selection;
-  const {start, end, period} = datetime;
-
-  const discoverQuery = {
-    id: undefined,
-    version: 2,
-    name: `${t('Release Apdex')}`,
-    fields: ['apdex()'],
-    query: new MutableSearch([
-      `release:${version}`,
-      'event.type:transaction',
-      'count():>0',
-    ]).formatString(),
-    range: period,
-    environment: environments,
-    projects,
-    start: start ? getUtcDateString(start) : undefined,
-    end: end ? getUtcDateString(end) : undefined,
-  } as const;
-
-  return EventView.fromSavedQuery(discoverQuery);
 }
 
 export const releaseComparisonChartLabels = {
@@ -154,7 +121,6 @@ export const releaseComparisonChartLabels = {
   [ReleaseComparisonChartType.ERRORED_USERS]: t('Errored'),
   [ReleaseComparisonChartType.CRASHED_USERS]: t('Crashed User Rate'),
   [ReleaseComparisonChartType.SESSION_COUNT]: t('Session Count'),
-  [ReleaseComparisonChartType.SESSION_DURATION]: t('Session Duration p50'),
   [ReleaseComparisonChartType.USER_COUNT]: t('User Count'),
   [ReleaseComparisonChartType.ERROR_COUNT]: t('Error Count'),
   [ReleaseComparisonChartType.TRANSACTION_COUNT]: t('Transaction Count'),
@@ -173,14 +139,15 @@ export const releaseComparisonChartTitles = {
   [ReleaseComparisonChartType.ERRORED_USERS]: t('Errored User Rate'),
   [ReleaseComparisonChartType.CRASHED_USERS]: t('Crashed User Rate'),
   [ReleaseComparisonChartType.SESSION_COUNT]: t('Session Count'),
-  [ReleaseComparisonChartType.SESSION_DURATION]: t('Session Duration'),
   [ReleaseComparisonChartType.USER_COUNT]: t('User Count'),
   [ReleaseComparisonChartType.ERROR_COUNT]: t('Error Count'),
   [ReleaseComparisonChartType.TRANSACTION_COUNT]: t('Transaction Count'),
   [ReleaseComparisonChartType.FAILURE_RATE]: t('Failure Rate'),
 };
 
-export const releaseComparisonChartHelp = {
+export const releaseComparisonChartHelp: Partial<
+  Record<ReleaseComparisonChartType, string>
+> = {
   [ReleaseComparisonChartType.CRASH_FREE_SESSIONS]:
     commonTermsDescription[SessionTerm.CRASH_FREE_SESSIONS],
   [ReleaseComparisonChartType.CRASH_FREE_USERS]:
@@ -192,8 +159,8 @@ export const releaseComparisonChartHelp = {
 };
 
 type GenerateReleaseMarklineOptions = {
-  hideLabel?: boolean;
   axisIndex?: number;
+  hideLabel?: boolean;
 };
 
 function generateReleaseMarkLine(
@@ -217,14 +184,17 @@ function generateReleaseMarkLine(
       label: {
         position: 'insideEndBottom',
         formatter: hideLabel ? '' : title,
+        // @ts-expect-error TS(2322): Type '{ position: "insideEndBottom"; formatter: st... Remove this comment to see the full error message
         font: 'Rubik',
-        fontSize: 11,
-      } as any, // TODO(ts): weird echart types,
+        fontSize: 14,
+        color: theme.chartLabel,
+        backgroundColor: theme.chartOther,
+      },
       data: [
         {
           xAxis: position,
         },
-      ] as any, // TODO(ts): weird echart types
+      ],
     }),
   };
 }
@@ -245,11 +215,10 @@ export function generateReleaseMarkLines(
   const markLines: Series[] = [];
   const adoptionStages = release.adoptionStages?.[project.slug];
   const isSingleEnv = decodeList(location.query.environment).length === 1;
+  const releaseBounds = getReleaseBounds(release);
   const {statsPeriod, ...releaseParamsRest} = getReleaseParams({
     location,
-    releaseBounds: getReleaseBounds(release),
-    defaultStatsPeriod: DEFAULT_STATS_PERIOD, // this will be removed once we get rid off legacy release details
-    allowEmptyPeriod: true,
+    releaseBounds,
   });
   let {start, end} = releaseParamsRest;
   const isDefaultPeriod = !(
@@ -265,7 +234,10 @@ export function generateReleaseMarkLines(
   }
 
   const releaseCreated = moment(release.dateCreated).startOf('minute');
-  if (releaseCreated.isBetween(start, end) || isDefaultPeriod) {
+  if (
+    releaseCreated.isBetween(start, end) ||
+    (isDefaultPeriod && releaseBounds.type === 'normal')
+  ) {
     markLines.push(
       generateReleaseMarkLine(
         releaseMarkLinesLabels.created,
@@ -276,13 +248,15 @@ export function generateReleaseMarkLines(
     );
   }
 
-  if (!isSingleEnv || !isProjectMobileForReleases(project.platform)) {
+  if (!isSingleEnv || !isMobileRelease(project.platform)) {
     // for now want to show marklines only on mobile platforms with single environment selected
     return markLines;
   }
 
-  const releaseAdopted = adoptionStages?.adopted && moment(adoptionStages.adopted);
-  if (releaseAdopted && releaseAdopted.isBetween(start, end)) {
+  const releaseAdopted: Moment | undefined = adoptionStages?.adopted
+    ? moment(adoptionStages.adopted)
+    : undefined;
+  if (releaseAdopted?.isBetween(start, end)) {
     markLines.push(
       generateReleaseMarkLine(
         releaseMarkLinesLabels.adopted,
@@ -293,8 +267,10 @@ export function generateReleaseMarkLines(
     );
   }
 
-  const releaseReplaced = adoptionStages?.unadopted && moment(adoptionStages.unadopted);
-  if (releaseReplaced && releaseReplaced.isBetween(start, end)) {
+  const releaseReplaced: Moment | undefined = adoptionStages?.unadopted
+    ? moment(adoptionStages.unadopted)
+    : undefined;
+  if (releaseReplaced?.isBetween(start, end)) {
     markLines.push(
       generateReleaseMarkLine(
         releaseMarkLinesLabels.unadopted,

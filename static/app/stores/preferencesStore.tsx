@@ -1,56 +1,52 @@
-import Reflux from 'reflux';
+import {createStore} from 'reflux';
 
-import PreferencesActions from '../actions/preferencesActions';
+import type {StrictStoreDefinition} from './types';
 
 type Preferences = {
   /**
    * Is the sidebar collapsed to the side
    */
-  collapsed: boolean;
+  collapsed?: boolean;
 };
 
-type PreferenceStoreInterface = {
-  prefs: Preferences;
-
-  getInitialState(): Preferences;
-  reset(): void;
+interface PreferenceStoreDefinition extends StrictStoreDefinition<Preferences> {
+  hideSidebar(): void;
   loadInitialState(prefs: Preferences): void;
-};
+  reset(): void;
+  showSidebar(): void;
+}
 
-const preferenceStoreConfig: Reflux.StoreDefinition & PreferenceStoreInterface = {
-  prefs: {} as Preferences,
+const storeConfig: PreferenceStoreDefinition = {
+  state: {},
 
   init() {
+    // XXX: Do not use `this.listenTo` in this store. We avoid usage of reflux
+    // listeners due to their leaky nature in tests.
+
     this.reset();
-
-    this.listenTo(PreferencesActions.hideSidebar, this.onHideSidebar);
-    this.listenTo(PreferencesActions.showSidebar, this.onShowSidebar);
-    this.listenTo(PreferencesActions.loadInitialState, this.loadInitialState);
-  },
-
-  getInitialState() {
-    return this.prefs;
   },
 
   reset() {
-    this.prefs = {
-      collapsed: false,
-    };
+    this.state = {collapsed: false};
   },
 
-  loadInitialState(prefs: Preferences) {
-    this.prefs = {...prefs};
-    this.trigger(this.prefs);
+  loadInitialState(prefs) {
+    this.state = {...prefs};
+    this.trigger(this.state);
   },
 
-  onHideSidebar() {
-    this.prefs.collapsed = true;
-    this.trigger(this.prefs);
+  hideSidebar() {
+    this.state = {...this.state, collapsed: true};
+    this.trigger(this.state);
   },
 
-  onShowSidebar() {
-    this.prefs.collapsed = false;
-    this.trigger(this.prefs);
+  showSidebar() {
+    this.state = {...this.state, collapsed: false};
+    this.trigger(this.state);
+  },
+
+  getState() {
+    return this.state;
   },
 };
 
@@ -58,7 +54,5 @@ const preferenceStoreConfig: Reflux.StoreDefinition & PreferenceStoreInterface =
  * This store is used to hold local user preferences
  * Side-effects (like reading/writing to cookies) are done in associated actionCreators
  */
-const PreferenceStore = Reflux.createStore(preferenceStoreConfig) as Reflux.Store &
-  PreferenceStoreInterface;
-
+const PreferenceStore = createStore(storeConfig);
 export default PreferenceStore;

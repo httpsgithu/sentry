@@ -1,64 +1,73 @@
-import * as React from 'react';
 import styled from '@emotion/styled';
-import {AnimatePresence, motion, Variants} from 'framer-motion';
+import type {HTMLMotionProps, Variants} from 'framer-motion';
+import {AnimatePresence, motion} from 'framer-motion';
 
-import Button from 'app/components/button';
-import {IconCheckmark} from 'app/icons';
-import {t} from 'app/locale';
-import pulsingIndicatorStyles from 'app/styles/pulsingIndicator';
-import space from 'app/styles/space';
-import {Group} from 'app/types';
-import trackAdvancedAnalyticsEvent from 'app/utils/analytics/trackAdvancedAnalyticsEvent';
-import EventWaiter from 'app/utils/eventWaiter';
-import testableTransition from 'app/utils/testableTransition';
-
-type EventWaiterProps = Omit<React.ComponentProps<typeof EventWaiter>, 'children'>;
-type FirstIssue = null | true | Group;
+import {LinkButton} from 'sentry/components/button';
+import {IconCheckmark} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import pulsingIndicatorStyles from 'sentry/styles/pulsingIndicator';
+import {space} from 'sentry/styles/space';
+import type {Group} from 'sentry/types/group';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import type {EventWaiterProps} from 'sentry/utils/eventWaiter';
+import EventWaiter from 'sentry/utils/eventWaiter';
+import testableTransition from 'sentry/utils/testableTransition';
 
 type RenderProps = {
-  indicator: React.ReactNode;
   firstEventButton: React.ReactNode;
+  indicator: React.ReactNode;
 };
 
-type Props = EventWaiterProps & {
+interface FirstEventIndicatorProps extends Omit<EventWaiterProps, 'children' | 'api'> {
   children: (props: RenderProps) => React.ReactNode;
-};
+}
 
-const FirstEventIndicator = ({children, ...props}: Props) => (
-  <EventWaiter {...props}>
-    {({firstIssue}) =>
-      children({
-        indicator: <Indicator firstIssue={firstIssue} {...props} />,
-        firstEventButton: (
-          <Button
-            title={t("You'll need to send your first error to continue")}
-            tooltipProps={{disabled: !!firstIssue}}
-            disabled={!firstIssue}
-            priority="primary"
-            onClick={() =>
-              trackAdvancedAnalyticsEvent('growth.onboarding_take_to_error', {
-                organization: props.organization,
-              })
-            }
-            to={`/organizations/${props.organization.slug}/issues/${
-              firstIssue !== true && firstIssue !== null ? `${firstIssue.id}/` : ''
-            }`}
-          >
-            {t('Take me to my error')}
-          </Button>
-        ),
-      })
-    }
-  </EventWaiter>
-);
+function FirstEventIndicator({children, ...props}: FirstEventIndicatorProps) {
+  return (
+    <EventWaiter {...props}>
+      {({firstIssue}) =>
+        children({
+          indicator: <Indicator firstIssue={firstIssue} {...props} />,
+          firstEventButton: (
+            <LinkButton
+              title={t("You'll need to send your first error to continue")}
+              tooltipProps={{disabled: !!firstIssue}}
+              disabled={!firstIssue}
+              priority="primary"
+              onClick={() =>
+                trackAnalytics('growth.onboarding_take_to_error', {
+                  organization: props.organization,
+                  platform: props.project.platform,
+                })
+              }
+              to={`/organizations/${props.organization.slug}/issues/${
+                firstIssue && firstIssue !== true && 'id' in firstIssue
+                  ? `${firstIssue.id}/`
+                  : ''
+              }?referrer=onboarding-first-event-indicator`}
+            >
+              {t('Take me to my error')}
+            </LinkButton>
+          ),
+        })
+      }
+    </EventWaiter>
+  );
+}
 
-const Indicator = ({firstIssue}: EventWaiterProps & {firstIssue: FirstIssue}) => (
-  <Container>
-    <AnimatePresence>
-      {!firstIssue ? <Waiting key="waiting" /> : <Success key="received" />}
-    </AnimatePresence>
-  </Container>
-);
+interface IndicatorProps extends Omit<EventWaiterProps, 'children' | 'api'> {
+  firstIssue: null | boolean | Group;
+}
+
+function Indicator({firstIssue}: IndicatorProps) {
+  return (
+    <Container>
+      <AnimatePresence>
+        {!firstIssue ? <Waiting key="waiting" /> : <Success key="received" />}
+      </AnimatePresence>
+    </Container>
+  );
+}
 
 const Container = styled('div')`
   display: grid;
@@ -69,7 +78,7 @@ const Container = styled('div')`
 const StatusWrapper = styled(motion.div)`
   display: grid;
   grid-template-columns: 1fr max-content;
-  grid-gap: ${space(1)};
+  gap: ${space(1)};
   align-items: center;
   font-size: ${p => p.theme.fontSizeMedium};
   /* Keep the wrapper in the parent grids first cell for transitions */
@@ -77,7 +86,7 @@ const StatusWrapper = styled(motion.div)`
   grid-row: 1;
 `;
 
-StatusWrapper.defaultProps = {
+const StatusWrapperDefaultProps = {
   initial: 'initial',
   animate: 'animate',
   exit: 'exit',
@@ -92,19 +101,27 @@ StatusWrapper.defaultProps = {
   },
 };
 
-const Waiting = (props: React.ComponentProps<typeof StatusWrapper>) => (
-  <StatusWrapper {...props}>
-    <AnimatedText>{t('Waiting to receive first event to continue')}</AnimatedText>
-    <WaitingIndicator />
-  </StatusWrapper>
-);
+function Waiting(props: HTMLMotionProps<'div'>) {
+  return (
+    <StatusWrapper {...StatusWrapperDefaultProps} {...props}>
+      <AnimatedText {...AnimatedTextDefaultProps}>
+        {t('Waiting to receive first event to continue')}
+      </AnimatedText>
+      <WaitingIndicator variants={indicatorAnimation} transition={testableTransition()} />
+    </StatusWrapper>
+  );
+}
 
-const Success = (props: React.ComponentProps<typeof StatusWrapper>) => (
-  <StatusWrapper {...props}>
-    <AnimatedText>{t('Event was received!')}</AnimatedText>
-    <ReceivedIndicator />
-  </StatusWrapper>
-);
+function Success(props: HTMLMotionProps<'div'>) {
+  return (
+    <StatusWrapper {...StatusWrapperDefaultProps} {...props}>
+      <AnimatedText {...AnimatedTextDefaultProps}>
+        {t('Event was received!')}
+      </AnimatedText>
+      <ReceivedIndicator size="sm" />
+    </StatusWrapper>
+  );
+}
 
 const indicatorAnimation: Variants = {
   initial: {opacity: 0, y: -10},
@@ -114,7 +131,7 @@ const indicatorAnimation: Variants = {
 
 const AnimatedText = styled(motion.div)``;
 
-AnimatedText.defaultProps = {
+const AnimatedTextDefaultProps = {
   variants: indicatorAnimation,
   transition: testableTransition(),
 };
@@ -124,11 +141,6 @@ const WaitingIndicator = styled(motion.div)`
   ${pulsingIndicatorStyles};
 `;
 
-WaitingIndicator.defaultProps = {
-  variants: indicatorAnimation,
-  transition: testableTransition(),
-};
-
 const ReceivedIndicator = styled(IconCheckmark)`
   color: #fff;
   background: ${p => p.theme.green300};
@@ -136,10 +148,6 @@ const ReceivedIndicator = styled(IconCheckmark)`
   padding: 3px;
   margin: 0 ${space(0.25)};
 `;
-
-ReceivedIndicator.defaultProps = {
-  size: 'sm',
-};
 
 export {Indicator};
 

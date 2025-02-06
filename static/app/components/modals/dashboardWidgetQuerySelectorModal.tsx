@@ -1,51 +1,53 @@
-import * as React from 'react';
-import {browserHistory} from 'react-router';
+import {Fragment} from 'react';
 import {css} from '@emotion/react';
 import styled from '@emotion/styled';
 
-import {ModalRenderProps} from 'app/actionCreators/modal';
-import {Client} from 'app/api';
-import Button from 'app/components/button';
-import {IconChevron, IconSearch} from 'app/icons';
-import {t} from 'app/locale';
-import space from 'app/styles/space';
-import {GlobalSelection, Organization} from 'app/types';
-import withApi from 'app/utils/withApi';
-import withGlobalSelection from 'app/utils/withGlobalSelection';
-import {Widget} from 'app/views/dashboardsV2/types';
-import {eventViewFromWidget} from 'app/views/dashboardsV2/utils';
-import Input from 'app/views/settings/components/forms/controls/input';
+import type {ModalRenderProps} from 'sentry/actionCreators/modal';
+import type {Client} from 'sentry/api';
+import {Button} from 'sentry/components/button';
+import Input from 'sentry/components/input';
+import Link from 'sentry/components/links/link';
+import {IconChevron, IconSearch} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {PageFilters} from 'sentry/types/core';
+import type {Organization} from 'sentry/types/organization';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import withApi from 'sentry/utils/withApi';
+import withPageFilters from 'sentry/utils/withPageFilters';
+import type {Widget} from 'sentry/views/dashboards/types';
+import {getWidgetDiscoverUrl} from 'sentry/views/dashboards/utils';
 
 export type DashboardWidgetQuerySelectorModalOptions = {
   organization: Organization;
   widget: Widget;
+  isMetricsData?: boolean;
 };
 
 type Props = ModalRenderProps &
   DashboardWidgetQuerySelectorModalOptions & {
     api: Client;
     organization: Organization;
-    selection: GlobalSelection;
+    selection: PageFilters;
   };
 
-class DashboardWidgetQuerySelectorModal extends React.Component<Props> {
-  renderQueries() {
-    const {organization, widget, selection} = this.props;
+function DashboardWidgetQuerySelectorModal(props: Props) {
+  const {organization, widget, selection, isMetricsData, Body, Header} = props;
+
+  const renderQueries = () => {
     const querySearchBars = widget.queries.map((query, index) => {
-      const eventView = eventViewFromWidget(
-        widget.title,
-        query,
+      const discoverLocation = getWidgetDiscoverUrl(
+        {
+          ...widget,
+          queries: [query],
+        },
         selection,
-        widget.displayType
+        organization,
+        0,
+        isMetricsData
       );
-      const discoverLocation = eventView.getResultsViewUrlTarget(organization.slug);
-      // Pull a max of 3 valid Y-Axis from the widget
-      const yAxisOptions = eventView.getYAxisOptions().map(({value}) => value);
-      discoverLocation.query.yAxis = query.fields
-        .filter(field => yAxisOptions.includes(field))
-        .slice(0, 3);
       return (
-        <React.Fragment key={index}>
+        <Fragment key={index}>
           <QueryContainer>
             <Container>
               <SearchLabel htmlFor="smart-search-input" aria-label={t('Search events')}>
@@ -53,38 +55,41 @@ class DashboardWidgetQuerySelectorModal extends React.Component<Props> {
               </SearchLabel>
               <StyledInput value={query.conditions} disabled />
             </Container>
-            <OpenInDiscoverButton
-              priority="primary"
-              icon={<IconChevron size="xs" direction="right" />}
-              onClick={() => {
-                browserHistory.push(discoverLocation);
-              }}
-            />
+            <Link to={discoverLocation}>
+              <OpenInDiscoverButton
+                priority="primary"
+                icon={<IconChevron size="xs" direction="right" />}
+                onClick={() => {
+                  trackAnalytics('dashboards_views.query_selector.selected', {
+                    organization,
+                    widget_type: widget.displayType,
+                  });
+                }}
+                aria-label={t('Open in Discover')}
+              />
+            </Link>
           </QueryContainer>
-        </React.Fragment>
+        </Fragment>
       );
     });
     return querySearchBars;
-  }
+  };
 
-  render() {
-    const {Body, Header, widget} = this.props;
-    return (
-      <React.Fragment>
-        <Header closeButton>
-          <h4>{widget.title}</h4>
-        </Header>
-        <Body>
-          <p>
-            {t(
-              'Multiple queries were used to create this widget visualization. Which query would you like to view in Discover?'
-            )}
-          </p>
-          {this.renderQueries()}
-        </Body>
-      </React.Fragment>
-    );
-  }
+  return (
+    <Fragment>
+      <Header closeButton>
+        <h4>{widget.title}</h4>
+      </Header>
+      <Body>
+        <p>
+          {t(
+            'Multiple queries were used to create this widget visualization. Which query would you like to view in Discover?'
+          )}
+        </p>
+        {renderQueries()}
+      </Body>
+    </Fragment>
+  );
 }
 
 const StyledInput = styled(Input)`
@@ -107,13 +112,13 @@ const OpenInDiscoverButton = styled(Button)`
 
 const Container = styled('div')`
   border: 1px solid ${p => p.theme.border};
-  box-shadow: inset ${p => p.theme.dropShadowLight};
+  box-shadow: inset ${p => p.theme.dropShadowMedium};
   background: ${p => p.theme.backgroundSecondary};
   padding: 7px ${space(1)};
   position: relative;
   display: grid;
   grid-template-columns: max-content 1fr max-content;
-  grid-gap: ${space(1)};
+  gap: ${space(1)};
   align-items: start;
   flex-grow: 1;
   border-radius: ${p => p.theme.borderRadius};
@@ -132,4 +137,4 @@ export const modalCss = css`
   margin: 70px auto;
 `;
 
-export default withApi(withGlobalSelection(DashboardWidgetQuerySelectorModal));
+export default withApi(withPageFilters(DashboardWidgetQuerySelectorModal));

@@ -1,7 +1,9 @@
-from sentry.models import OrganizationMember
-from sentry.testutils import AcceptanceTestCase
+from sentry.models.organizationmember import OrganizationMember
+from sentry.testutils.cases import AcceptanceTestCase
+from sentry.testutils.silo import no_silo_test
 
 
+@no_silo_test
 class ListOrganizationMembersTest(AcceptanceTestCase):
     def setUp(self):
         super().setUp()
@@ -22,7 +24,6 @@ class ListOrganizationMembersTest(AcceptanceTestCase):
 
     def test_list(self):
         self.browser.get(f"/organizations/{self.org.slug}/members/")
-        self.browser.wait_until_not(".loading-indicator")
-        self.browser.snapshot(name="list organization members")
+        self.browser.wait_until_not('[data-test-id="loading-indicator"]')
         assert self.browser.element_exists_by_test_id("email-invite")
         assert self.browser.element_exists_by_aria_label("Resend invite")

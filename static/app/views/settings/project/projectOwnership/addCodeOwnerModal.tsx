@@ -1,270 +1,330 @@
-import {Component, Fragment} from 'react';
+import {type Dispatch, Fragment, type SetStateAction, useCallback, useState} from 'react';
 import styled from '@emotion/styled';
 
-import {addErrorMessage} from 'app/actionCreators/indicator';
-import {ModalRenderProps} from 'app/actionCreators/modal';
-import {Client} from 'app/api';
-import Alert from 'app/components/alert';
-import Button from 'app/components/button';
-import Link from 'app/components/links/link';
-import LoadingIndicator from 'app/components/loadingIndicator';
-import {Panel, PanelBody} from 'app/components/panels';
-import {IconCheckmark, IconNot} from 'app/icons';
-import {t, tct} from 'app/locale';
-import space from 'app/styles/space';
-import {
+import {addErrorMessage} from 'sentry/actionCreators/indicator';
+import type {ModalRenderProps} from 'sentry/actionCreators/modal';
+import {Alert} from 'sentry/components/alert';
+import {Button, LinkButton} from 'sentry/components/button';
+import SelectField from 'sentry/components/forms/fields/selectField';
+import Form from 'sentry/components/forms/form';
+import Link from 'sentry/components/links/link';
+import LoadingError from 'sentry/components/loadingError';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import Panel from 'sentry/components/panels/panel';
+import PanelBody from 'sentry/components/panels/panelBody';
+import {IconCheckmark, IconNot} from 'sentry/icons';
+import {t, tct} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {
   CodeOwner,
   CodeownersFile,
   Integration,
-  Organization,
-  Project,
   RepositoryProjectPathConfig,
-} from 'app/types';
-import {getIntegrationIcon} from 'app/utils/integrationUtil';
-import withApi from 'app/utils/withApi';
-import Form from 'app/views/settings/components/forms/form';
-import SelectField from 'app/views/settings/components/forms/selectField';
+} from 'sentry/types/integrations';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import {getIntegrationIcon} from 'sentry/utils/integrationUtil';
+import {
+  fetchMutation,
+  useApiQuery,
+  useMutation,
+  type UseMutationResult,
+} from 'sentry/utils/queryClient';
+import type RequestError from 'sentry/utils/requestError/requestError';
+import useApi from 'sentry/utils/useApi';
 
 type Props = {
-  api: Client;
   organization: Organization;
   project: Project;
-  codeMappings: RepositoryProjectPathConfig[];
-  integrations: Integration[];
-  onSave: (data: CodeOwner) => void;
+  onSave?: (data: CodeOwner) => void;
 } & ModalRenderProps;
 
-type State = {
-  codeownersFile: CodeownersFile | null;
-  codeMappingId: string | null;
-  isLoading: boolean;
-  error: boolean;
-  errorJSON: {raw?: string} | null;
-};
+type TCodeownersPayload = {codeMappingId: string | null; raw: string};
+type TCodeownersData = CodeOwner;
+type TCodeownersError = RequestError;
+type TCodeownersVariables = [TCodeownersPayload];
+type TCodeownersContext = unknown;
 
-class AddCodeOwnerModal extends Component<Props, State> {
-  state: State = {
-    codeownersFile: null,
-    codeMappingId: null,
-    isLoading: false,
-    error: false,
-    errorJSON: null,
-  };
+export default function AddCodeOwnerModal({
+  organization,
+  Header,
+  Body,
+  Footer,
+  project,
+  onSave,
+  closeModal,
+}: Props) {
+  const {
+    data: codeMappings,
+    isPending: isCodeMappingsPending,
+    isError: isCodeMappingsError,
+  } = useApiQuery<RepositoryProjectPathConfig[]>(
+    [
+      `/organizations/${organization.slug}/code-mappings/`,
+      {query: {project: project.id}},
+    ],
+    {staleTime: Infinity}
+  );
 
-  fetchFile = async (codeMappingId: string) => {
-    const {organization} = this.props;
-    this.setState({
-      codeMappingId,
-      codeownersFile: null,
-      error: false,
-      errorJSON: null,
-      isLoading: true,
-    });
-    try {
-      const data: CodeownersFile = await this.props.api.requestPromise(
-        `/organizations/${organization.slug}/code-mappings/${codeMappingId}/codeowners/`,
-        {
-          method: 'GET',
-        }
+  const {
+    data: integrations,
+    isPending: isIntegrationsPending,
+    isError: isIntegrationsError,
+  } = useApiQuery<Integration[]>(
+    [
+      `/organizations/${organization.slug}/integrations/`,
+      {query: {features: ['codeowners']}},
+    ],
+    {staleTime: Infinity}
+  );
+
+  const [codeMappingId, setCodeMappingId] = useState<string | null>(null);
+
+  const {data: codeownersFile} = useApiQuery<CodeownersFile>(
+    [`/organizations/${organization.slug}/code-mappings/${codeMappingId}/codeowners/`],
+    {staleTime: Infinity, enabled: Boolean(codeMappingId)}
+  );
+
+  const api = useApi({
+    persistInFlight: false,
+  });
+  const mutation = useMutation<
+    TCodeownersData,
+    TCodeownersError,
+    TCodeownersVariables,
+    TCodeownersContext
+  >({
+    mutationFn: ([payload]: TCodeownersVariables) => {
+      return fetchMutation(api)([
+        'POST',
+        `/projects/${organization.slug}/${project.slug}/codeowners/`,
+        {},
+        payload,
+      ]);
+    },
+    onSuccess: d => {
+      const codeMapping = codeMappings?.find(
+        mapping => mapping.id === codeMappingId?.toString()
       );
-      this.setState({codeownersFile: data, isLoading: false});
-    } catch (_err) {
-      this.setState({isLoading: false});
-    }
-  };
-
-  addFile = async () => {
-    const {organization, project, codeMappings} = this.props;
-    const {codeownersFile, codeMappingId} = this.state;
-
-    if (codeownersFile) {
-      const postData: {
-        codeMappingId: string | null;
-        raw: string;
-      } = {
-        codeMappingId,
-        raw: codeownersFile.raw,
-      };
-
-      try {
-        const data = await this.props.api.requestPromise(
-          `/projects/${organization.slug}/${project.slug}/codeowners/`,
-          {
-            method: 'POST',
-            data: postData,
-          }
+      onSave?.({...d, codeMapping});
+      closeModal();
+    },
+    onError: err => {
+      if (err.responseJSON && !('raw' in err.responseJSON)) {
+        addErrorMessage(
+          Object.values(err.responseJSON ?? {})
+            .flat()
+            .join(' ')
         );
-        const codeMapping = codeMappings.find(
-          mapping => mapping.id === codeMappingId?.toString()
-        );
-        this.handleAddedFile({...data, codeMapping});
-      } catch (err) {
-        if (err.responseJSON.raw) {
-          this.setState({error: true, errorJSON: err.responseJSON, isLoading: false});
-        } else {
-          addErrorMessage(t(Object.values(err.responseJSON).flat().join(' ')));
-        }
       }
+    },
+    gcTime: 0,
+  });
+
+  const addFile = useCallback(() => {
+    if (codeownersFile) {
+      mutation.mutate([{codeMappingId, raw: codeownersFile.raw}]);
     }
-  };
+  }, [codeMappingId, codeownersFile, mutation]);
 
-  handleAddedFile(data: CodeOwner) {
-    this.props.onSave(data);
-    this.props.closeModal();
+  if (isCodeMappingsPending || isIntegrationsPending) {
+    return <LoadingIndicator />;
+  }
+  if (isCodeMappingsError || isIntegrationsError) {
+    return <LoadingError />;
   }
 
-  sourceFile(codeownersFile: CodeownersFile) {
-    return (
-      <Panel>
-        <SourceFileBody>
-          <IconCheckmark size="md" isCircled color="green200" />
-          {codeownersFile.filepath}
-          <Button size="small" href={codeownersFile.html_url} target="_blank">
-            {t('Preview File')}
-          </Button>
-        </SourceFileBody>
-      </Panel>
-    );
-  }
-
-  errorMessage(baseUrl) {
-    const {errorJSON, codeMappingId} = this.state;
-    const {codeMappings} = this.props;
-    const codeMapping = codeMappings.find(mapping => mapping.id === codeMappingId);
-    const {integrationId, provider} = codeMapping as RepositoryProjectPathConfig;
-    const errActors = errorJSON?.raw?.[0].split('\n').map((el, i) => <p key={i}>{el}</p>);
-    return (
-      <Alert type="error" icon={<IconNot size="md" />}>
-        {errActors}
-        {codeMapping && (
-          <p>
-            {tct(
-              'Configure [userMappingsLink:User Mappings] or [teamMappingsLink:Team Mappings] for any missing associations.',
-              {
-                userMappingsLink: (
-                  <Link
-                    to={`${baseUrl}/${provider?.key}/${integrationId}/?tab=userMappings&referrer=add-codeowners`}
-                  />
-                ),
-                teamMappingsLink: (
-                  <Link
-                    to={`${baseUrl}/${provider?.key}/${integrationId}/?tab=teamMappings&referrer=add-codeowners`}
-                  />
-                ),
-              }
-            )}
-          </p>
+  return (
+    <Fragment>
+      <Header closeButton>{t('Add Code Owner File')}</Header>
+      <Body>
+        {codeMappings.length ? (
+          <ApplyCodeMappings
+            codeMappingId={codeMappingId}
+            codeMappings={codeMappings}
+            codeownersFile={codeownersFile}
+            mutation={mutation}
+            organization={organization}
+            setCodeMappingId={setCodeMappingId}
+          />
+        ) : (
+          <LinkCodeOwners integrations={integrations} organization={organization} />
         )}
-        {tct(
-          '[addAndSkip:Add and Skip Missing Associations] will add your codeowner file and skip any rules that having missing associations. You can add associations later for any skipped rules.',
-          {addAndSkip: <strong>Add and Skip Missing Associations</strong>}
+      </Body>
+      <Footer>
+        <Button
+          disabled={codeownersFile ? false : true}
+          aria-label={t('Add File')}
+          priority="primary"
+          onClick={addFile}
+        >
+          {t('Add File')}
+        </Button>
+      </Footer>
+    </Fragment>
+  );
+}
+
+function ApplyCodeMappings({
+  codeMappingId,
+  codeMappings,
+  codeownersFile,
+  mutation,
+  organization,
+  setCodeMappingId,
+}: {
+  codeMappingId: string | null;
+  codeMappings: RepositoryProjectPathConfig[];
+  codeownersFile: CodeownersFile | undefined;
+  mutation: UseMutationResult<CodeOwner, RequestError, TCodeownersVariables, unknown>;
+  organization: Organization;
+  setCodeMappingId: Dispatch<SetStateAction<string | null>>;
+}) {
+  const baseUrl = `/settings/${organization.slug}/integrations/`;
+  return (
+    <Form apiMethod="POST" apiEndpoint="/code-mappings/" hideFooter initialData={{}}>
+      <StyledSelectField
+        name="codeMappingId"
+        label={t('Apply an existing code mapping')}
+        options={codeMappings.map((cm: RepositoryProjectPathConfig) => ({
+          value: cm.id,
+          label: `Repo Name: ${cm.repoName}, Stack Trace Root: ${cm.stackRoot}, Source Code Root: ${cm.sourceRoot}`,
+        }))}
+        onChange={setCodeMappingId}
+        required
+        inline={false}
+        flexibleControlStateSize
+        stacked
+      />
+
+      <FileResult>
+        {codeownersFile ? (
+          <SourceFile codeownersFile={codeownersFile} />
+        ) : (
+          <NoSourceFile />
         )}
-      </Alert>
-    );
-  }
+        {mutation.isError && mutation.error.responseJSON?.raw ? (
+          <ErrorMessage
+            baseUrl={baseUrl}
+            codeMappingId={codeMappingId}
+            codeMappings={codeMappings}
+            errorJSON={mutation.error.responseJSON as {raw?: string}}
+          />
+        ) : null}
+      </FileResult>
+    </Form>
+  );
+}
 
-  noSourceFile() {
-    const {codeMappingId, isLoading} = this.state;
-    if (isLoading) {
-      return (
-        <Container>
-          <LoadingIndicator mini />
-        </Container>
-      );
-    }
-    if (!codeMappingId) {
-      return null;
-    }
-    return (
-      <Panel>
-        <NoSourceFileBody>
-          {codeMappingId ? (
-            <Fragment>
-              <IconNot size="md" color="red200" />
-              {t('No codeowner file found.')}
-            </Fragment>
-          ) : null}
-        </NoSourceFileBody>
-      </Panel>
-    );
-  }
-
-  render() {
-    const {Header, Body, Footer} = this.props;
-    const {codeownersFile, error, errorJSON} = this.state;
-    const {codeMappings, integrations, organization} = this.props;
-    const baseUrl = `/settings/${organization.slug}/integrations`;
-
+function LinkCodeOwners({
+  integrations,
+  organization,
+}: {
+  integrations: Integration[];
+  organization: Organization;
+}) {
+  const baseUrl = `/settings/${organization.slug}/integrations/`;
+  if (integrations.length) {
     return (
       <Fragment>
-        <Header closeButton>{t('Add Code Owner File')}</Header>
-        <Body>
-          {!codeMappings.length && (
-            <Fragment>
-              <div>
-                {t(
-                  "Configure code mapping to add your CODEOWNERS file. Select the integration you'd like to use for mapping:"
-                )}
-              </div>
-              <IntegrationsList>
-                {integrations.map(integration => (
-                  <Button
-                    key={integration.id}
-                    type="button"
-                    to={`${baseUrl}/${integration.provider.key}/${integration.id}/?tab=codeMappings&referrer=add-codeowners`}
-                  >
-                    {getIntegrationIcon(integration.provider.key)}
-                    <IntegrationName>{integration.name}</IntegrationName>
-                  </Button>
-                ))}
-              </IntegrationsList>
-            </Fragment>
+        <div>
+          {t(
+            "Configure code mapping to add your CODEOWNERS file. Select the integration you'd like to use for mapping:"
           )}
-          {codeMappings.length > 0 && (
-            <Form
-              apiMethod="POST"
-              apiEndpoint="/code-mappings/"
-              hideFooter
-              initialData={{}}
+        </div>
+        <IntegrationsList>
+          {integrations.map(integration => (
+            <LinkButton
+              key={integration.id}
+              to={`${baseUrl}${integration.provider.key}/${integration.id}/?tab=codeMappings&referrer=add-codeowners`}
             >
-              <StyledSelectField
-                name="codeMappingId"
-                label={t('Apply an existing code mapping')}
-                choices={codeMappings.map((cm: RepositoryProjectPathConfig) => [
-                  cm.id,
-                  cm.repoName,
-                ])}
-                onChange={this.fetchFile}
-                required
-                inline={false}
-                flexibleControlStateSize
-                stacked
-              />
-
-              <FileResult>
-                {codeownersFile ? this.sourceFile(codeownersFile) : this.noSourceFile()}
-                {error && errorJSON && this.errorMessage(baseUrl)}
-              </FileResult>
-            </Form>
-          )}
-        </Body>
-        <Footer>
-          <Button
-            disabled={codeownersFile ? false : true}
-            label={t('Add File')}
-            priority="primary"
-            onClick={this.addFile}
-          >
-            {t('Add File')}
-          </Button>
-        </Footer>
+              {getIntegrationIcon(integration.provider.key)}
+              <IntegrationName>{integration.name}</IntegrationName>
+            </LinkButton>
+          ))}
+        </IntegrationsList>
       </Fragment>
     );
   }
+  return (
+    <Fragment>
+      <div>{t('Install a GitHub or GitLab integration to use this feature.')}</div>
+      <Container style={{paddingTop: space(2)}}>
+        <LinkButton priority="primary" size="sm" to={baseUrl}>
+          Setup Integration
+        </LinkButton>
+      </Container>
+    </Fragment>
+  );
 }
 
-export default withApi(AddCodeOwnerModal);
-export {AddCodeOwnerModal};
+function SourceFile({codeownersFile}: {codeownersFile: CodeownersFile}) {
+  return (
+    <Panel>
+      <SourceFileBody>
+        <IconCheckmark size="md" isCircled color="green200" />
+        {codeownersFile.filepath}
+        <LinkButton size="sm" href={codeownersFile.html_url} external>
+          {t('Preview File')}
+        </LinkButton>
+      </SourceFileBody>
+    </Panel>
+  );
+}
+
+function NoSourceFile() {
+  return (
+    <Panel>
+      <NoSourceFileBody>
+        <IconNot size="md" color="red200" />
+        {t('No codeowner file found.')}
+      </NoSourceFileBody>
+    </Panel>
+  );
+}
+
+function ErrorMessage({
+  baseUrl,
+  codeMappingId,
+  codeMappings,
+  errorJSON,
+}: {
+  baseUrl: string;
+  codeMappingId: string | null;
+  codeMappings: RepositoryProjectPathConfig[];
+  errorJSON: {raw?: string} | null;
+}) {
+  const codeMapping = codeMappings.find(mapping => mapping.id === codeMappingId);
+  const errActors = errorJSON?.raw?.[0]!.split('\n').map((el, i) => <p key={i}>{el}</p>);
+  return (
+    <Alert type="error" showIcon>
+      {errActors}
+      {codeMapping && (
+        <p>
+          {tct(
+            'Configure [userMappingsLink:User Mappings] or [teamMappingsLink:Team Mappings] for any missing associations.',
+            {
+              userMappingsLink: (
+                <Link
+                  to={`${baseUrl}${codeMapping.provider?.key ?? ''}/${codeMapping.integrationId ?? ''}/?tab=userMappings&referrer=add-codeowners`}
+                />
+              ),
+              teamMappingsLink: (
+                <Link
+                  to={`${baseUrl}${codeMapping.provider?.key ?? ''}/${codeMapping.integrationId ?? ''}/?tab=teamMappings&referrer=add-codeowners`}
+                />
+              ),
+            }
+          )}
+        </p>
+      )}
+      {tct(
+        '[addAndSkip:Add and Skip Missing Associations] will add your codeowner file and skip any rules that having missing associations. You can add associations later for any skipped rules.',
+        {addAndSkip: <strong>Add and Skip Missing Associations</strong>}
+      )}
+    </Alert>
+  );
+}
 
 const StyledSelectField = styled(SelectField)`
   border-bottom: None;
@@ -288,7 +348,7 @@ const SourceFileBody = styled(PanelBody)`
 
 const IntegrationsList = styled('div')`
   display: grid;
-  grid-gap: ${space(1)};
+  gap: ${space(1)};
   justify-items: center;
   margin-top: ${space(2)};
 `;

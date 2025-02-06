@@ -1,5 +1,5 @@
-from sentry.testutils import TestCase
-from sentry.utils.sentryappwebhookrequests import SentryAppWebhookRequestsBuffer
+from sentry.testutils.cases import TestCase
+from sentry.utils.sentry_apps import SentryAppWebhookRequestsBuffer
 
 
 class TestSentryAppWebhookRequests(TestCase):

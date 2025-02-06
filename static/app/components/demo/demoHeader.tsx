@@ -1,87 +1,90 @@
-import {useEffect, useState} from 'react';
+import {useEffect} from 'react';
 import styled from '@emotion/styled';
 
-import Button from 'app/components/button';
-import ButtonBar from 'app/components/buttonBar';
-import ExternalLink from 'app/components/links/externalLink';
-import LogoSentry from 'app/components/logoSentry';
-import {t} from 'app/locale';
-import PreferencesStore from 'app/stores/preferencesStore';
-import space from 'app/styles/space';
-import trackAdvancedAnalyticsEvent from 'app/utils/analytics/trackAdvancedAnalyticsEvent';
-import {emailQueryParameter, extraQueryParameter} from 'app/utils/demoMode';
-import getCookie from 'app/utils/getCookie';
+import {Button, LinkButton} from 'sentry/components/button';
+import LogoSentry from 'sentry/components/logoSentry';
+import {t} from 'sentry/locale';
+import PreferencesStore from 'sentry/stores/preferencesStore';
+import {useLegacyStore} from 'sentry/stores/useLegacyStore';
+import {space} from 'sentry/styles/space';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import {
+  extraQueryParameter,
+  extraQueryParameterWithEmail,
+  isDemoModeEnabled,
+  openDemoEmailModal,
+  urlAttachQueryParams,
+} from 'sentry/utils/demoMode';
 
-type Preferences = typeof PreferencesStore.prefs;
+export const DEMO_HEADER_HEIGHT_PX = 70;
 
 export default function DemoHeader() {
-  // if the user came from a SaaS org, we should send them back to upgrade when they leave the sandbox
-  const saasOrgSlug = getCookie('saas_org_slug');
-
-  const queryParameter = emailQueryParameter();
-  const getStartedExtraParameter = extraQueryParameter(true);
-  const extraParameter = extraQueryParameter(false);
-
-  const getStartedText = saasOrgSlug ? t('Upgrade Now') : t('Sign Up for Free');
-  const getStartedUrl = saasOrgSlug
-    ? `https://sentry.io/settings/${saasOrgSlug}/billing/checkout/`
-    : `https://sentry.io/signup/${queryParameter}${getStartedExtraParameter}`;
-
-  const [collapsed, setCollapsed] = useState(PreferencesStore.prefs.collapsed);
-
-  const preferenceUnsubscribe = PreferencesStore.listen(
-    (preferences: Preferences) => onPreferenceChange(preferences),
-    undefined
-  );
-
-  function onPreferenceChange(preferences: Preferences) {
-    if (preferences.collapsed === collapsed) {
-      return;
-    }
-    setCollapsed(!collapsed);
-  }
+  const collapsed = !!useLegacyStore(PreferencesStore).collapsed;
 
   useEffect(() => {
-    return () => {
-      preferenceUnsubscribe();
-    };
-  });
+    openDemoEmailModal();
+  }, []);
+
+  if (!isDemoModeEnabled()) {
+    return null;
+  }
+
+  // if the user came from a SaaS org, we should send them back to upgrade when they leave the sandbox
+  const extraSearchParams = extraQueryParameter();
+
+  const docsBtn = (
+    <DocsDemoBtn
+      onClick={() => trackAnalytics('growth.demo_click_docs', {organization: null})}
+      href={urlAttachQueryParams('https://docs.sentry.io/', extraSearchParams)}
+      external
+    >
+      {t('Documentation')}
+    </DocsDemoBtn>
+  );
+
+  const reqDemoBtn = (
+    <NewRequestDemoBtn
+      onClick={() =>
+        trackAnalytics('growth.demo_click_request_demo', {
+          organization: null,
+        })
+      }
+      href={urlAttachQueryParams('https://sentry.io/_/demo/', extraSearchParams)}
+      external
+    >
+      {t('Request a Demo')}
+    </NewRequestDemoBtn>
+  );
+
+  const signUpBtn = (
+    <FreeTrial
+      onClick={() => {
+        const url = urlAttachQueryParams(
+          'https://sentry.io/signup/',
+          extraQueryParameterWithEmail()
+        );
+
+        // Using window.open instead of href={} because we need to read `email`
+        // from localStorage when the user clicks the button.
+        window.open(url, '_blank');
+
+        trackAnalytics('growth.demo_click_get_started', {
+          cta: undefined,
+          organization: null,
+        });
+      }}
+    >
+      <FreeTrialTextLong>{t('Start Free Trial')}</FreeTrialTextLong>
+      <FreeTrialTextShort>{t('Sign Up')}</FreeTrialTextShort>
+    </FreeTrial>
+  );
 
   return (
     <Wrapper collapsed={collapsed}>
       <StyledLogoSentry />
-      <ButtonBar gap={4}>
-        <StyledExternalLink
-          onClick={() =>
-            trackAdvancedAnalyticsEvent('growth.demo_click_docs', {organization: null})
-          }
-          href={`https://docs.sentry.io/${extraParameter}`}
-        >
-          {t('Documentation')}
-        </StyledExternalLink>
-        <BaseButton
-          priority="form"
-          onClick={() =>
-            trackAdvancedAnalyticsEvent('growth.demo_click_request_demo', {
-              organization: null,
-            })
-          }
-          href={`https://sentry.io/_/demo/${extraParameter}`}
-        >
-          {t('Request a Demo')}
-        </BaseButton>
-        <GetStarted
-          onClick={() =>
-            trackAdvancedAnalyticsEvent('growth.demo_click_get_started', {
-              is_upgrade: !!saasOrgSlug,
-              organization: null,
-            })
-          }
-          href={getStartedUrl}
-        >
-          {getStartedText}
-        </GetStarted>
-      </ButtonBar>
+      {docsBtn}
+      {reqDemoBtn}
+      {signUpBtn}
     </Wrapper>
   );
 }
@@ -90,10 +93,13 @@ export default function DemoHeader() {
 const Wrapper = styled('div')<{collapsed: boolean}>`
   padding-right: ${space(3)};
   background-color: ${p => p.theme.white};
-  height: ${p => p.theme.demo.headerSize};
+  height: ${DEMO_HEADER_HEIGHT_PX}px;
   display: flex;
   justify-content: space-between;
   text-transform: uppercase;
+  align-items: center;
+  white-space: nowrap;
+  gap: ${space(4)};
 
   margin-left: calc(
     -1 * ${p => (p.collapsed ? p.theme.sidebar.collapsedWidth : p.theme.sidebar.expandedWidth)}
@@ -104,7 +110,7 @@ const Wrapper = styled('div')<{collapsed: boolean}>`
   border-bottom: 1px solid ${p => p.theme.border};
   z-index: ${p => p.theme.zIndex.settingsSidebarNav};
 
-  @media (max-width: ${p => p.theme.breakpoints[1]}) {
+  @media (max-width: ${p => p.theme.breakpoints.medium}) {
     height: ${p => p.theme.sidebar.mobileHeight};
     margin-left: 0;
   }
@@ -114,24 +120,46 @@ const StyledLogoSentry = styled(LogoSentry)`
   margin-top: auto;
   margin-bottom: auto;
   margin-left: 20px;
+  margin-right: auto;
   width: 130px;
   height: 30px;
   color: ${p => p.theme.textColor};
 `;
 
-const BaseButton = styled(Button)`
-  border-radius: 2rem;
+const FreeTrialTextShort = styled('span')`
+  display: none;
+`;
+
+const FreeTrialTextLong = styled('span')``;
+
+const NewRequestDemoBtn = styled(LinkButton)`
   text-transform: uppercase;
+  @media (max-width: ${p => p.theme.breakpoints.small}) {
+    display: none;
+  }
 `;
 
-// Note many of the colors don't come from the theme as they come from the marketing site
-const GetStarted = styled(BaseButton)`
+const DocsDemoBtn = styled(LinkButton)`
+  text-transform: uppercase;
+  @media (max-width: 500px) {
+    display: none;
+  }
+`;
+
+const FreeTrial = styled(Button)`
+  text-transform: uppercase;
   border-color: transparent;
-  box-shadow: 0 2px 0 rgb(54 45 89 / 10%);
-  background-color: #e1567c;
+  background-color: #6c5fc7;
   color: #fff;
-`;
-
-const StyledExternalLink = styled(ExternalLink)`
-  color: #584774;
+  .short-text {
+    display: none;
+  }
+  @media (max-width: 650px) {
+    ${FreeTrialTextLong} {
+      display: none;
+    }
+    ${FreeTrialTextShort} {
+      display: inline;
+    }
+  }
 `;

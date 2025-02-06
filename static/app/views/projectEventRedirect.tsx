@@ -1,15 +1,12 @@
-import {Component} from 'react';
-import {RouteComponentProps} from 'react-router';
+import {useEffect, useState} from 'react';
 
-import DetailedError from 'app/components/errors/detailedError';
-import {t} from 'app/locale';
-import {PageContent} from 'app/styles/organization';
+import DetailedError from 'sentry/components/errors/detailedError';
+import * as Layout from 'sentry/components/layouts/thirds';
+import {t} from 'sentry/locale';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import {useParams} from 'sentry/utils/useParams';
 
 type Props = RouteComponentProps<{}, {}>;
-
-type State = {
-  error: string | null;
-};
 
 /**
  * This component performs a client-side redirect to Event Details given only
@@ -21,18 +18,16 @@ type State = {
  * See:
  * https://github.com/getsentry/sentry/blob/824c03089907ad22a9282303a5eaca33989ce481/src/sentry/web/urls.py#L578
  */
-class ProjectEventRedirect extends Component<Props, State> {
-  state: State = {
-    error: null,
-  };
+function ProjectEventRedirect({router}: Props) {
+  const [error, setError] = useState<string | null>(null);
 
-  componentDidMount() {
-    const {router} = this.props;
+  const params = useParams();
 
+  useEffect(() => {
     // This presumes that _this_ React view/route is only reachable at
     // /:org/:project/events/:eventId (the same URL which serves the ProjectEventRedirect
     // Django view).
-    const endpoint = router.location.pathname;
+    const endpoint = `/organizations/${params.orgId}/projects/${params.projectId}/events/${params.eventId}/`;
 
     // Use XmlHttpRequest directly instead of our client API helper (fetch),
     // because you can't reach the underlying XHR via $.ajax, and we need
@@ -49,33 +44,34 @@ class ProjectEventRedirect extends Component<Props, State> {
 
     xhr.onload = () => {
       if (xhr.status === 404) {
-        this.setState({error: t('Could not find an issue for the provided event id')});
+        setError(t('Could not find an issue for the provided event id'));
         return;
       }
       // responseURL is the URL of the document the browser ultimately loaded,
       // after following any redirects. It _should_ be the page we're trying
       // to reach; use the router to go there.
-
+      //
       // Use `replace` so that hitting the browser back button will skip all
       // this redirect business.
-      router.replace(xhr.responseURL);
+      const url = new URL(xhr.responseURL);
+      if (url.origin === window.location.origin) {
+        router.replace(url.pathname);
+      } else {
+        // If the origin has changed, we cannot do a simple replace with the router.
+        // Instead, we opt to do a full redirect.
+        window.location.replace(xhr.responseURL);
+      }
     };
     xhr.onerror = () => {
-      this.setState({error: t('Could not load the requested event')});
+      setError(t('Could not load the requested event'));
     };
-  }
+  }, [params, router]);
 
-  render() {
-    return this.state.error ? (
-      <DetailedError
-        heading={t('Not found')}
-        message={this.state.error}
-        hideSupportLinks
-      />
-    ) : (
-      <PageContent />
-    );
-  }
+  return error ? (
+    <DetailedError heading={t('Not found')} message={error} hideSupportLinks />
+  ) : (
+    <Layout.Page withPadding />
+  );
 }
 
 export default ProjectEventRedirect;

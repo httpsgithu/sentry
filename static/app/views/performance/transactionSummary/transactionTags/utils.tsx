@@ -1,11 +1,19 @@
-import {Location, Query} from 'history';
+import type {Location, Query} from 'history';
 
-import {Organization} from 'app/types';
-import {trackAnalyticsEvent} from 'app/utils/analytics';
-import {decodeScalar} from 'app/utils/queryString';
+import type {Organization} from 'sentry/types/organization';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import {decodeScalar} from 'sentry/utils/queryString';
+import type {DomainView} from 'sentry/views/insights/pages/useFilters';
+import {getTransactionSummaryBaseUrl} from 'sentry/views/performance/transactionSummary/utils';
 
-export function generateTagsRoute({orgSlug}: {orgSlug: String}): string {
-  return `/organizations/${orgSlug}/performance/summary/tags/`;
+export function generateTagsRoute({
+  organization,
+  view,
+}: {
+  organization: Organization;
+  view?: DomainView;
+}): string {
+  return `${getTransactionSummaryBaseUrl(organization, view)}/tags/`;
 }
 
 export function decodeSelectedTagKey(location: Location): string | undefined {
@@ -13,26 +21,25 @@ export function decodeSelectedTagKey(location: Location): string | undefined {
 }
 
 export function trackTagPageInteraction(organization: Organization) {
-  trackAnalyticsEvent({
-    eventKey: 'performance_views.tags.interaction',
-    eventName: 'Performance Views: Tag Page - Interaction',
-    organization_id: parseInt(organization.id, 10),
-  });
+  trackAnalytics('performance_views.tags.interaction', {organization});
 }
 
 export function tagsRouteWithQuery({
-  orgSlug,
+  organization,
   transaction,
   projectID,
   query,
+  view,
 }: {
-  orgSlug: string;
-  transaction: string;
+  organization: Organization;
   query: Query;
+  transaction: string;
   projectID?: string | string[];
+  view?: DomainView;
 }) {
   const pathname = generateTagsRoute({
-    orgSlug,
+    organization,
+    view,
   });
 
   return {
@@ -70,8 +77,8 @@ export function parseHistogramBucketInfo(row: {[key: string]: React.ReactText}) 
   const parts = field.split('_');
   return {
     histogramField: field,
-    bucketSize: parseInt(parts[parts.length - 3], 10),
-    offset: parseInt(parts[parts.length - 2], 10),
-    multiplier: parseInt(parts[parts.length - 1], 10),
+    bucketSize: parseInt(parts[parts.length - 3]!, 10),
+    offset: parseInt(parts[parts.length - 2]!, 10),
+    multiplier: parseInt(parts[parts.length - 1]!, 10),
   };
 }

@@ -1,23 +1,24 @@
-import Access from 'app/components/acl/access';
-import {t} from 'app/locale';
-import {Organization, SentryApp} from 'app/types';
+import Access from 'sentry/components/acl/access';
+import {t} from 'sentry/locale';
+import type {SentryApp} from 'sentry/types/integrations';
+import type {Organization} from 'sentry/types/organization';
 
 import ActionButtons from './actionButtons';
 
 type Props = {
-  organization: Organization;
   app: SentryApp;
-
   onClickRemove: (app: SentryApp) => void;
+
+  organization: Organization;
   onClickPublish?: () => void;
 };
 
-const SentryApplicationRowButtons = ({
+function SentryApplicationRowButtons({
   organization,
   app,
   onClickRemove,
   onClickPublish,
-}: Props) => {
+}: Props) {
   const isInternal = app.status === 'internal';
 
   return (
@@ -54,6 +55,6 @@ const SentryApplicationRowButtons = ({
       }}
     </Access>
   );
-};
+}
 
 export default SentryApplicationRowButtons;

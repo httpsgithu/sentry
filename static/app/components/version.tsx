@@ -1,74 +1,75 @@
-import * as React from 'react';
-import {withRouter, WithRouterProps} from 'react-router';
 import {css} from '@emotion/react';
 import styled from '@emotion/styled';
 
-import Clipboard from 'app/components/clipboard';
-import GlobalSelectionLink from 'app/components/globalSelectionLink';
-import Link from 'app/components/links/link';
-import Tooltip from 'app/components/tooltip';
-import {IconCopy} from 'app/icons';
-import overflowEllipsis from 'app/styles/overflowEllipsis';
-import space from 'app/styles/space';
-import {Organization} from 'app/types';
-import {formatVersion} from 'app/utils/formatters';
-import theme from 'app/utils/theme';
-import withOrganization from 'app/utils/withOrganization';
+import {CopyToClipboardButton} from 'sentry/components/copyToClipboardButton';
+import GlobalSelectionLink from 'sentry/components/globalSelectionLink';
+import Link from 'sentry/components/links/link';
+import {Tooltip} from 'sentry/components/tooltip';
+import type {Organization} from 'sentry/types/organization';
+import theme from 'sentry/utils/theme';
+import {useLocation} from 'sentry/utils/useLocation';
+import {formatVersion} from 'sentry/utils/versions/formatVersion';
+import withOrganization from 'sentry/utils/withOrganization';
 
 type Props = {
-  /**
-   * Raw version (canonical release identifier)
-   */
-  version: string;
   /**
    *  Organization injected by withOrganization HOC
    */
   organization: Organization;
   /**
+   * Raw version (canonical release identifier)
+   */
+  version: string;
+  /**
    * Should the version be a link to the release page
    */
   anchor?: boolean;
+  className?: string;
   /**
-   * Should link to release page preserve user's global selection values
+   * Should link to release page preserve user's page filter values
    */
-  preserveGlobalSelection?: boolean;
+  preservePageFilters?: boolean;
+  /**
+   * Will add project ID to the linked url (can be overridden by preservePageFilters).
+   * If not provided and user does not have global-views enabled, it will try to take it from current url query.
+   */
+  projectId?: string;
+  /**
+   * Should the release text break and wrap onto the next line
+   */
+  shouldWrapText?: boolean;
   /**
    * Should there be a tooltip with raw version on hover
    */
   tooltipRawVersion?: boolean;
   /**
-   * Should we also show package name
-   */
-  withPackage?: boolean;
-  /**
-   * Will add project ID to the linked url (can be overridden by preserveGlobalSelection).
-   * If not provided and user does not have global-views enabled, it will try to take it from current url query.
-   */
-  projectId?: string;
-  /**
    * Ellipsis on overflow
    */
   truncate?: boolean;
-  className?: string;
+  /**
+   * Should we also show package name
+   */
+  withPackage?: boolean;
 };
 
-const Version = ({
+function Version({
   version,
   organization,
   anchor = true,
-  preserveGlobalSelection,
+  preservePageFilters,
   tooltipRawVersion,
   withPackage,
   projectId,
   truncate,
+  shouldWrapText = false,
   className,
-  location,
-}: WithRouterProps & Props) => {
+}: Props) {
+  const location = useLocation();
   const versionToDisplay = formatVersion(version, withPackage);
 
   let releaseDetailProjectId: null | undefined | string | string[];
   if (projectId) {
-    // we can override preserveGlobalSelection's project id
+    // we can override preservePageFilters's project id
     releaseDetailProjectId = projectId;
   } else if (!organization?.features.includes('global-views')) {
     // we need this for users without global-views, otherwise they might get `This release may not be in your selected project`
@@ -86,23 +87,30 @@ const Version = ({
         },
         className,
       };
-      if (preserveGlobalSelection) {
+      if (preservePageFilters) {
         return (
           <GlobalSelectionLink {...props}>
-            <VersionText truncate={truncate}>{versionToDisplay}</VersionText>
+            <VersionText truncate={truncate} shouldWrapText={shouldWrapText}>
+              {versionToDisplay}
+            </VersionText>
           </GlobalSelectionLink>
         );
-      } else {
-        return (
-          <Link {...props}>
-            <VersionText truncate={truncate}>{versionToDisplay}</VersionText>
-          </Link>
-        );
       }
+      return (
+        <Link {...props}>
+          <VersionText truncate={truncate} shouldWrapText={shouldWrapText}>
+            {versionToDisplay}
+          </VersionText>
+        </Link>
+      );
     }
 
     return (
-      <VersionText className={className} truncate={truncate}>
+      <VersionText
+        className={className}
+        truncate={truncate}
+        shouldWrapText={shouldWrapText}
+      >
         {versionToDisplay}
       </VersionText>
     );
@@ -115,23 +123,19 @@ const Version = ({
       }}
     >
       <TooltipVersionWrapper>{version}</TooltipVersionWrapper>
-
-      <Clipboard value={version}>
-        <TooltipClipboardIconWrapper>
-          <IconCopy size="xs" color="white" />
-        </TooltipClipboardIconWrapper>
-      </Clipboard>
+      <CopyToClipboardButton borderless text={version} size="zero" iconSize="xs" />
     </TooltipContent>
   );
 
-  const getPopperStyles = () => {
-    // if the version name is not a hash (sha1 or sha265) and we are not on mobile, allow tooltip to be as wide as 500px
+  const getOverlayStyle = () => {
+    // if the version name is not a hash (sha1 or sha265) and we are not on
+    // mobile, allow tooltip to be as wide as 500px
     if (/(^[a-f0-9]{40}$)|(^[a-f0-9]{64}$)/.test(version)) {
       return undefined;
     }
 
     return css`
-      @media (min-width: ${theme.breakpoints[0]}) {
+      @media (min-width: ${theme.breakpoints.small}) {
         max-width: 500px;
       }
     `;
@@ -143,30 +147,32 @@ const Version = ({
       disabled={!tooltipRawVersion}
       isHoverable
       containerDisplayMode={truncate ? 'block' : 'inline-block'}
-      popperStyle={getPopperStyles()}
+      overlayStyle={getOverlayStyle()}
     >
       {renderVersion()}
     </Tooltip>
   );
-};
+}
 
 // TODO(matej): try to wrap version with this when truncate prop is true (in separate PR)
 // const VersionWrapper = styled('div')`
-//   ${overflowEllipsis};
+//   ${p => p.theme.overflowEllipsis};
 //   max-width: 100%;
 //   width: auto;
 //   display: inline-block;
 // `;
 
-const VersionText = styled('span')<{truncate?: boolean}>`
-  ${p =>
-    p.truncate &&
-    `max-width: 100%;
-    display: block;
+const truncateStyles = css`
+  max-width: 100%;
+  display: block;
   overflow: hidden;
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
-  white-space: nowrap;`}
+`;
+
+const VersionText = styled('span')<{shouldWrapText?: boolean; truncate?: boolean}>`
+  ${p => p.truncate && truncateStyles}
+  white-space: ${p => (p.shouldWrapText ? 'normal' : 'nowrap')};
 `;
 
 const TooltipContent = styled('span')`
@@ -175,21 +181,7 @@ const TooltipContent = styled('span')`
 `;
 
 const TooltipVersionWrapper = styled('span')`
-  ${overflowEllipsis}
+  ${p => p.theme.overflowEllipsis}
 `;
 
-const TooltipClipboardIconWrapper = styled('span')`
-  margin-left: ${space(0.5)};
-  position: relative;
-  bottom: -${space(0.25)};
-
-  &:hover {
-    cursor: pointer;
-  }
-`;
-
-type PropsWithoutOrg = Omit<Props, 'organization'>;
-
-export default withOrganization(
-  withRouter(Version)
-) as React.ComponentClass<PropsWithoutOrg>;
+export default withOrganization(Version);

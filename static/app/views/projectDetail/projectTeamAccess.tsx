@@ -1,15 +1,16 @@
 import styled from '@emotion/styled';
 
-import Button from 'app/components/button';
-import {SectionHeading} from 'app/components/charts/styles';
-import Collapsible from 'app/components/collapsible';
-import IdBadge from 'app/components/idBadge';
-import Link from 'app/components/links/link';
-import Placeholder from 'app/components/placeholder';
-import {IconOpen} from 'app/icons';
-import {t, tn} from 'app/locale';
-import space from 'app/styles/space';
-import {Organization, Project} from 'app/types';
+import {Button, LinkButton} from 'sentry/components/button';
+import {SectionHeading} from 'sentry/components/charts/styles';
+import Collapsible from 'sentry/components/collapsible';
+import IdBadge from 'sentry/components/idBadge';
+import Link from 'sentry/components/links/link';
+import Placeholder from 'sentry/components/placeholder';
+import {IconOpen} from 'sentry/icons';
+import {t, tn} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 
 import {SectionHeadingLink, SectionHeadingWrapper, SidebarSection} from './styles';
 
@@ -29,17 +30,17 @@ function ProjectTeamAccess({organization, project}: Props) {
 
     if (project.teams.length === 0) {
       return (
-        <Button
+        <LinkButton
           to={settingsLink}
           disabled={!hasEditPermissions}
           title={
             hasEditPermissions ? undefined : t('You do not have permission to do this')
           }
           priority="primary"
-          size="small"
+          size="sm"
         >
           {t('Assign Team')}
-        </Button>
+        </LinkButton>
       );
     }
 

@@ -1,13 +1,15 @@
-import {useEffect, useRef} from 'react';
-import ReactDOM from 'react-dom';
+import {useCallback, useEffect, useRef} from 'react';
+import {createPortal} from 'react-dom';
 import {css} from '@emotion/react';
 import styled from '@emotion/styled';
 
-import {IconClose} from 'app/icons';
-import {slideInLeft} from 'app/styles/animations';
-import space from 'app/styles/space';
+import {IconClose} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import HookStore from 'sentry/stores/hookStore';
+import {slideInLeft} from 'sentry/styles/animations';
+import {space} from 'sentry/styles/space';
 
-import {CommonSidebarProps} from './types';
+import type {CommonSidebarProps} from './types';
 
 type PositionProps = Pick<CommonSidebarProps, 'orientation' | 'collapsed'>;
 
@@ -22,7 +24,7 @@ const PanelContainer = styled('div')<PositionProps>`
   box-shadow: 1px 0 2px rgba(0, 0, 0, 0.06);
   text-align: left;
   animation: 200ms ${slideInLeft};
-  z-index: ${p => p.theme.zIndex.sidebar};
+  z-index: ${p => p.theme.zIndex.sidebar - 1};
 
   ${p =>
     p.orientation === 'top'
@@ -40,23 +42,23 @@ const PanelContainer = styled('div')<PositionProps>`
         `};
 `;
 
-type Props = React.ComponentProps<typeof PanelContainer> &
-  Pick<CommonSidebarProps, 'collapsed' | 'orientation' | 'hidePanel'> & {
-    title?: string;
-  };
+interface Props extends React.HTMLAttributes<HTMLDivElement> {
+  collapsed: CommonSidebarProps['collapsed'];
+  hidePanel: CommonSidebarProps['hidePanel'];
+  orientation: CommonSidebarProps['orientation'];
+  title?: string;
+}
 
-/**
- * Get the container element of the sidebar that react portals into.
- */
-export const getSidebarPanelContainer = () =>
-  document.getElementById('sidebar-flyout-portal') as HTMLDivElement;
+const getSidebarPortal = () => {
+  let portal = document.getElementById('sidebar-flyout-portal');
 
-const makePortal = () => {
-  const portal = document.createElement('div');
-  portal.setAttribute('id', 'sidebar-flyout-portal');
-  document.body.appendChild(portal);
+  if (!portal) {
+    portal = document.createElement('div');
+    portal.setAttribute('id', 'sidebar-flyout-portal');
+    document.body.appendChild(portal);
+  }
 
-  return portal;
+  return portal as HTMLDivElement;
 };
 
 function SidebarPanel({
@@ -66,43 +68,56 @@ function SidebarPanel({
   title,
   children,
   ...props
-}: Props) {
-  const portalEl = useRef<HTMLDivElement>(getSidebarPanelContainer() || makePortal());
+}: Props): React.ReactElement {
+  const portalEl = useRef<HTMLDivElement>(getSidebarPortal());
 
-  useEffect(() => {
-    document.addEventListener('click', panelCloseHandler);
-    return function cleanup() {
-      document.removeEventListener('click', panelCloseHandler);
-    };
-  }, []);
+  const panelCloseHandler = useCallback(
+    (evt: MouseEvent) => {
+      if (!(evt.target instanceof Element)) {
+        return;
+      }
 
-  function panelCloseHandler(evt: MouseEvent) {
-    if (!(evt.target instanceof Element)) {
-      return;
-    }
+      if (portalEl.current.contains(evt.target)) {
+        return;
+      }
 
-    const panel = getSidebarPanelContainer();
-
-    if (panel?.contains(evt.target)) {
-      return;
-    }
-
-    hidePanel();
-  }
-
-  const sidebar = (
-    <PanelContainer collapsed={collapsed} orientation={orientation} {...props}>
-      {title && (
-        <SidebarPanelHeader>
-          <Title>{title}</Title>
-          <PanelClose onClick={hidePanel} />
-        </SidebarPanelHeader>
-      )}
-      <SidebarPanelBody hasHeader={!!title}>{children}</SidebarPanelBody>
-    </PanelContainer>
+      // If we are in Sandbox, don't hide panel when the modal is clicked (before the email is added)
+      const blockHideSidebar = HookStore.get('onboarding:block-hide-sidebar')[0]?.();
+      if (blockHideSidebar) {
+        return;
+      }
+      hidePanel();
+    },
+    [hidePanel]
   );
 
-  return ReactDOM.createPortal(sidebar, portalEl.current);
+  useEffect(() => {
+    // Wait one tick to setup the click handler so we don't detect the click
+    // that is bubbling up from opening the panel itself
+    window.setTimeout(() => document.addEventListener('click', panelCloseHandler));
+
+    return function cleanup() {
+      window.setTimeout(() => document.removeEventListener('click', panelCloseHandler));
+    };
+  }, [panelCloseHandler]);
+
+  return createPortal(
+    <PanelContainer
+      role="dialog"
+      collapsed={collapsed}
+      orientation={orientation}
+      {...props}
+    >
+      {title ? (
+        <SidebarPanelHeader>
+          <Title>{title}</Title>
+          <PanelClose size="lg" onClick={hidePanel} aria-label={t('Close Panel')} />
+        </SidebarPanelHeader>
+      ) : null}
+      <SidebarPanelBody hasHeader={!!title}>{children}</SidebarPanelBody>
+    </PanelContainer>,
+    portalEl.current
+  );
 }
 
 export default SidebarPanel;
@@ -137,10 +152,6 @@ const PanelClose = styled(IconClose)`
     color: ${p => p.theme.textColor};
   }
 `;
-
-PanelClose.defaultProps = {
-  size: 'lg',
-};
 
 const Title = styled('div')`
   font-size: ${p => p.theme.fontSizeExtraLarge};

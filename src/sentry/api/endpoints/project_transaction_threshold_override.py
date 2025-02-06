@@ -1,8 +1,11 @@
-from django.db import transaction
+from django.db import router, transaction
 from rest_framework import serializers, status
 from rest_framework.exceptions import ParseError
+from rest_framework.request import Request
 from rest_framework.response import Response
 
+from sentry.api.api_publish_status import ApiPublishStatus
+from sentry.api.base import region_silo_endpoint
 from sentry.api.bases import ProjectTransactionThresholdOverridePermission
 from sentry.api.bases.organization_events import OrganizationEventsV2EndpointBase
 from sentry.api.serializers import serialize
@@ -52,17 +55,23 @@ class ProjectTransactionThresholdOverrideSerializer(serializers.Serializer):
         return data
 
 
+@region_silo_endpoint
 class ProjectTransactionThresholdOverrideEndpoint(OrganizationEventsV2EndpointBase):
+    publish_status = {
+        "DELETE": ApiPublishStatus.PRIVATE,
+        "GET": ApiPublishStatus.PRIVATE,
+        "POST": ApiPublishStatus.PRIVATE,
+    }
     permission_classes = (ProjectTransactionThresholdOverridePermission,)
 
-    def get_project(self, request, organization):
+    def get_project(self, request: Request, organization):
         projects = self.get_projects(request, organization)
         if len(projects) != 1:
             raise ParseError("Only 1 project per transaction threshold")
 
         return projects[0]
 
-    def get(self, request, organization):
+    def get(self, request: Request, organization) -> Response:
         if not self.has_feature(organization, request):
             return self.respond(status=status.HTTP_404_NOT_FOUND)
 
@@ -85,7 +94,7 @@ class ProjectTransactionThresholdOverrideEndpoint(OrganizationEventsV2EndpointBa
             status.HTTP_200_OK,
         )
 
-    def post(self, request, organization):
+    def post(self, request: Request, organization) -> Response:
         if not self.has_feature(organization, request):
             return self.respond(status=status.HTTP_404_NOT_FOUND)
 
@@ -103,7 +112,7 @@ class ProjectTransactionThresholdOverrideEndpoint(OrganizationEventsV2EndpointBa
 
         data = serializer.validated_data
 
-        with transaction.atomic():
+        with transaction.atomic(router.db_for_write(ProjectTransactionThresholdOverride)):
             (
                 transaction_threshold,
                 created,
@@ -114,7 +123,7 @@ class ProjectTransactionThresholdOverrideEndpoint(OrganizationEventsV2EndpointBa
                 defaults={
                     "threshold": data["threshold"],
                     "metric": data["metric"],
-                    "edited_by": request.user,
+                    "edited_by_id": request.user.id,
                 },
             )
 
@@ -126,7 +135,7 @@ class ProjectTransactionThresholdOverrideEndpoint(OrganizationEventsV2EndpointBa
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 
-    def delete(self, request, organization):
+    def delete(self, request: Request, organization) -> Response:
         if not self.has_feature(organization, request):
             return self.respond(status=status.HTTP_404_NOT_FOUND)
 

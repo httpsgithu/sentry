@@ -1,80 +1,73 @@
-import {Component, createRef, PureComponent} from 'react';
+import {Component, createRef} from 'react';
 import styled from '@emotion/styled';
 
-import {toPercent} from 'app/components/performance/waterfall/utils';
-import Tooltip from 'app/components/tooltip';
-import {EventTransaction} from 'app/types/event';
-import {defined} from 'app/utils';
-import {WEB_VITAL_DETAILS} from 'app/utils/performance/vitals/constants';
+import {Tooltip} from 'sentry/components/tooltip';
+import {space} from 'sentry/styles/space';
+import {defined} from 'sentry/utils';
+import toPercent from 'sentry/utils/number/toPercent';
+import {VITAL_DETAILS} from 'sentry/utils/performance/vitals/constants';
+import type {Vital} from 'sentry/utils/performance/vitals/types';
 
-import {
-  getMeasurementBounds,
-  getMeasurements,
-  SpanBoundsType,
-  SpanGeneratedBoundsType,
-} from './utils';
+import type {SpanBoundsType, SpanGeneratedBoundsType, VerticalMark} from './utils';
+import {getMeasurementBounds} from './utils';
 
 type Props = {
-  event: EventTransaction;
-  generateBounds: (bounds: SpanBoundsType) => SpanGeneratedBoundsType;
   dividerPosition: number;
+  generateBounds: (bounds: SpanBoundsType) => SpanGeneratedBoundsType;
+  measurements: Map<number, VerticalMark>;
 };
-class MeasurementsPanel extends PureComponent<Props> {
-  render() {
-    const {event, generateBounds, dividerPosition} = this.props;
 
-    const measurements = getMeasurements(event);
+type VitalLabel = {
+  isPoorValue: boolean;
+  vital: Vital;
+};
 
-    return (
-      <Container
-        style={{
-          // the width of this component is shrunk to compensate for half of the width of the divider line
-          width: `calc(${toPercent(1 - dividerPosition)} - 0.5px)`,
-        }}
-      >
-        {Array.from(measurements).map(([timestamp, verticalMark]) => {
-          const bounds = getMeasurementBounds(timestamp, generateBounds);
+function MeasurementsPanel(props: Props) {
+  const {measurements, generateBounds, dividerPosition} = props;
 
-          const shouldDisplay = defined(bounds.left) && defined(bounds.width);
+  return (
+    <Container
+      style={{
+        // the width of this component is shrunk to compensate for half of the width of the divider line
+        width: `calc(${toPercent(1 - dividerPosition)} - 0.5px)`,
+      }}
+    >
+      {Array.from(measurements.values()).map(verticalMark => {
+        const mark = Object.values(verticalMark.marks)[0]!;
+        const {timestamp} = mark;
+        const bounds = getMeasurementBounds(timestamp, generateBounds);
 
-          if (!shouldDisplay || !bounds.isSpanVisibleInView) {
-            return null;
-          }
+        const shouldDisplay = defined(bounds.left) && defined(bounds.width);
 
-          // Measurements are referred to by their full name `measurements.<name>`
-          // here but are stored using their abbreviated name `<name>`. Make sure
-          // to convert it appropriately.
-          const vitals = Object.keys(verticalMark.marks).map(
-            name => WEB_VITAL_DETAILS[`measurements.${name}`]
-          );
+        if (!shouldDisplay || !bounds.isSpanVisibleInView) {
+          return null;
+        }
 
-          // generate vertical marker label
-          const acronyms = vitals.map(vital => vital.acronym);
-          const lastAcronym = acronyms.pop() as string;
-          const label = acronyms.length
-            ? `${acronyms.join(', ')} & ${lastAcronym}`
-            : lastAcronym;
+        const vitalLabels: VitalLabel[] = Object.keys(verticalMark.marks).map(name => ({
+          vital: VITAL_DETAILS[`measurements.${name}` as keyof typeof VITAL_DETAILS],
+          isPoorValue: verticalMark.marks[name]!.failedThreshold,
+        }));
 
-          // generate tooltip labe;l
-          const longNames = vitals.map(vital => vital.name);
-          const lastName = longNames.pop() as string;
-          const tooltipLabel = longNames.length
-            ? `${longNames.join(', ')} & ${lastName}`
-            : lastName;
-
+        if (vitalLabels.length > 1) {
           return (
-            <LabelContainer
+            <MultiLabelContainer
               key={String(timestamp)}
-              failedThreshold={verticalMark.failedThreshold}
-              label={label}
-              tooltipLabel={tooltipLabel}
               left={toPercent(bounds.left || 0)}
+              vitalLabels={vitalLabels}
             />
           );
-        })}
-      </Container>
-    );
-  }
+        }
+
+        return (
+          <LabelContainer
+            key={String(timestamp)}
+            left={toPercent(bounds.left || 0)}
+            vitalLabel={vitalLabels[0]!}
+          />
+        );
+      })}
+    </Container>
+  );
 }
 
 const Container = styled('div')`
@@ -82,6 +75,16 @@ const Container = styled('div')`
   overflow: hidden;
 
   height: 20px;
+`;
+
+const StyledMultiLabelContainer = styled('div')`
+  transform: translateX(-50%);
+  position: absolute;
+  display: flex;
+  top: 0;
+  height: 100%;
+  user-select: none;
+  white-space: nowrap;
 `;
 
 const StyledLabelContainer = styled('div')`
@@ -92,26 +95,36 @@ const StyledLabelContainer = styled('div')`
   white-space: nowrap;
 `;
 
-const Label = styled('div')<{failedThreshold: boolean}>`
-  transform: translateX(-50%);
+const Label = styled('div')<{
+  failedThreshold: boolean;
+  isSingleLabel?: boolean;
+}>`
+  transform: ${p => (p.isSingleLabel ? `translate(-50%, 15%)` : `translateY(15%)`)};
   font-size: ${p => p.theme.fontSizeExtraSmall};
-  font-weight: 600;
-  ${p => (p.failedThreshold ? `color: ${p.theme.red300};` : null)}
+  font-weight: ${p => p.theme.fontWeightBold};
+  color: ${p => (p.failedThreshold ? `${p.theme.errorText}` : `${p.theme.textColor}`)};
+  background: ${p => p.theme.background};
+  border: 1px solid;
+  border-color: ${p => (p.failedThreshold ? p.theme.red300 : p.theme.gray200)};
+  border-radius: ${p => p.theme.borderRadius};
+  height: 75%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: ${space(0.25)};
+  margin-right: ${space(0.25)};
 `;
 
 export default MeasurementsPanel;
 
 type LabelContainerProps = {
   left: string;
-  label: string;
-  tooltipLabel: string;
-  failedThreshold: boolean;
+  vitalLabel: VitalLabel;
 };
 
 type LabelContainerState = {
   width: number;
 };
-
 class LabelContainer extends Component<LabelContainerProps> {
   state: LabelContainerState = {
     width: 1,
@@ -120,7 +133,6 @@ class LabelContainer extends Component<LabelContainerProps> {
   componentDidMount() {
     const {current} = this.elementDOMRef;
     if (current) {
-      // eslint-disable-next-line react/no-did-mount-set-state
       this.setState({
         width: current.clientWidth,
       });
@@ -130,7 +142,7 @@ class LabelContainer extends Component<LabelContainerProps> {
   elementDOMRef = createRef<HTMLDivElement>();
 
   render() {
-    const {left, label, tooltipLabel, failedThreshold} = this.props;
+    const {left, vitalLabel} = this.props;
 
     return (
       <StyledLabelContainer
@@ -139,16 +151,63 @@ class LabelContainer extends Component<LabelContainerProps> {
           left: `clamp(calc(0.5 * ${this.state.width}px), ${left}, calc(100% - 0.5 * ${this.state.width}px))`,
         }}
       >
-        <Label failedThreshold={failedThreshold}>
+        <Label failedThreshold={vitalLabel.isPoorValue} isSingleLabel>
           <Tooltip
-            title={tooltipLabel}
+            title={vitalLabel.vital.name}
             position="top"
             containerDisplayMode="inline-block"
           >
-            {label}
+            {vitalLabel.vital.acronym}
           </Tooltip>
         </Label>
       </StyledLabelContainer>
+    );
+  }
+}
+
+type MultiLabelContainerProps = {
+  left: string;
+  vitalLabels: VitalLabel[];
+};
+
+class MultiLabelContainer extends Component<MultiLabelContainerProps> {
+  state: LabelContainerState = {
+    width: 1,
+  };
+
+  componentDidMount() {
+    const {current} = this.elementDOMRef;
+    if (current) {
+      this.setState({
+        width: current.clientWidth,
+      });
+    }
+  }
+
+  elementDOMRef = createRef<HTMLDivElement>();
+
+  render() {
+    const {left, vitalLabels} = this.props;
+
+    return (
+      <StyledMultiLabelContainer
+        ref={this.elementDOMRef}
+        style={{
+          left: `clamp(calc(0.5 * ${this.state.width}px), ${left}, calc(100% - 0.5 * ${this.state.width}px))`,
+        }}
+      >
+        {vitalLabels.map(label => (
+          <Label failedThreshold={label.isPoorValue} key={`${label.vital.name}-label`}>
+            <Tooltip
+              title={label.vital.name}
+              position="top"
+              containerDisplayMode="inline-block"
+            >
+              {label.vital.acronym}
+            </Tooltip>
+          </Label>
+        ))}
+      </StyledMultiLabelContainer>
     );
   }
 }

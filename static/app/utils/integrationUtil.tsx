@@ -1,66 +1,59 @@
-import capitalize from 'lodash/capitalize';
 import * as qs from 'query-string';
 
+import type {Result} from 'sentry/components/forms/controls/selectAsyncControl';
 import {
+  IconAsana,
   IconBitbucket,
+  IconCodecov,
   IconGeneric,
   IconGithub,
   IconGitlab,
   IconJira,
+  IconSentry,
   IconVsts,
-} from 'app/icons';
-import {t} from 'app/locale';
-import HookStore from 'app/stores/hookStore';
-import {
+} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import HookStore from 'sentry/stores/hookStore';
+import type {Hooks} from 'sentry/types/hooks';
+import type {
   AppOrProviderOrPlugin,
-  DocumentIntegration,
+  CodeOwner,
+  DocIntegration,
+  ExternalActorMapping,
+  ExternalActorMappingOrSuggestion,
   Integration,
   IntegrationFeature,
   IntegrationInstallationStatus,
   IntegrationType,
-  Organization,
   PluginWithProjectList,
   SentryApp,
   SentryAppInstallation,
-} from 'app/types';
-import {Hooks} from 'app/types/hooks';
-import {
-  integrationEventMap,
-  IntegrationEventParameters,
-} from 'app/utils/analytics/integrationAnalyticsEvents';
-import makeAnalyticsFunction from 'app/utils/analytics/makeAnalyticsFunction';
+} from 'sentry/types/integrations';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import {capitalize} from 'sentry/utils/string/capitalize';
 
-const mapIntegrationParams = analyticsParams => {
-  // Reload expects integration_status even though it's not relevant for non-sentry apps
-  // Passing in a dummy value of published in those cases
-  const fullParams = {...analyticsParams};
-  if (analyticsParams.integration && analyticsParams.integration_type !== 'sentry_app') {
-    fullParams.integration_status = 'published';
-  }
-  return fullParams;
-};
+import type {IconSize} from './theme';
 
-export const trackIntegrationAnalytics = makeAnalyticsFunction<
-  IntegrationEventParameters,
-  {organization: Organization} // org is required
->(integrationEventMap, {
-  mapValuesFn: mapIntegrationParams,
-});
+/**
+ * TODO: remove alias once all usages are updated
+ * @deprecated Use trackAnalytics instead
+ */
+export const trackIntegrationAnalytics = trackAnalytics;
 
 /**
  * In sentry.io the features list supports rendering plan details. If the hook
  * is not registered for rendering the features list like this simply show the
  * features as a normal list.
  */
-const generateFeaturesList = p => (
+const generateFeaturesList = (p: any) => (
   <ul>
-    {p.features.map((f, i) => (
+    {p.features.map((f: any, i: any) => (
       <li key={i}>{f.description}</li>
     ))}
   </ul>
 );
 
-const generateIntegrationFeatures = p =>
+const generateIntegrationFeatures = (p: any) =>
   p.children({
     disabled: false,
     disabledReason: null,
@@ -68,12 +61,10 @@ const generateIntegrationFeatures = p =>
     gatedFeatureGroups: [],
   });
 
-const defaultFeatureGateComponents = {
+const defaultFeatureGateComponents: ReturnType<Hooks['integrations:feature-gates']> = {
   IntegrationFeatures: generateIntegrationFeatures,
-  IntegrationDirectoryFeatures: generateIntegrationFeatures,
   FeatureList: generateFeaturesList,
-  IntegrationDirectoryFeatureList: generateFeaturesList,
-} as ReturnType<Hooks['integrations:feature-gates']>;
+};
 
 export const getIntegrationFeatureGate = () => {
   const defaultHook = () => defaultFeatureGateComponents;
@@ -100,7 +91,8 @@ export const getCategories = (features: IntegrationFeature[]): string[] => {
       case 'issue basic':
       case 'issue link':
       case 'issue sync':
-        return 'project management';
+      case 'project management':
+        return 'issue tracking';
       case 'commits':
         return 'source code management';
       case 'chat unfurl':
@@ -124,8 +116,8 @@ export const getCategoriesForIntegration = (
   if (isPlugin(integration)) {
     return getCategories(integration.featureDescriptions);
   }
-  if (isDocumentIntegration(integration)) {
-    return getCategories(integration.features);
+  if (isDocIntegration(integration)) {
+    return getCategories(integration.features ?? []);
   }
   return getCategories(integration.metadata.features);
 };
@@ -142,10 +134,16 @@ export function isPlugin(
   return integration.hasOwnProperty('shortName');
 }
 
-export function isDocumentIntegration(
+export function isDocIntegration(
   integration: AppOrProviderOrPlugin
-): integration is DocumentIntegration {
-  return integration.hasOwnProperty('docUrl');
+): integration is DocIntegration {
+  return integration.hasOwnProperty('isDraft');
+}
+
+export function isExternalActorMapping(
+  mapping: ExternalActorMappingOrSuggestion
+): mapping is ExternalActorMapping {
+  return mapping.hasOwnProperty('id');
 }
 
 export const getIntegrationType = (
@@ -157,21 +155,21 @@ export const getIntegrationType = (
   if (isPlugin(integration)) {
     return 'plugin';
   }
-  if (isDocumentIntegration(integration)) {
+  if (isDocIntegration(integration)) {
     return 'document';
   }
   return 'first_party';
 };
 
 export const convertIntegrationTypeToSnakeCase = (
-  type: 'plugin' | 'firstParty' | 'sentryApp' | 'documentIntegration'
+  type: 'plugin' | 'firstParty' | 'sentryApp' | 'docIntegration'
 ) => {
   switch (type) {
     case 'firstParty':
       return 'first_party';
     case 'sentryApp':
       return 'sentry_app';
-    case 'documentIntegration':
+    case 'docIntegration':
       return 'document';
     default:
       return type;
@@ -187,9 +185,13 @@ export const safeGetQsParam = (param: string) => {
   }
 };
 
-export const getIntegrationIcon = (integrationType?: string, size?: string) => {
-  const iconSize = size || 'md';
+export const getIntegrationIcon = (
+  integrationType?: string,
+  iconSize: IconSize = 'md'
+) => {
   switch (integrationType) {
+    case 'asana':
+      return <IconAsana size={iconSize} />;
     case 'bitbucket':
       return <IconBitbucket size={iconSize} />;
     case 'gitlab':
@@ -202,10 +204,80 @@ export const getIntegrationIcon = (integrationType?: string, size?: string) => {
       return <IconJira size={iconSize} />;
     case 'vsts':
       return <IconVsts size={iconSize} />;
+    case 'codecov':
+      return <IconCodecov size={iconSize} />;
     default:
       return <IconGeneric size={iconSize} />;
   }
 };
+
+export const getIntegrationDisplayName = (integrationType?: string) => {
+  switch (integrationType) {
+    case 'asana':
+      return 'Asana';
+    case 'bitbucket':
+      return 'Bitbucket';
+    case 'gitlab':
+      return 'GitLab';
+    case 'github':
+    case 'github_enterprise':
+      return 'GitHub';
+    case 'jira':
+    case 'jira_server':
+      return 'Jira';
+    case 'vsts':
+      return 'VSTS';
+    case 'codecov':
+      return 'Codeov';
+    default:
+      return '';
+  }
+};
+
+export const getIntegrationSourceUrl = (
+  integrationType: string,
+  sourceUrl: string,
+  lineNo: number | null
+) => {
+  switch (integrationType) {
+    case 'bitbucket':
+    case 'bitbucket_server':
+      return `${sourceUrl}#lines-${lineNo}`;
+    case 'vsts': {
+      const url = new URL(sourceUrl);
+      if (lineNo) {
+        url.searchParams.set('line', lineNo.toString());
+        url.searchParams.set('lineEnd', (lineNo + 1).toString());
+        url.searchParams.set('lineStartColumn', '1');
+        url.searchParams.set('lineEndColumn', '1');
+        url.searchParams.set('lineStyle', 'plain');
+        url.searchParams.set('_a', 'contents');
+      }
+      return url.toString();
+    }
+    case 'github':
+    case 'github_enterprise':
+    default:
+      if (lineNo === null) {
+        return sourceUrl;
+      }
+      return `${sourceUrl}#L${lineNo}`;
+  }
+};
+
+export function getCodeOwnerIcon(
+  provider: CodeOwner['provider'],
+  iconSize: IconSize = 'md'
+) {
+  switch (provider ?? '') {
+    case 'github':
+      return <IconGithub size={iconSize} />;
+    case 'gitlab':
+      return <IconGitlab size={iconSize} />;
+    default:
+      return <IconSentry size={iconSize} />;
+  }
+}
 
 // used for project creation and onboarding
 // determines what integration maps to what project platform
@@ -228,3 +300,33 @@ export const getAlertText = (integrations?: Integration[]): string | undefined =
         'Update to the latest version of our Slack app to get access to personal and team notifications.'
       );
 };
+
+/**
+ * Uses the mapping and baseEndpoint to derive the details for the mappings request.
+ * @param baseEndpoint Must have a trailing slash, since the id is appended for PUT requests!
+ * @param mapping The mapping or suggestion being sent to the endpoint
+ * @returns An object containing the request method (apiMethod), and final endpoint (apiEndpoint)
+ */
+export const getExternalActorEndpointDetails = (
+  baseEndpoint: string,
+  mapping?: ExternalActorMappingOrSuggestion
+): {apiEndpoint: string; apiMethod: 'POST' | 'PUT'} => {
+  const isValidMapping = mapping && isExternalActorMapping(mapping);
+  return {
+    apiMethod: isValidMapping ? 'PUT' : 'POST',
+    apiEndpoint: isValidMapping ? `${baseEndpoint}${mapping.id}/` : baseEndpoint,
+  };
+};
+
+export const sentryNameToOption = ({id, name}: any): Result => ({
+  value: id,
+  label: name,
+});
+
+export function getIntegrationStatus(integration: Integration) {
+  // there are multiple status fields for an integration we consider
+  const statusList = [integration.organizationIntegrationStatus, integration.status];
+  const firstNotActive = statusList.find(s => s !== 'active');
+  // Active if everything is active, otherwise the first inactive status
+  return firstNotActive ?? 'active';
+}

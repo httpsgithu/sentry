@@ -1,65 +1,29 @@
 import * as Sentry from '@sentry/react';
-import isNil from 'lodash/isNil';
 
-import GroupActions from 'app/actions/groupActions';
-import {Client, RequestCallbacks, RequestOptions} from 'app/api';
-import GroupStore from 'app/stores/groupStore';
-import {Actor, Group, Member, Note, User} from 'app/types';
-import {buildTeamId, buildUserId} from 'app/utils';
-import {uniqueId} from 'app/utils/guid';
+import type {RequestCallbacks, RequestOptions} from 'sentry/api';
+import {Client} from 'sentry/api';
+import GroupStore from 'sentry/stores/groupStore';
+import type {Actor} from 'sentry/types/core';
+import type {Group, Tag as GroupTag, TagValue} from 'sentry/types/group';
+import {buildTeamId, buildUserId} from 'sentry/utils';
+import {uniqueId} from 'sentry/utils/guid';
+import type {ApiQueryKey, UseApiQueryOptions} from 'sentry/utils/queryClient';
+import {useApiQuery} from 'sentry/utils/queryClient';
 
 type AssignedBy = 'suggested_assignee' | 'assignee_selector';
-type AssignToUserParams = {
-  /**
-   * Issue id
-   */
-  id: string;
-  user: User | Actor;
-  member?: Member;
-  assignedBy: AssignedBy;
-};
 
-export function assignToUser(params: AssignToUserParams) {
+export function clearAssignment(
+  groupId: string,
+  orgSlug: string,
+  assignedBy: AssignedBy
+): Promise<Group> {
   const api = new Client();
 
-  const endpoint = `/issues/${params.id}/`;
+  const endpoint = `/organizations/${orgSlug}/issues/${groupId}/`;
 
   const id = uniqueId();
 
-  GroupActions.assignTo(id, params.id, {
-    email: (params.member && params.member.email) || '',
-  });
-
-  const request = api.requestPromise(endpoint, {
-    method: 'PUT',
-    // Sending an empty value to assignedTo is the same as "clear",
-    // so if no member exists, that implies that we want to clear the
-    // current assignee.
-    data: {
-      assignedTo: params.user ? buildUserId(params.user.id) : '',
-      assignedBy: params.assignedBy,
-    },
-  });
-
-  request
-    .then(data => {
-      GroupActions.assignToSuccess(id, params.id, data);
-    })
-    .catch(data => {
-      GroupActions.assignToError(id, params.id, data);
-    });
-
-  return request;
-}
-
-export function clearAssignment(groupId: string, assignedBy: AssignedBy) {
-  const api = new Client();
-
-  const endpoint = `/issues/${groupId}/`;
-
-  const id = uniqueId();
-
-  GroupActions.assignTo(id, groupId, {
+  GroupStore.onAssignTo(id, groupId, {
     email: '',
   });
 
@@ -74,33 +38,41 @@ export function clearAssignment(groupId: string, assignedBy: AssignedBy) {
 
   request
     .then(data => {
-      GroupActions.assignToSuccess(id, groupId, data);
+      GroupStore.onAssignToSuccess(id, groupId, data);
+      return data;
     })
     .catch(data => {
-      GroupActions.assignToError(id, groupId, data);
+      GroupStore.onAssignToError(id, groupId, data);
+      throw data;
     });
 
   return request;
 }
 
 type AssignToActorParams = {
+  actor: Pick<Actor, 'id' | 'type'>;
+  assignedBy: AssignedBy;
   /**
    * Issue id
    */
   id: string;
-  actor: Pick<Actor, 'id' | 'type'>;
-  assignedBy: AssignedBy;
+  orgSlug: string;
 };
 
-export function assignToActor({id, actor, assignedBy}: AssignToActorParams) {
+export function assignToActor({
+  id,
+  actor,
+  assignedBy,
+  orgSlug,
+}: AssignToActorParams): Promise<Group> {
   const api = new Client();
 
-  const endpoint = `/issues/${id}/`;
+  const endpoint = `/organizations/${orgSlug}/issues/${id}/`;
 
   const guid = uniqueId();
-  let actorId;
+  let actorId = '';
 
-  GroupActions.assignTo(guid, id, {email: ''});
+  GroupStore.onAssignTo(guid, id, {email: ''});
 
   switch (actor.type) {
     case 'user':
@@ -124,65 +96,20 @@ export function assignToActor({id, actor, assignedBy}: AssignToActorParams) {
       data: {assignedTo: actorId, assignedBy},
     })
     .then(data => {
-      GroupActions.assignToSuccess(guid, id, data);
+      GroupStore.onAssignToSuccess(guid, id, data);
+      return data;
     })
     .catch(data => {
-      GroupActions.assignToError(guid, id, data);
+      GroupStore.onAssignToSuccess(guid, id, data);
+      throw data;
     });
 }
 
-export function deleteNote(api: Client, group: Group, id: string, _oldText: string) {
-  const restore = group.activity.find(activity => activity.id === id);
-  const index = GroupStore.removeActivity(group.id, id);
-  if (index === -1) {
-    // I dunno, the id wasn't found in the GroupStore
-    return Promise.reject(new Error('Group was not found in store'));
-  }
-
-  const promise = api.requestPromise(`/issues/${group.id}/comments/${id}/`, {
-    method: 'DELETE',
-  });
-
-  promise.catch(() => GroupStore.addActivity(group.id, restore, index));
-
-  return promise;
-}
-
-export function createNote(api: Client, group: Group, note: Note) {
-  const promise = api.requestPromise(`/issues/${group.id}/comments/`, {
-    method: 'POST',
-    data: note,
-  });
-
-  promise.then(data => GroupStore.addActivity(group.id, data));
-
-  return promise;
-}
-
-export function updateNote(
-  api: Client,
-  group: Group,
-  note: Note,
-  id: string,
-  oldText: string
-) {
-  GroupStore.updateActivity(group.id, id, {text: note.text});
-
-  const promise = api.requestPromise(`/issues/${group.id}/comments/${id}/`, {
-    method: 'PUT',
-    data: note,
-  });
-
-  promise.catch(() => GroupStore.updateActivity(group.id, id, {text: oldText}));
-
-  return promise;
-}
-
 type ParamsType = {
-  itemIds?: Array<number> | Array<string>;
+  environment?: string | string[] | null;
+  itemIds?: string[];
+  project?: number[] | string[] | null;
   query?: string;
-  environment?: string | Array<string> | null;
-  project?: Array<number> | null;
 };
 
 type UpdateParams = ParamsType & {
@@ -193,17 +120,17 @@ type UpdateParams = ParamsType & {
 type QueryArgs =
   | {
       query: string;
-      environment?: string | Array<string>;
-      project?: Array<number>;
+      environment?: string | string[];
+      project?: Array<number | string>;
     }
   | {
-      id: Array<number> | Array<string>;
-      environment?: string | Array<string>;
-      project?: Array<number>;
+      id: number[] | string[];
+      environment?: string | string[];
+      project?: Array<number | string>;
     }
   | {
-      environment?: string | Array<string>;
-      project?: Array<number>;
+      environment?: string | string[];
+      project?: Array<number | string>;
     };
 
 /**
@@ -213,11 +140,11 @@ export function paramsToQueryArgs(params: ParamsType): QueryArgs {
   const p: QueryArgs = params.itemIds
     ? {id: params.itemIds} // items matching array of itemids
     : params.query
-    ? {query: params.query} // items matching search query
-    : {}; // all items
+      ? {query: params.query} // items matching search query
+      : {}; // all items
 
   // only include environment if it is not null/undefined
-  if (params.query && !isNil(params.environment)) {
+  if (params.query && params.environment !== null && params.environment !== undefined) {
     p.environment = params.environment;
   }
 
@@ -229,8 +156,12 @@ export function paramsToQueryArgs(params: ParamsType): QueryArgs {
   // only include date filters if they are not null/undefined
   if (params.query) {
     ['start', 'end', 'period', 'utc'].forEach(prop => {
-      if (!isNil(params[prop])) {
-        p[prop === 'period' ? 'statsPeriod' : prop] = params[prop];
+      if (
+        params[prop as keyof typeof params] !== null &&
+        params[prop as keyof typeof params] !== undefined
+      ) {
+        (p as any)[prop === 'period' ? 'statsPeriod' : prop] =
+          params[prop as keyof typeof params];
       }
     });
   }
@@ -282,7 +213,7 @@ export function bulkDelete(
   const query: QueryArgs = paramsToQueryArgs(params);
   const id = uniqueId();
 
-  GroupActions.delete(id, itemIds);
+  GroupStore.onDelete(id, itemIds);
 
   return wrapRequest(
     api,
@@ -291,10 +222,10 @@ export function bulkDelete(
       query,
       method: 'DELETE',
       success: response => {
-        GroupActions.deleteSuccess(id, itemIds, response);
+        GroupStore.onDeleteSuccess(id, itemIds, response);
       },
       error: error => {
-        GroupActions.deleteError(id, itemIds, error);
+        GroupStore.onDeleteError(id, itemIds, error);
       },
     },
     options
@@ -302,8 +233,8 @@ export function bulkDelete(
 }
 
 type BulkUpdateParams = UpdateParams & {
-  failSilently?: boolean;
   data?: any;
+  failSilently?: boolean;
 };
 
 export function bulkUpdate(
@@ -317,7 +248,7 @@ export function bulkUpdate(
   const query: QueryArgs = paramsToQueryArgs(params);
   const id = uniqueId();
 
-  GroupActions.update(id, itemIds, data);
+  GroupStore.onUpdate(id, itemIds, data);
 
   return wrapRequest(
     api,
@@ -327,10 +258,10 @@ export function bulkUpdate(
       method: 'PUT',
       data,
       success: response => {
-        GroupActions.updateSuccess(id, itemIds, response);
+        GroupStore.onUpdateSuccess(id, itemIds, response);
       },
-      error: error => {
-        GroupActions.updateError(id, itemIds, error, failSilently);
+      error: () => {
+        GroupStore.onUpdateError(id, itemIds, !!failSilently);
       },
     },
     options
@@ -350,7 +281,7 @@ export function mergeGroups(
   const query: QueryArgs = paramsToQueryArgs(params);
   const id = uniqueId();
 
-  GroupActions.merge(id, itemIds);
+  GroupStore.onMerge(id, itemIds);
 
   return wrapRequest(
     api,
@@ -360,12 +291,72 @@ export function mergeGroups(
       method: 'PUT',
       data: {merge: 1},
       success: response => {
-        GroupActions.mergeSuccess(id, itemIds, response);
+        GroupStore.onMergeSuccess(id, itemIds, response);
       },
       error: error => {
-        GroupActions.mergeError(id, itemIds, error);
+        GroupStore.onMergeError(id, itemIds, error);
       },
     },
     options
   );
+}
+
+type FetchIssueTagValuesParameters = {
+  groupId: string;
+  orgSlug: string;
+  tagKey: string;
+  cursor?: string;
+  environment?: string[];
+  sort?: string | string[];
+};
+
+export const makeFetchIssueTagValuesQueryKey = ({
+  orgSlug,
+  groupId,
+  tagKey,
+  environment,
+  sort,
+  cursor,
+}: FetchIssueTagValuesParameters): ApiQueryKey => [
+  `/organizations/${orgSlug}/issues/${groupId}/tags/${tagKey}/values/`,
+  {query: {environment, sort, cursor}},
+];
+
+export function useFetchIssueTagValues(
+  parameters: FetchIssueTagValuesParameters,
+  options: Partial<UseApiQueryOptions<TagValue[]>> = {}
+) {
+  return useApiQuery<TagValue[]>(makeFetchIssueTagValuesQueryKey(parameters), {
+    staleTime: 0,
+    retry: false,
+    ...options,
+  });
+}
+
+type FetchIssueTagParameters = {
+  groupId: string;
+  orgSlug: string;
+  tagKey: string;
+};
+
+export const makeFetchIssueTagQueryKey = ({
+  orgSlug,
+  groupId,
+  tagKey,
+  environment,
+  sort,
+}: FetchIssueTagValuesParameters): ApiQueryKey => [
+  `/organizations/${orgSlug}/issues/${groupId}/tags/${tagKey}/`,
+  {query: {environment, sort}},
+];
+
+export function useFetchIssueTag(
+  parameters: FetchIssueTagParameters,
+  options: Partial<UseApiQueryOptions<GroupTag>> = {}
+) {
+  return useApiQuery<GroupTag>(makeFetchIssueTagQueryKey(parameters), {
+    staleTime: 0,
+    retry: false,
+    ...options,
+  });
 }

@@ -1,7 +1,7 @@
-import {addErrorMessage} from 'app/actionCreators/indicator';
-import {Client} from 'app/api';
-import {t} from 'app/locale';
-import {NewQuery, SavedQuery} from 'app/types';
+import {addErrorMessage} from 'sentry/actionCreators/indicator';
+import {Client} from 'sentry/api';
+import {t} from 'sentry/locale';
+import type {NewQuery, SavedQuery} from 'sentry/types/organization';
 
 export function fetchSavedQueries(
   api: Client,

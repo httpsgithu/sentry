@@ -1,11 +1,14 @@
+from unittest import mock
+
 from selenium.common.exceptions import TimeoutException
 
-from sentry.models import Project
-from sentry.testutils import AcceptanceTestCase
-from sentry.utils.compat import mock
+from sentry.models.project import Project
+from sentry.testutils.cases import AcceptanceTestCase
+from sentry.testutils.silo import no_silo_test
 from sentry.utils.retries import TimedRetryPolicy
 
 
+@no_silo_test
 class OrganizationOnboardingTest(AcceptanceTestCase):
     def setUp(self):
         super().setUp()
@@ -23,16 +26,13 @@ class OrganizationOnboardingTest(AcceptanceTestCase):
 
         # Welcome step
         self.browser.wait_until('[data-test-id="onboarding-step-welcome"]')
-        self.browser.snapshot(name="onboarding - welcome")
 
         # Platform selection step
-        self.browser.click('[data-test-id="welcome-next"]')
+        self.browser.click('[aria-label="Start"]')
         self.browser.wait_until('[data-test-id="onboarding-step-select-platform"]')
 
-        self.browser.snapshot(name="onboarding - select platform")
-
-        # Select and create node JS project
-        self.browser.click('[data-test-id="platform-node"]')
+        # Select and create nest JS project
+        self.browser.click('[data-test-id="platform-node-nestjs"]')
         self.browser.wait_until_not('[data-test-id="platform-select-next"][aria-disabled="true"]')
         self.browser.wait_until('[data-test-id="platform-select-next"][aria-disabled="false"]')
 
@@ -40,16 +40,11 @@ class OrganizationOnboardingTest(AcceptanceTestCase):
         def click_platform_select_name(browser):
             browser.click('[data-test-id="platform-select-next"]')
             # Project getting started
-            browser.wait_until('[data-test-id="onboarding-step-get-started"]')
+            browser.wait_until('[data-test-id="onboarding-step-setup-docs"]')
 
         click_platform_select_name(self.browser)
-        self.browser.snapshot(name="onboarding - get started")
 
         # Verify project was created for org
         project = Project.objects.get(organization=self.org)
-        assert project.name == "rowdy-tiger"
-        assert project.platform == "node"
-
-        self.browser.click('[data-test-id="onboarding-getting-started-invite-members"]')
-        self.browser.wait_until("[role='dialog']")
-        self.browser.snapshot(name="onboarding - invite members")
+        assert project.name == "node-nestjs"
+        assert project.platform == "node-nestjs"

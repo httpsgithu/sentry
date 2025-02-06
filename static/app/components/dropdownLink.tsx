@@ -1,10 +1,9 @@
-import * as React from 'react';
-import {css, withTheme} from '@emotion/react';
+import type {Theme} from '@emotion/react';
+import {css, useTheme} from '@emotion/react';
 import classNames from 'classnames';
 
-import DropdownMenu from 'app/components/dropdownMenu';
-import {IconChevron} from 'app/icons';
-import {Theme} from 'app/utils/theme';
+import DeprecatedDropdownMenu from 'sentry/components/deprecatedDropdownMenu';
+import {IconChevron} from 'sentry/icons';
 
 const getRootCss = (theme: Theme) => css`
   .dropdown-menu {
@@ -14,7 +13,7 @@ const getRootCss = (theme: Theme) => css`
       &:hover,
       &:focus {
         color: inherit;
-        background-color: ${theme.focus};
+        background-color: ${theme.hover};
       }
     }
 
@@ -29,7 +28,7 @@ const getRootCss = (theme: Theme) => css`
 
   .dropdown-submenu:hover > span {
     color: ${theme.textColor};
-    background: ${theme.focus};
+    background: ${theme.hover};
   }
 `;
 
@@ -38,52 +37,52 @@ const getRootCss = (theme: Theme) => css`
 // `dropdown-actor` is a flexbox
 
 type Props = Omit<
-  Omit<DropdownMenu['props'], 'children'>,
-  keyof typeof DropdownMenu.defaultProps
+  Omit<DeprecatedDropdownMenu['props'], 'children'>,
+  keyof typeof DeprecatedDropdownMenu.defaultProps
 > &
-  Partial<typeof DropdownMenu.defaultProps> & {
-    theme: Theme;
+  Partial<typeof DeprecatedDropdownMenu.defaultProps> & {
     children: React.ReactNode;
-    title?: React.ReactNode;
-    customTitle?: React.ReactNode;
-    /**
-     * display dropdown caret
-     */
-    caret?: boolean;
-    disabled?: boolean;
-    /**
-     * Anchors menu to the right
-     */
-    anchorRight?: boolean;
-    anchorMiddle?: boolean;
     /**
      * Always render children of dropdown menu, this is included to support menu
      * items that open a confirm modal. Otherwise when dropdown menu hides, the
      * modal also gets unmounted
      */
     alwaysRenderMenu?: boolean;
-    topLevelClasses?: string;
-    menuClasses?: string;
+    anchorMiddle?: boolean;
+    /**
+     * Anchors menu to the right
+     */
+    anchorRight?: boolean;
+    /**
+     * display dropdown caret
+     */
+    caret?: boolean;
     className?: string;
+    customTitle?: React.ReactNode;
+    disabled?: boolean;
+    menuClasses?: string;
+    title?: React.ReactNode;
+    topLevelClasses?: string;
   };
 
-const DropdownLink = withTheme(
-  ({
-    anchorRight,
-    anchorMiddle,
-    disabled,
-    title,
-    customTitle,
-    caret,
-    children,
-    menuClasses,
-    className,
-    alwaysRenderMenu,
-    topLevelClasses,
-    theme,
-    ...otherProps
-  }: Props) => (
-    <DropdownMenu alwaysRenderMenu={alwaysRenderMenu} {...otherProps}>
+function DropdownLink({
+  anchorMiddle,
+  title,
+  customTitle,
+  children,
+  menuClasses,
+  className,
+  topLevelClasses,
+  anchorRight = false,
+  disabled = false,
+  caret = true,
+  alwaysRenderMenu = true,
+  ...otherProps
+}: Props) {
+  const theme = useTheme();
+
+  return (
+    <DeprecatedDropdownMenu alwaysRenderMenu={alwaysRenderMenu} {...otherProps}>
       {({isOpen, getRootProps, getActorProps, getMenuProps}) => {
         const shouldRenderMenu = alwaysRenderMenu || isOpen;
         const cx = classNames('dropdown-actor', className, {
@@ -99,18 +98,19 @@ const DropdownLink = withTheme(
           open: isOpen,
         });
 
+        const {onClick: onClickActor, ...actorProps} = getActorProps({
+          className: cx,
+        });
+
         return (
           <span
             css={getRootCss(theme)}
             {...getRootProps({
               className: topLevelCx,
             })}
+            data-test-id="dropdown-link"
           >
-            <a
-              {...getActorProps({
-                className: cx,
-              })}
-            >
+            <a onClick={disabled ? undefined : onClickActor} {...actorProps}>
               {customTitle || (
                 <div className="dropdown-actor-title">
                   {title}
@@ -131,17 +131,8 @@ const DropdownLink = withTheme(
           </span>
         );
       }}
-    </DropdownMenu>
-  )
-);
-
-DropdownLink.defaultProps = {
-  alwaysRenderMenu: true,
-  disabled: false,
-  anchorRight: false,
-  caret: true,
-};
-
-DropdownLink.displayName = 'DropdownLink';
+    </DeprecatedDropdownMenu>
+  );
+}
 
 export default DropdownLink;

@@ -1,11 +1,12 @@
-import Alert from 'app/components/alert';
-import {IconInfo} from 'app/icons';
-import {t} from 'app/locale';
+import {Alert} from 'sentry/components/alert';
+import {t} from 'sentry/locale';
 
-const ComingSoon = () => (
-  <Alert type="info" icon={<IconInfo size="md" />}>
-    {t('This feature is coming soon!')}
-  </Alert>
-);
+function ComingSoon() {
+  return (
+    <Alert type="info" showIcon>
+      {t('This feature is coming soon!')}
+    </Alert>
+  );
+}
 
 export default ComingSoon;

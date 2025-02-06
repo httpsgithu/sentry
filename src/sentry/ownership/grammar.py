@@ -1,19 +1,32 @@
-import operator
+from __future__ import annotations
+
 import re
 from collections import namedtuple
-from functools import reduce
-from typing import Iterable, List, Mapping, Pattern, Tuple
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, NamedTuple
 
-from django.db.models import Q
-from parsimonious.exceptions import ParseError  # noqa
-from parsimonious.grammar import Grammar, NodeVisitor
+from parsimonious.exceptions import ParseError
+from parsimonious.grammar import Grammar
+from parsimonious.nodes import Node
+from parsimonious.nodes import NodeVisitor as BaseNodeVisitor
 from rest_framework.serializers import ValidationError
 
-from sentry.models import ActorTuple
+from sentry.eventstore.models import EventSubjectTemplateData
+from sentry.integrations.models.repository_project_path_config import RepositoryProjectPathConfig
+from sentry.models.organizationmember import OrganizationMember
+from sentry.types.actor import Actor, ActorType
+from sentry.users.services.user.service import user_service
+from sentry.utils.codeowners import codeowners_match
+from sentry.utils.event_frames import find_stack_frames, get_sdk_name, munged_filename_and_frames
 from sentry.utils.glob import glob_match
 from sentry.utils.safe import get_path
 
 __all__ = ("parse_rules", "dump_schema", "load_schema")
+
+if TYPE_CHECKING:
+    NodeVisitor = BaseNodeVisitor[str]
+else:
+    NodeVisitor = BaseNodeVisitor
 
 VERSION = 1
 
@@ -24,9 +37,9 @@ CODEOWNERS = "codeowners"
 
 # Grammar is defined in EBNF syntax.
 ownership_grammar = Grammar(
-    fr"""
+    rf"""
 
-ownership = line+
+ownership = line*
 
 line = _ (comment / rule / empty) newline?
 
@@ -65,15 +78,27 @@ class Rule(namedtuple("Rule", "matcher owners")):
     This line contains a Matcher and a list of Owners.
     """
 
-    def dump(self):
+    def __str__(self) -> str:
+        owners = [o.dump() for o in self.owners]
+        owners_str = " ".join(
+            f"#{owner['identifier']}" if owner["type"] == "team" else owner["identifier"]
+            for owner in owners
+        )
+        return f"{self.matcher} {owners_str}"
+
+    def dump(self) -> dict[str, Sequence[Owner]]:
         return {"matcher": self.matcher.dump(), "owners": [o.dump() for o in self.owners]}
 
     @classmethod
-    def load(cls, data):
+    def load(cls, data: Mapping[str, Any]) -> Rule:
         return cls(Matcher.load(data["matcher"]), [Owner.load(o) for o in data["owners"]])
 
-    def test(self, data):
-        return self.matcher.test(data)
+    def test(
+        self,
+        data: Mapping[str, Any],
+        munged_data: tuple[Sequence[Mapping[str, Any]], Sequence[str]],
+    ) -> bool | Any:
+        return self.matcher.test(data, munged_data)
 
 
 class Matcher(namedtuple("Matcher", "type pattern")):
@@ -91,74 +116,115 @@ class Matcher(namedtuple("Matcher", "type pattern")):
         src/*
     """
 
-    def dump(self):
+    def __str__(self) -> str:
+        return f"{self.type}:{self.pattern}"
+
+    def dump(self) -> dict[str, str]:
         return {"type": self.type, "pattern": self.pattern}
 
     @classmethod
-    def load(cls, data):
+    def load(cls, data: Mapping[str, str]) -> Matcher:
         return cls(data["type"], data["pattern"])
 
-    def test(self, data):
+    @staticmethod
+    def munge_if_needed(
+        data: Mapping[str, Any]
+    ) -> tuple[Sequence[Mapping[str, Any]], Sequence[str]]:
+        keys = ["filename", "abs_path"]
+        platform = data.get("platform")
+        sdk_name = get_sdk_name(data)
+        frames = find_stack_frames(data)
+        if platform:
+            munged = munged_filename_and_frames(platform, frames, "munged_filename", sdk_name)
+            if munged:
+                keys.append(munged[0])
+                frames = munged[1]
+
+        return frames, keys
+
+    def test(
+        self,
+        data: Mapping[str, Any],
+        munged_data: tuple[Sequence[Mapping[str, Any]], Sequence[str]],
+    ) -> bool:
         if self.type == URL:
             return self.test_url(data)
         elif self.type == PATH:
-            return self.test_frames(data, ["filename", "abs_path"])
+            return self.test_frames(*munged_data)
         elif self.type == MODULE:
-            return self.test_frames(data, ["module"])
+            return self.test_frames(find_stack_frames(data), ["module"])
         elif self.type.startswith("tags."):
             return self.test_tag(data)
         elif self.type == CODEOWNERS:
-            return self.test_codeowners(data)
+            return self.test_frames(
+                *munged_data,
+                # Codeowners has a slightly different syntax compared to issue owners
+                # As such we need to match it using gitignore logic.
+                # See syntax documentation here:
+                # https://docs.github.com/en/github/creating-cloning-and-archiving-repositories/creating-a-repository-on-github/about-code-owners
+                match_frame_value_func=lambda val, pattern: bool(codeowners_match(val, pattern)),
+                match_frame_func=lambda frame: frame.get("in_app") is not False,
+            )
         return False
 
-    def test_url(self, data):
-        try:
-            url = data["request"]["url"]
-        except KeyError:
-            return False
-        return url and glob_match(url, self.pattern, ignorecase=True)
+    def test_url(self, data: Mapping[str, Any]) -> bool:
+        url = get_path(data, "request", "url")
+        return url and bool(glob_match(url, self.pattern, ignorecase=True))
 
-    def test_frames(self, data, keys):
-        for frame in _iter_frames(data):
-            value = next((frame.get(key) for key in keys if frame.get(key)), None)
-
-            if not value:
+    def test_frames(
+        self,
+        frames: Sequence[Mapping[str, Any]],
+        keys: Sequence[str],
+        match_frame_value_func: Callable[[str | None, str], bool] = lambda val, pattern: bool(
+            glob_match(val, pattern, ignorecase=True, path_normalize=True)
+        ),
+        match_frame_func: Callable[[Mapping[str, Any]], bool] = lambda _: True,
+    ) -> bool:
+        for frame in frames:
+            if not match_frame_func(frame):
                 continue
 
-            if glob_match(value, self.pattern, ignorecase=True, path_normalize=True):
-                return True
+            for key in keys:
+                value = frame.get(key)
+                if not value:
+                    continue
+
+                if match_frame_value_func(value, self.pattern):
+                    return True
 
         return False
 
-    def test_tag(self, data):
+    def test_tag(self, data: Mapping[str, Any]) -> bool:
         tag = self.type[5:]
+
+        # inspect the event-payload User interface first before checking tags.user
+        if tag and tag.startswith("user."):
+            for k, v in (get_path(data, "user", filter=True) or {}).items():
+                if isinstance(v, str) and tag.endswith("." + k) and glob_match(v, self.pattern):
+                    return True
+                # user interface supports different fields in the payload, any other fields present gets put into the
+                # 'data' dict
+                # we look one more level deep to see if the pattern matches
+                elif k == "data":
+                    for data_k, data_v in (v or {}).items():
+                        if (
+                            isinstance(data_v, str)
+                            and tag.endswith("." + data_k)
+                            and glob_match(data_v, self.pattern)
+                        ):
+                            return True
+
         for k, v in get_path(data, "tags", filter=True) or ():
             if k == tag and glob_match(v, self.pattern):
                 return True
-        return False
-
-    def test_codeowners(self, data):
-        """
-        Codeowners has a slightly different syntax compared to issue owners
-        As such we need to match it using gitignore logic.
-        See syntax documentation here:
-        https://docs.github.com/en/github/creating-cloning-and-archiving-repositories/creating-a-repository-on-github/about-code-owners
-        """
-        spec = _path_to_regex(self.pattern)
-        keys = ["filename", "abs_path"]
-        for frame in _iter_frames(data):
-            value = next((frame.get(key) for key in keys if frame.get(key)), None)
-
-            if not value:
-                continue
-
-            if spec.search(value):
+            elif k == EventSubjectTemplateData.tag_aliases.get(tag, tag) and glob_match(
+                v, self.pattern
+            ):
                 return True
-
         return False
 
 
-class Owner(namedtuple("Owner", "type identifier")):
+class Owner(NamedTuple):
     """
     An Owner represents a User or Team who owns this Rule.
 
@@ -169,46 +235,49 @@ class Owner(namedtuple("Owner", "type identifier")):
         #team
     """
 
-    def dump(self):
+    type: str
+    identifier: str
+
+    def dump(self) -> dict[str, str]:
         return {"type": self.type, "identifier": self.identifier}
 
     @classmethod
-    def load(cls, data):
+    def load(cls, data: Mapping[str, str]) -> Owner:
         return cls(data["type"], data["identifier"])
 
 
 class OwnershipVisitor(NodeVisitor):
     visit_comment = visit_empty = lambda *a: None
 
-    def visit_ownership(self, node, children):
+    def visit_ownership(self, node: Node, children: Sequence[Rule | None]) -> list[Rule]:
         return [_f for _f in children if _f]
 
-    def visit_line(self, node, children):
+    def visit_line(self, node: Node, children: tuple[Node, Sequence[Rule | None], Any]) -> Any:
         _, line, _ = children
         comment_or_rule_or_empty = line[0]
         if comment_or_rule_or_empty:
             return comment_or_rule_or_empty
 
-    def visit_rule(self, node, children):
+    def visit_rule(self, node: Node, children: tuple[Node, Matcher, Sequence[Owner]]) -> Rule:
         _, matcher, owners = children
         return Rule(matcher, owners)
 
-    def visit_matcher(self, node, children):
+    def visit_matcher(self, node: Node, children: tuple[Node, str, str]) -> Matcher:
         _, tag, identifier = children
         return Matcher(tag, identifier)
 
-    def visit_matcher_tag(self, node, children):
+    def visit_matcher_tag(self, node: Node, children: Sequence[Any]) -> str:
         if not children:
             return "path"
         (tag,) = children
         type, _ = tag
-        return type[0].text
+        return str(type[0].text)
 
-    def visit_owners(self, node, children):
+    def visit_owners(self, node: Node, children: tuple[Any, Sequence[Owner]]) -> list[Owner]:
         _, owners = children
-        return owners
+        return list(owners)
 
-    def visit_owner(self, node, children):
+    def visit_owner(self, node: Node, children: tuple[Node, bool, str]) -> Owner:
         _, is_team, pattern = children
         type = "team" if is_team else "user"
         # User emails are case insensitive, so coerce them
@@ -217,151 +286,45 @@ class OwnershipVisitor(NodeVisitor):
             pattern = pattern.lower()
         return Owner(type, pattern)
 
-    def visit_team_prefix(self, node, children):
+    def visit_team_prefix(self, node: Node, children: Sequence[Any]) -> bool:
         return bool(children)
 
-    def visit_any_identifier(self, node, children):
+    def visit_any_identifier(self, node: Node, children: Sequence[Any]) -> Node:
         return children[0]
 
-    def visit_identifier(self, node, children):
-        return node.text
+    def visit_identifier(self, node: Node, children: Sequence[Any]) -> str:
+        return str(node.text)
 
-    def visit_quoted_identifier(self, node, children):
-        return node.text[1:-1].encode("ascii", "backslashreplace").decode("unicode-escape")
+    def visit_quoted_identifier(self, node: Node, children: Sequence[Any]) -> str:
+        return str(node.text[1:-1].encode("ascii", "backslashreplace").decode("unicode-escape"))
 
-    def generic_visit(self, node, children):
-        return children or node
-
-
-def _path_to_regex(pattern: str) -> Pattern[str]:
-    """
-    ported from https://github.com/hmarr/codeowners/blob/d0452091447bd2a29ee508eebc5a79874fb5d4ff/match.go#L33
-    ported from https://github.com/sbdchd/codeowners/blob/6c5e8563f4c675abb098df704e19f4c6b95ff9aa/codeowners/__init__.py#L16
-
-    There are some special cases like backslash that were added
-
-    MIT License
-
-    Copyright (c) 2020 Harry Marr
-    Copyright (c) 2019-2020 Steve Dignam
-
-    Permission is hereby granted, free of charge, to any person obtaining a copy
-    of this software and associated documentation files (the "Software"), to deal
-    in the Software without restriction, including without limitation the rights
-    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    copies of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
-
-    The above copyright notice and this permission notice shall be included in all
-    copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-    SOFTWARE.
-    """
-    regex = ""
-
-    # Special case backslash can match a backslash file or directory
-    if pattern[0] == "\\":
-        return re.compile(r"\\(?:\Z|/)")
-
-    slash_pos = pattern.find("/")
-    anchored = slash_pos > -1 and slash_pos != len(pattern) - 1
-
-    regex += r"\A" if anchored else r"(?:\A|/)"
-
-    matches_dir = pattern[-1] == "/"
-    if matches_dir:
-        pattern = pattern.rstrip("/")
-
-    # patterns ending with "/*" are special. They only match items directly in the directory
-    # not deeper
-    trailing_slash_star = pattern[-1] == "*" and len(pattern) > 1 and pattern[-2] == "/"
-
-    iterator = enumerate(pattern)
-
-    # Anchored paths may or may not start with a slash
-    if anchored and pattern[0] == "/":
-        next(iterator, None)
-        regex += r"/?"
-
-    for i, ch in iterator:
-
-        if ch == "*":
-
-            # Handle double star (**) case properly
-            if i + 1 < len(pattern) and pattern[i + 1] == "*":
-                left_anchored = i == 0
-                leading_slash = i > 0 and pattern[i - 1] == "/"
-                right_anchored = i + 2 == len(pattern)
-                trailing_slash = i + 2 < len(pattern) and pattern[i + 2] == "/"
-
-                if (left_anchored or leading_slash) and (right_anchored or trailing_slash):
-                    regex += ".*"
-
-                    next(iterator, None)
-                    next(iterator, None)
-                    continue
-            regex += "[^/]*"
-        elif ch == "?":
-            regex += "[^/]"
-        else:
-            regex += re.escape(ch)
-
-    if matches_dir:
-        regex += "/"
-    elif trailing_slash_star:
-        regex += r"\Z"
-    else:
-        regex += r"(?:\Z|/)"
-    return re.compile(regex)
+    def generic_visit(self, node: Node, children: Sequence[Any]) -> list[Node] | Node:
+        return list(children) or node
 
 
-def _iter_frames(data):
-    try:
-        yield from get_path(data, "stacktrace", "frames", filter=True) or ()
-    except KeyError:
-        pass
-
-    try:
-        values = get_path(data, "exception", "values", filter=True) or ()
-    except KeyError:
-        return
-
-    for value in values:
-        try:
-            yield from get_path(value, "stacktrace", "frames", filter=True) or ()
-        except KeyError:
-            continue
-
-
-def parse_rules(data):
+def parse_rules(data: str) -> Any:
     """Convert a raw text input into a Rule tree"""
     tree = ownership_grammar.parse(data)
     return OwnershipVisitor().visit(tree)
 
 
-def dump_schema(rules):
+def dump_schema(rules: Sequence[Rule]) -> dict[str, Any]:
     """Convert a Rule tree into a JSON schema"""
     return {"$version": VERSION, "rules": [r.dump() for r in rules]}
 
 
-def load_schema(schema):
+def load_schema(schema: Mapping[str, Any]) -> list[Rule]:
     """Convert a JSON schema into a Rule tree"""
     if schema["$version"] != VERSION:
         raise RuntimeError("Invalid schema $version: %r" % schema["$version"])
     return [Rule.load(r) for r in schema["rules"]]
 
 
-def convert_schema_to_rules_text(schema):
+def convert_schema_to_rules_text(schema: Mapping[str, Any]) -> str:
     rules = load_schema(schema)
     text = ""
 
-    def owner_prefix(type):
+    def owner_prefix(type: str) -> str:
         if type == "team":
             return "#"
         return ""
@@ -372,7 +335,7 @@ def convert_schema_to_rules_text(schema):
     return text
 
 
-def parse_code_owners(data: str) -> Tuple[List[str], List[str], List[str]]:
+def parse_code_owners(data: str) -> tuple[list[str], list[str], list[str]]:
     """Parse a CODEOWNERS text and returns the list of team names, list of usernames"""
     teams = []
     usernames = []
@@ -381,7 +344,11 @@ def parse_code_owners(data: str) -> Tuple[List[str], List[str], List[str]]:
         if rule.startswith("#") or not len(rule):
             continue
 
-        assignees = rule.strip().split()[1:]
+        # Skip lines that are only empty space characters
+        if re.match(r"^\s*$", rule):
+            continue
+
+        _, assignees = get_codeowners_path_and_owners(rule)
         for assignee in assignees:
             if "/" not in assignee:
                 if re.match(r"[^@]+@[^@]+\.[^@]+", assignee):
@@ -395,7 +362,24 @@ def parse_code_owners(data: str) -> Tuple[List[str], List[str], List[str]]:
     return teams, usernames, emails
 
 
-def convert_codeowners_syntax(codeowners, associations, code_mapping):
+def get_codeowners_path_and_owners(rule: str) -> tuple[str, Sequence[str]]:
+    # Regex does a negative lookbehind for a backslash. Matches on whitespace without a preceding backslash.
+    pattern = re.compile(r"(?<!\\)\s")
+    path, *code_owners = (i for i in pattern.split(rule.strip()) if i)
+
+    # Find index of # in code_owners, assume everything after is a comment
+    try:
+        comment_index = code_owners.index("#")
+        code_owners = code_owners[:comment_index]
+    except ValueError:
+        pass
+
+    return path, code_owners
+
+
+def convert_codeowners_syntax(
+    codeowners: str, associations: Mapping[str, Any], code_mapping: RepositoryProjectPathConfig
+) -> str:
     """Converts CODEOWNERS text into IssueOwner syntax
     codeowners: CODEOWNERS text
     associations: dict of {externalName: sentryName}
@@ -410,7 +394,11 @@ def convert_codeowners_syntax(codeowners, associations, code_mapping):
             result += f"{rule}\n"
             continue
 
-        path, *code_owners = (x.strip() for x in rule.split())
+        # Skip lines that are only empty space characters
+        if re.match(r"^\s*$", rule):
+            continue
+
+        path, code_owners = get_codeowners_path_and_owners(rule)
         # Escape invalid paths https://docs.github.com/en/github/creating-cloning-and-archiving-repositories/creating-a-repository-on-github/about-code-owners#syntax-exceptions
         # Check if path has whitespace
         # Check if path has '#' not as first character
@@ -453,11 +441,11 @@ def convert_codeowners_syntax(codeowners, associations, code_mapping):
     return result
 
 
-def resolve_actors(owners: Iterable["Owner"], project_id: int) -> Mapping["Owner", "ActorTuple"]:
+def resolve_actors(owners: Iterable[Owner], project_id: int) -> dict[Owner, Actor | None]:
     """Convert a list of Owner objects into a dictionary
     of {Owner: Actor} pairs. Actors not identified are returned
     as None."""
-    from sentry.models import ActorTuple, Team, User
+    from sentry.models.team import Team
 
     if not owners:
         return {}
@@ -477,25 +465,36 @@ def resolve_actors(owners: Iterable["Owner"], project_id: int) -> Mapping["Owner
 
     actors = {}
     if users:
+        owner_users = user_service.get_many(
+            filter=dict(emails=[o.identifier for o in users], is_active=True)
+        )
+        in_project_user_ids = set(
+            OrganizationMember.objects.filter(
+                teams__projectteam__project__in=[project_id],
+                user_id__in=[owner.id for owner in owner_users],
+            ).values_list("user_id", flat=True)
+        )
+        rpc_users = [owner for owner in owner_users if owner.id in in_project_user_ids]
+
+        user_id_email_tuples = set()
+        for user in rpc_users:
+            user_id_email_tuples.add((user.id, user.email))
+            for useremail in user.useremails:
+                user_id_email_tuples.add((user.id, useremail.email))
+
         actors.update(
             {
-                ("user", email.lower()): ActorTuple(u_id, User)
-                for u_id, email in User.objects.filter(
-                    reduce(operator.or_, [Q(emails__email__iexact=o.identifier) for o in users]),
-                    # We don't require verified emails
-                    # emails__is_verified=True,
-                    is_active=True,
-                    sentry_orgmember_set__organizationmemberteam__team__projectteam__project_id=project_id,
-                )
-                .distinct()
-                .values_list("id", "emails__email")
+                ("user", email.lower()): Actor(id=u_id, actor_type=ActorType.USER)
+                # This will need to be broken in hybrid cloud world, querying users from region silo won't be possible
+                # without an explicit service call.
+                for u_id, email in user_id_email_tuples
             }
         )
 
     if teams:
         actors.update(
             {
-                ("team", slug): ActorTuple(t_id, Team)
+                ("team", slug): Actor(id=t_id, actor_type=ActorType.TEAM, slug=slug)
                 for t_id, slug in Team.objects.filter(
                     slug__in=[o.identifier for o in teams], projectteam__project_id=project_id
                 ).values_list("id", "slug")
@@ -505,17 +504,53 @@ def resolve_actors(owners: Iterable["Owner"], project_id: int) -> Mapping["Owner
     return {o: actors.get((o.type, o.identifier.lower())) for o in owners}
 
 
-def create_schema_from_issue_owners(issue_owners, project_id):
+def remove_deleted_owners_from_schema(
+    rules: list[dict[str, Any]], owners_id: dict[str, int]
+) -> None:
+    valid_rules = rules
+
+    for rule in rules:
+        valid_owners = rule["owners"]
+        for rule_owner in rule["owners"]:
+            if rule_owner["identifier"] not in owners_id.keys():
+                valid_owners.remove(rule_owner)
+                if not valid_owners:
+                    valid_rules.remove(rule)
+                    break
+
+        rule["owners"] = valid_owners
+
+    rules = valid_rules
+
+
+def add_owner_ids_to_schema(rules: list[dict[str, Any]], owners_id: dict[str, int]) -> None:
+    for rule in rules:
+        for rule_owner in rule["owners"]:
+            if rule_owner["identifier"] in owners_id.keys():
+                rule_owner["id"] = owners_id[rule_owner["identifier"]]
+
+
+def create_schema_from_issue_owners(
+    project_id: int,
+    issue_owners: str | None,
+    add_owner_ids: bool = False,
+    remove_deleted_owners: bool = False,
+) -> dict[str, Any] | None:
+    if issue_owners is None:
+        return None
+
     try:
         rules = parse_rules(issue_owners)
     except ParseError as e:
+        rule_name = e.expr.name if e.expr else str(e.expr)
         raise ValidationError(
-            {"raw": f"Parse error: {e.expr.name} (line {e.line()}, column {e.column()})"}
+            {"raw": f"Parse error: {rule_name} (line {e.line()}, column {e.column()})"}
         )
 
     schema = dump_schema(rules)
 
     owners = {o for rule in rules for o in rule.owners}
+    owners_id = {}
     actors = resolve_actors(owners, project_id)
 
     bad_actors = []
@@ -525,9 +560,16 @@ def create_schema_from_issue_owners(issue_owners, project_id):
                 bad_actors.append(owner.identifier)
             elif owner.type == "team":
                 bad_actors.append(f"#{owner.identifier}")
+        elif add_owner_ids:
+            owners_id[owner.identifier] = actor.id
 
-    if bad_actors:
+    if bad_actors and remove_deleted_owners:
+        remove_deleted_owners_from_schema(schema["rules"], owners_id)
+    elif bad_actors:
         bad_actors.sort()
         raise ValidationError({"raw": "Invalid rule owners: {}".format(", ".join(bad_actors))})
+
+    if add_owner_ids:
+        add_owner_ids_to_schema(schema["rules"], owners_id)
 
     return schema

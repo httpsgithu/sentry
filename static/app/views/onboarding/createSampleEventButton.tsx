@@ -1,33 +1,37 @@
-import * as React from 'react';
-import {browserHistory} from 'react-router';
+import {Component} from 'react';
 import * as Sentry from '@sentry/react';
 
 import {
   addErrorMessage,
   addLoadingMessage,
   clearIndicators,
-} from 'app/actionCreators/indicator';
-import {Client} from 'app/api';
-import Button from 'app/components/button';
-import {t} from 'app/locale';
-import {Organization, Project} from 'app/types';
-import {trackAdhocEvent, trackAnalyticsEvent} from 'app/utils/analytics';
-import trackAdvancedAnalyticsEvent from 'app/utils/analytics/trackAdvancedAnalyticsEvent';
-import withApi from 'app/utils/withApi';
-import withOrganization from 'app/utils/withOrganization';
+} from 'sentry/actionCreators/indicator';
+import type {Client} from 'sentry/api';
+import type {ButtonProps} from 'sentry/components/button';
+import {Button} from 'sentry/components/button';
+import {t} from 'sentry/locale';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import {browserHistory} from 'sentry/utils/browserHistory';
+import normalizeUrl from 'sentry/utils/url/normalizeUrl';
+import withApi from 'sentry/utils/withApi';
+import withOrganization from 'sentry/utils/withOrganization';
 
-type Props = React.ComponentProps<typeof Button> & {
+type CreateSampleEventButtonProps = ButtonProps & {
   api: Client;
   organization: Organization;
-  project?: Project;
   source: string;
+  onClick?: () => void;
+  onCreateSampleGroup?: () => void;
+  project?: Project;
 };
 
 type State = {
   creating: boolean;
 };
 
-const EVENT_POLL_RETRIES = 15;
+const EVENT_POLL_RETRIES = 30;
 const EVENT_POLL_INTERVAL = 1000;
 
 async function latestEventAvailable(
@@ -36,12 +40,13 @@ async function latestEventAvailable(
 ): Promise<{eventCreated: boolean; retries: number}> {
   let retries = 0;
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     if (retries > EVENT_POLL_RETRIES) {
       return {eventCreated: false, retries: retries - 1};
     }
-    await new Promise(resolve => setTimeout(resolve, EVENT_POLL_INTERVAL));
+
+    await new Promise(resolve => window.setTimeout(resolve, EVENT_POLL_INTERVAL));
+
     try {
       await api.requestPromise(`/issues/${groupID}/events/latest/`);
       return {eventCreated: true, retries};
@@ -51,7 +56,7 @@ async function latestEventAvailable(
   }
 }
 
-class CreateSampleEventButton extends React.Component<Props, State> {
+class CreateSampleEventButton extends Component<CreateSampleEventButtonProps, State> {
   state: State = {
     creating: false,
   };
@@ -63,28 +68,30 @@ class CreateSampleEventButton extends React.Component<Props, State> {
       return;
     }
 
-    trackAdhocEvent({
-      eventKey: 'sample_event.button_viewed',
-      org_id: organization.id,
+    trackAnalytics('sample_event.button_viewed', {
+      organization,
       project_id: project.id,
       source,
     });
   }
 
-  recordAnalytics({eventCreated, retries, duration}) {
+  componentWillUnmount() {
+    this._isMounted = false;
+  }
+
+  private _isMounted = true;
+
+  recordAnalytics({eventCreated, retries, duration}: any) {
     const {organization, project, source} = this.props;
 
     if (!project) {
       return;
     }
 
-    const eventKey = `sample_event.${eventCreated ? 'created' : 'failed'}`;
-    const eventName = `Sample Event ${eventCreated ? 'Created' : 'Failed'}`;
+    const eventKey = `sample_event.${eventCreated ? 'created' : 'failed'}` as const;
 
-    trackAnalyticsEvent({
-      eventKey,
-      eventName,
-      organization_id: organization.id,
+    trackAnalytics(eventKey, {
+      organization,
       project_id: project.id,
       platform: project.platform || '',
       interval: EVENT_POLL_INTERVAL,
@@ -96,17 +103,21 @@ class CreateSampleEventButton extends React.Component<Props, State> {
 
   createSampleGroup = async () => {
     // TODO(dena): swap out for action creator
-    const {api, organization, project} = this.props;
-    let eventData;
+    const {api, organization, project, onCreateSampleGroup} = this.props;
+    let eventData: any;
 
     if (!project) {
       return;
     }
 
-    trackAdvancedAnalyticsEvent('growth.onboarding_view_sample_event', {
-      platform: project.platform,
-      organization,
-    });
+    if (onCreateSampleGroup) {
+      onCreateSampleGroup();
+    } else {
+      trackAnalytics('growth.onboarding_view_sample_event', {
+        platform: project.platform,
+        organization,
+      });
+    }
 
     addLoadingMessage(t('Processing sample event...'), {
       duration: EVENT_POLL_RETRIES * EVENT_POLL_INTERVAL,
@@ -131,6 +142,13 @@ class CreateSampleEventButton extends React.Component<Props, State> {
     // before redirecting.
     const t0 = performance.now();
     const {eventCreated, retries} = await latestEventAvailable(api, eventData.groupID);
+
+    // Navigated away before event was created - skip analytics and error messages
+    // latestEventAvailable will succeed even if the request was cancelled
+    if (!this._isMounted) {
+      return;
+    }
+
     const t1 = performance.now();
 
     clearIndicators();
@@ -149,14 +167,18 @@ class CreateSampleEventButton extends React.Component<Props, State> {
         scope.setTag('retries', retries.toString());
         scope.setTag('duration', duration.toString());
 
-        scope.setLevel(Sentry.Severity.Warning);
+        scope.setLevel('warning');
         Sentry.captureMessage('Failed to load sample event');
       });
       return;
     }
 
+    this.props.onClick?.();
+
     browserHistory.push(
-      `/organizations/${organization.slug}/issues/${eventData.groupID}/?project=${project.id}`
+      normalizeUrl(
+        `/organizations/${organization.slug}/issues/${eventData.groupID}/?project=${project.id}&referrer=sample-error`
+      )
     );
   };
 
@@ -168,12 +190,12 @@ class CreateSampleEventButton extends React.Component<Props, State> {
       source: _source,
       ...props
     } = this.props;
+
     const {creating} = this.state;
 
     return (
       <Button
         {...props}
-        data-test-id="create-sample-event"
         disabled={props.disabled || creating}
         onClick={this.createSampleGroup}
       />

@@ -1,32 +1,34 @@
 import {Component} from 'react';
-import {browserHistory} from 'react-router';
 import * as Sentry from '@sentry/react';
-import {Location} from 'history';
+import type {Location} from 'history';
 
-import {fetchTotalCount} from 'app/actionCreators/events';
-import {Client} from 'app/api';
-import OptionSelector from 'app/components/charts/optionSelector';
+import {fetchTotalCount} from 'sentry/actionCreators/events';
+import type {Client} from 'sentry/api';
+import OptionSelector from 'sentry/components/charts/optionSelector';
 import {
   ChartControls,
   InlineContainer,
   SectionHeading,
   SectionValue,
-} from 'app/components/charts/styles';
-import {t} from 'app/locale';
-import {Organization} from 'app/types';
-import {trackAnalyticsEvent} from 'app/utils/analytics';
-import EventView, {isAPIPayloadSimilar} from 'app/utils/discover/eventView';
+} from 'sentry/components/charts/styles';
+import {t} from 'sentry/locale';
+import type {Organization} from 'sentry/types/organization';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import {browserHistory} from 'sentry/utils/browserHistory';
+import type EventView from 'sentry/utils/discover/eventView';
+import {isAPIPayloadSimilar} from 'sentry/utils/discover/eventView';
 
-import {getAxisOptions, TooltipOption} from '../data';
+import type {TooltipOption} from '../data';
+import {getAxisOptions} from '../data';
 
 type Props = {
   api: Client;
   eventView: EventView;
-  organization: Organization;
-  options?: TooltipOption[];
-  location: Location;
-  rightAxis: string;
   leftAxis: string;
+  location: Location;
+  organization: Organization;
+  rightAxis: string;
+  options?: TooltipOption[];
 };
 
 type State = {
@@ -67,10 +69,8 @@ class ChartFooter extends Component<Props, State> {
 
   handleSelectorChange(key: string, value: string) {
     const {location, organization} = this.props;
-    trackAnalyticsEvent({
-      eventKey: 'performance_views.overview.change_chart',
-      eventName: 'Performance Views: Change Overview Chart',
-      organization_id: parseInt(organization.id, 10),
+    trackAnalytics('performance_views.overview.change_chart', {
+      organization,
       metric: value,
     });
 

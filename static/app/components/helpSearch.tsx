@@ -1,25 +1,17 @@
-import * as React from 'react';
+import {Fragment} from 'react';
 import styled from '@emotion/styled';
 
-import Search from 'app/components/search';
-import SearchResult from 'app/components/search/searchResult';
-import SearchResultWrapper from 'app/components/search/searchResultWrapper';
-import HelpSource from 'app/components/search/sources/helpSource';
-import {IconWindow} from 'app/icons';
-import {t, tn} from 'app/locale';
-import space from 'app/styles/space';
+import {Search} from 'sentry/components/search';
+import SearchResult from 'sentry/components/search/searchResult';
+import SearchResultWrapper from 'sentry/components/search/searchResultWrapper';
+import HelpSource from 'sentry/components/search/sources/helpSource';
+import {IconWindow} from 'sentry/icons';
+import {t, tn} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
 
-type HelpResult = Parameters<
-  React.ComponentProps<typeof HelpSource>['children']
->[0]['results'][0];
+type ItemRenderer = React.ComponentProps<typeof Search>['renderItem'];
 
-type ResultItemProps = HelpResult & {
-  highlighted: boolean;
-  // TODO(ts): Improve types when we've typed more of the search components
-  itemProps: any;
-};
-
-const renderResult = ({item, matches, itemProps, highlighted}: ResultItemProps) => {
+const renderResult: ItemRenderer = ({item, matches, itemProps, highlighted}) => {
   const sectionHeading =
     item.sectionHeading !== undefined ? (
       <SectionHeading>
@@ -31,38 +23,45 @@ const renderResult = ({item, matches, itemProps, highlighted}: ResultItemProps) 
 
   if (item.empty) {
     return (
-      <React.Fragment>
+      <Fragment>
         {sectionHeading}
         <Empty>{t('No results from %s', item.sectionHeading)}</Empty>
-      </React.Fragment>
+      </Fragment>
     );
   }
 
   return (
-    <React.Fragment>
+    <Fragment>
       {sectionHeading}
       <SearchResultWrapper {...itemProps} highlighted={highlighted}>
         <SearchResult highlighted={highlighted} item={item} matches={matches} />
       </SearchResultWrapper>
-    </React.Fragment>
+    </Fragment>
   );
 };
 
+type Props = Omit<
+  React.ComponentProps<typeof Search>,
+  'sources' | 'minSearch' | 'closeOnSelect' | 'renderItem'
+>;
+
 // TODO(ts): Type based on Search props once that has types
-const HelpSearch = props => (
-  <Search
-    {...props}
-    sources={[HelpSource]}
-    minSearch={3}
-    closeOnSelect={false}
-    renderItem={renderResult}
-  />
-);
+function HelpSearch(props: Props) {
+  return (
+    <Search
+      {...props}
+      sources={[HelpSource]}
+      minSearch={3}
+      closeOnSelect={false}
+      renderItem={renderResult}
+    />
+  );
+}
 
 const SectionHeading = styled('div')`
   display: grid;
   grid-template-columns: max-content 1fr max-content;
-  grid-gap: ${space(1)};
+  gap: ${space(1)};
   align-items: center;
   background: ${p => p.theme.backgroundSecondary};
   padding: ${space(1)} ${space(2)};

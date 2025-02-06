@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import random
 from collections import namedtuple
 from copy import deepcopy
@@ -7,12 +9,17 @@ import pytest
 from django.urls import reverse
 from rest_framework.exceptions import ErrorDetail
 
-from sentry.testutils import APITestCase, SnubaTestCase
-from sentry.testutils.helpers.datetime import before_now, iso_format
+from sentry.sentry_metrics.aggregation_option_registry import AggregationOption
+from sentry.testutils.cases import APITestCase, MetricsEnhancedPerformanceTestCase, SnubaTestCase
+from sentry.testutils.helpers.datetime import before_now
 from sentry.utils.samples import load_data
 from sentry.utils.snuba import get_array_column_alias
 
-HistogramSpec = namedtuple("HistogramSpec", ["start", "end", "fields"])
+pytestmark = pytest.mark.sentry_metrics
+
+HistogramSpec = namedtuple(
+    "HistogramSpec", ["start", "end", "fields", "tags"], defaults=[None, None, [], {}]
+)
 
 ARRAY_COLUMNS = ["measurements", "span_op_breakdowns"]
 
@@ -20,8 +27,9 @@ ARRAY_COLUMNS = ["measurements", "span_op_breakdowns"]
 class OrganizationEventsHistogramEndpointTest(APITestCase, SnubaTestCase):
     def setUp(self):
         super().setUp()
-        self.min_ago = iso_format(before_now(minutes=1))
+        self.min_ago = before_now(minutes=1)
         self.data = load_data("transaction")
+        self.features = {}
 
     def populate_events(self, specs):
         start = before_now(minutes=5)
@@ -34,8 +42,8 @@ class OrganizationEventsHistogramEndpointTest(APITestCase, SnubaTestCase):
                     measurement_name = suffix_key
                     breakdown_name = f"ops.{suffix_key}"
 
-                    data["timestamp"] = iso_format(start)
-                    data["start_timestamp"] = iso_format(start - timedelta(seconds=i))
+                    data["timestamp"] = start.isoformat()
+                    data["start_timestamp"] = (start - timedelta(seconds=i)).isoformat()
                     value = random.random() * (spec.end - spec.start) + spec.start
                     data["transaction"] = f"/measurement/{measurement_name}/value/{value}"
 
@@ -48,7 +56,7 @@ class OrganizationEventsHistogramEndpointTest(APITestCase, SnubaTestCase):
                     self.store_event(data, self.project.id)
 
     def as_response_data(self, specs):
-        data = {}
+        data: dict[str, list[dict[str, int]]] = {}
         for spec in specs:
             spec = HistogramSpec(*spec)
             for measurement, count in sorted(spec.fields):
@@ -60,10 +68,11 @@ class OrganizationEventsHistogramEndpointTest(APITestCase, SnubaTestCase):
     def do_request(self, query, features=None):
         if features is None:
             features = {"organizations:performance-view": True}
+        features.update(self.features)
         self.login_as(user=self.user)
         url = reverse(
             "sentry-api-0-organization-events-histogram",
-            kwargs={"organization_slug": self.organization.slug},
+            kwargs={"organization_id_or_slug": self.organization.slug},
         )
         with self.feature(features):
             return self.client.get(url, query, format="json")
@@ -74,6 +83,7 @@ class OrganizationEventsHistogramEndpointTest(APITestCase, SnubaTestCase):
         assert response.status_code == 200, response.content
         assert response.data == {}
 
+    @pytest.mark.querybuilder
     def test_good_params(self):
         for array_column in ARRAY_COLUMNS:
             alias = get_array_column_alias(array_column)
@@ -1015,3 +1025,143 @@ class OrganizationEventsHistogramEndpointTest(APITestCase, SnubaTestCase):
             (0, 1, [("transaction.duration", 0)]),
         ]
         assert response.data == self.as_response_data(expected)
+
+
+class OrganizationEventsMetricsEnhancedPerformanceHistogramEndpointTest(
+    MetricsEnhancedPerformanceTestCase
+):
+    def setUp(self):
+        super().setUp()
+        self.min_ago = before_now(minutes=1)
+        self.features = {}
+
+    def populate_events(self, specs):
+        start = before_now(minutes=5)
+        for spec in specs:
+            spec = HistogramSpec(*spec)
+            for suffix_key, count in spec.fields:
+                for i in range(count):
+                    self.store_transaction_metric(
+                        (spec.end + spec.start) / 2,
+                        metric=suffix_key,
+                        tags={"transaction": suffix_key, **spec.tags},
+                        timestamp=start,
+                        aggregation_option=AggregationOption.HIST,
+                    )
+
+    def as_response_data(self, specs):
+        data: dict[str, list[dict[str, int]]] = {}
+        for spec in specs:
+            spec = HistogramSpec(*spec)
+            for measurement, count in sorted(spec.fields):
+                if measurement not in data:
+                    data[measurement] = []
+                data[measurement].append({"bin": spec.start, "count": count})
+        return data
+
+    def do_request(self, query, features=None):
+        if features is None:
+            features = {
+                "organizations:performance-view": True,
+                "organizations:performance-use-metrics": True,
+            }
+        features.update(self.features)
+        self.login_as(user=self.user)
+        url = reverse(
+            "sentry-api-0-organization-events-histogram",
+            kwargs={"organization_id_or_slug": self.organization.slug},
+        )
+        with self.feature(features):
+            return self.client.get(url, query, format="json")
+
+    def test_no_projects(self):
+        response = self.do_request({})
+
+        assert response.status_code == 200, response.content
+        assert response.data == {}
+
+    def test_histogram_simple(self):
+        specs = [
+            (0, 1, [("transaction.duration", 5)]),
+            (1, 2, [("transaction.duration", 10)]),
+            (2, 3, [("transaction.duration", 1)]),
+            (4, 5, [("transaction.duration", 15)]),
+        ]
+        self.populate_events(specs)
+        query = {
+            "project": [self.project.id],
+            "field": ["transaction.duration"],
+            "numBuckets": 5,
+            "dataset": "metrics",
+        }
+        response = self.do_request(query)
+        assert response.status_code == 200, response.content
+        expected = [
+            (0, 1, [("transaction.duration", 6)]),
+            (1, 2, [("transaction.duration", 9)]),
+            (2, 3, [("transaction.duration", 3)]),
+            (3, 4, [("transaction.duration", 8)]),
+            (4, 5, [("transaction.duration", 7)]),
+        ]
+        # Note metrics data is approximate, these values are based on running the test and asserting the results
+        expected_response = self.as_response_data(expected)
+        expected_response["meta"] = {"isMetricsData": True}
+        assert response.data == expected_response
+
+    def test_multi_histogram(self):
+        specs = [
+            (0, 1, [("measurements.fcp", 5), ("measurements.lcp", 5)]),
+            (1, 2, [("measurements.fcp", 5), ("measurements.lcp", 5)]),
+        ]
+        self.populate_events(specs)
+        query = {
+            "project": [self.project.id],
+            "field": ["measurements.fcp", "measurements.lcp"],
+            "numBuckets": 2,
+            "dataset": "metrics",
+        }
+        response = self.do_request(query)
+        assert response.status_code == 200, response.content
+        expected = [
+            (0, 1, [("measurements.fcp", 5), ("measurements.lcp", 5)]),
+            (1, 2, [("measurements.fcp", 5), ("measurements.lcp", 5)]),
+        ]
+        # Note metrics data is approximate, these values are based on running the test and asserting the results
+        expected_response = self.as_response_data(expected)
+        expected_response["meta"] = {"isMetricsData": True}
+        assert response.data == expected_response
+
+    def test_histogram_exclude_outliers_data_filter(self):
+        specs = [
+            (0, 0, [("transaction.duration", 4)], {"histogram_outlier": "inlier"}),
+            (1, 1, [("transaction.duration", 4)], {"histogram_outlier": "inlier"}),
+            (4000, 4001, [("transaction.duration", 1)], {"histogram_outlier": "outlier"}),
+        ]
+        self.populate_events(specs)
+
+        query = {
+            "project": [self.project.id],
+            "field": ["transaction.duration"],
+            "numBuckets": 5,
+            "dataFilter": "exclude_outliers",
+            "dataset": "metrics",
+        }
+
+        response = self.do_request(query)
+        assert response.status_code == 200, response.content
+        # Metrics approximation means both buckets got merged
+        expected = [
+            (0, 0, [("transaction.duration", 8)]),
+            (1, 2, [("transaction.duration", 0)]),
+        ]
+        expected_response = self.as_response_data(expected)
+        expected_response["meta"] = {"isMetricsData": True}
+        assert response.data == expected_response
+
+
+class OrganizationEventsMetricsEnhancedPerformanceHistogramEndpointTestWithMetricLayer(
+    OrganizationEventsMetricsEnhancedPerformanceHistogramEndpointTest
+):
+    def setUp(self):
+        super().setUp()
+        self.features["organizations:use-metrics-layer"] = True

@@ -1,17 +1,16 @@
-import * as React from 'react';
 import styled from '@emotion/styled';
 
-import {SectionHeading} from 'app/components/charts/styles';
-import FeatureBadge from 'app/components/featureBadge';
-import QuestionTooltip from 'app/components/questionTooltip';
-import space from 'app/styles/space';
+import FeatureBadge from 'sentry/components/badge/featureBadge';
+import {SectionHeading} from 'sentry/components/charts/styles';
+import QuestionTooltip from 'sentry/components/questionTooltip';
+import {space} from 'sentry/styles/space';
 
 type MetaDataProps = {
-  headingText: string;
-  tooltipText: string;
   bodyText: React.ReactNode;
+  headingText: string;
   subtext: React.ReactNode;
   badge?: 'alpha' | 'beta' | 'new';
+  tooltipText?: string;
 };
 
 export function MetaData({
@@ -25,12 +24,14 @@ export function MetaData({
     <HeaderInfo>
       <StyledSectionHeading>
         {headingText}
-        <QuestionTooltip
-          position="top"
-          size="sm"
-          containerDisplayMode="block"
-          title={tooltipText}
-        />
+        {tooltipText && (
+          <QuestionTooltip
+            position="top"
+            size="xs"
+            containerDisplayMode="block"
+            title={tooltipText}
+          />
+        )}
         {badge && <StyledFeatureBadge type={badge} />}
       </StyledSectionHeading>
       <SectionBody>{bodyText}</SectionBody>
@@ -40,7 +41,8 @@ export function MetaData({
 }
 
 const HeaderInfo = styled('div')`
-  height: 78px;
+  min-height: 78px;
+  white-space: nowrap;
 `;
 
 const StyledSectionHeading = styled(SectionHeading)`

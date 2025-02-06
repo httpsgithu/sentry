@@ -1,10 +1,16 @@
-__all__ = ("ApiClient",)
+from __future__ import annotations
 
+from typing import TypeAlias
+
+import orjson
+from django.conf import settings
+from django.contrib.auth.models import AnonymousUser
 from django.urls import resolve
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from sentry.auth.superuser import Superuser
-from sentry.utils import json
+
+__all__ = ("ApiClient",)
 
 
 class ApiError(Exception):
@@ -22,7 +28,7 @@ class ApiError(Exception):
 class ApiClient:
     prefix = "/api/0"
 
-    ApiError = ApiError
+    ApiError: TypeAlias = ApiError
 
     def request(
         self,
@@ -49,8 +55,9 @@ class ApiClient:
         callback, callback_args, callback_kwargs = resolver_match
 
         if data:
+            # TODO(@anonrig): Investigate why we are doing this?
             # we encode to ensure compatibility
-            data = json.loads(json.dumps(data))
+            data = orjson.loads(orjson.dumps(data, option=orjson.OPT_UTC_Z))
 
         rf = APIRequestFactory()
         mock_request = getattr(rf, method.lower())(full_path, data or {})
@@ -73,11 +80,13 @@ class ApiClient:
                 mock_request.superuser = Superuser(mock_request)
         else:
             mock_request.auth = auth
-            mock_request.user = user
+            mock_request.user = user or AnonymousUser()
             mock_request.is_sudo = lambda: is_sudo
             mock_request.session = {}
             mock_request.superuser = Superuser(mock_request)
 
+        if "*" not in settings.ALLOWED_HOSTS:
+            mock_request.META["HTTP_HOST"] = settings.ALLOWED_HOSTS[0]
         mock_request.is_superuser = lambda: mock_request.superuser.is_active
 
         if request:

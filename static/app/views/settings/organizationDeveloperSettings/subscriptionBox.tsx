@@ -1,118 +1,117 @@
-import * as React from 'react';
 import styled from '@emotion/styled';
 
-import Checkbox from 'app/components/checkbox';
-import Tooltip from 'app/components/tooltip';
-import {t} from 'app/locale';
-import {Organization} from 'app/types';
-import withOrganization from 'app/utils/withOrganization';
-import {
-  DESCRIPTIONS,
-  EVENT_CHOICES,
-} from 'app/views/settings/organizationDeveloperSettings/constants';
+import FeatureBadge from 'sentry/components/badge/featureBadge';
+import Checkbox from 'sentry/components/checkbox';
+import {Tooltip} from 'sentry/components/tooltip';
+import {t} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import type {Organization} from 'sentry/types/organization';
+import withOrganization from 'sentry/utils/withOrganization';
+import type {EVENT_CHOICES} from 'sentry/views/settings/organizationDeveloperSettings/constants';
+import {PERMISSIONS_MAP} from 'sentry/views/settings/organizationDeveloperSettings/constants';
 
-type Resource = typeof EVENT_CHOICES[number];
+type Resource = (typeof EVENT_CHOICES)[number];
 
-type DefaultProps = {
-  webhookDisabled: boolean;
-};
-
-type Props = DefaultProps & {
-  resource: Resource;
-  disabledFromPermissions: boolean;
+type Props = {
   checked: boolean;
+  disabledFromPermissions: boolean;
+  isNew: boolean;
   onChange: (resource: Resource, checked: boolean) => void;
   organization: Organization;
+  resource: Resource;
+  webhookDisabled?: boolean;
 };
 
-export class SubscriptionBox extends React.Component<Props> {
-  static defaultProps: DefaultProps = {
-    webhookDisabled: false,
-  };
+function SubscriptionBox({
+  checked,
+  disabledFromPermissions,
+  isNew,
+  onChange,
+  organization,
+  resource,
+  webhookDisabled = false,
+}: Props) {
+  const {features} = organization;
 
-  onChange = (evt: React.ChangeEvent<HTMLInputElement>) => {
-    const checked = evt.target.checked;
-    const {resource} = this.props;
-    this.props.onChange(resource, checked);
-  };
+  let disabled = disabledFromPermissions || webhookDisabled;
+  let message = t(
+    "Must have at least 'Read' permissions enabled for %s",
+    PERMISSIONS_MAP[resource]
+  );
 
-  render() {
-    const {resource, organization, webhookDisabled, checked} = this.props;
-    const features = new Set(organization.features);
-
-    let disabled = this.props.disabledFromPermissions || webhookDisabled;
-    let message = `Must have at least 'Read' permissions enabled for ${resource}`;
-    if (resource === 'error' && !features.has('integrations-event-hooks')) {
-      disabled = true;
-      message =
-        'Your organization does not have access to the error subscription resource.';
-    }
-    if (webhookDisabled) {
-      message = 'Cannot enable webhook subscription without specifying a webhook url';
-    }
-
-    return (
-      <React.Fragment>
-        <SubscriptionGridItemWrapper key={resource}>
-          <Tooltip disabled={!disabled} title={message}>
-            <SubscriptionGridItem disabled={disabled}>
-              <SubscriptionInfo>
-                <SubscriptionTitle>{t(`${resource}`)}</SubscriptionTitle>
-                <SubscriptionDescription>
-                  {t(`${DESCRIPTIONS[resource]}`)}
-                </SubscriptionDescription>
-              </SubscriptionInfo>
-              <Checkbox
-                key={`${resource}${checked}`}
-                disabled={disabled}
-                id={resource}
-                value={resource}
-                checked={checked}
-                onChange={this.onChange}
-              />
-            </SubscriptionGridItem>
-          </Tooltip>
-        </SubscriptionGridItemWrapper>
-      </React.Fragment>
+  if (resource === 'error' && !features.includes('integrations-event-hooks')) {
+    disabled = true;
+    message = t(
+      'Your organization does not have access to the error subscription resource.'
     );
   }
+
+  if (webhookDisabled) {
+    message = t('Cannot enable webhook subscription without specifying a webhook url');
+  }
+
+  const DESCRIPTIONS: Record<(typeof EVENT_CHOICES)[number], string> = {
+    // Swap ignored for archived if the feature is enabled
+    issue: organization.features.includes('webhooks-unresolved')
+      ? `created, resolved, assigned, archived, unresolved`
+      : `created, resolved, assigned, archived`,
+    error: 'created',
+    comment: 'created, edited, deleted',
+  };
+
+  return (
+    <Tooltip disabled={!disabled} title={message} key={resource}>
+      <SubscriptionGridItem disabled={disabled}>
+        <SubscriptionInfo>
+          <SubscriptionTitle>
+            {resource}
+            {isNew && <FeatureBadge type="new" />}
+          </SubscriptionTitle>
+          <SubscriptionDescription>{DESCRIPTIONS[resource]}</SubscriptionDescription>
+        </SubscriptionInfo>
+        <Checkbox
+          key={`${resource}${checked}`}
+          aria-label={resource}
+          disabled={disabled}
+          id={resource}
+          value={resource}
+          checked={checked}
+          onChange={evt => onChange(resource, evt.target.checked)}
+        />
+      </SubscriptionGridItem>
+    </Tooltip>
+  );
 }
 
 export default withOrganization(SubscriptionBox);
 
+const SubscriptionGridItem = styled('div')<{disabled: boolean}>`
+  display: flex;
+  justify-content: space-between;
+  background: ${p => p.theme.backgroundSecondary};
+  opacity: ${p => (p.disabled ? 0.3 : 1)};
+  border-radius: ${p => p.theme.borderRadius};
+  margin: ${space(1.5)};
+  padding: ${space(1.5)};
+  box-sizing: border-box;
+`;
+
 const SubscriptionInfo = styled('div')`
   display: flex;
   flex-direction: column;
-`;
-
-const SubscriptionGridItem = styled('div')<{disabled: boolean}>`
-  display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-  background: ${p => p.theme.backgroundSecondary};
-  opacity: ${({disabled}: {disabled: boolean}) => (disabled ? 0.3 : 1)};
-  border-radius: 3px;
-  flex: 1;
-  padding: 12px;
-  height: 100%;
-`;
-
-const SubscriptionGridItemWrapper = styled('div')`
-  padding: 12px;
-  width: 33%;
+  align-self: center;
 `;
 
 const SubscriptionDescription = styled('div')`
-  font-size: 12px;
+  font-size: ${p => p.theme.fontSizeMedium};
   line-height: 1;
   color: ${p => p.theme.gray300};
-  white-space: nowrap;
 `;
 
 const SubscriptionTitle = styled('div')`
-  font-size: 16px;
+  font-size: ${p => p.theme.fontSizeLarge};
   line-height: 1;
   color: ${p => p.theme.textColor};
   white-space: nowrap;
-  margin-bottom: 5px;
+  margin-bottom: ${space(0.75)};
 `;

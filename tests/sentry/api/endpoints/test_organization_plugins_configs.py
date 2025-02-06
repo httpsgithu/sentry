@@ -1,8 +1,7 @@
 from django.urls import reverse
 
 from sentry.plugins.base import plugins
-from sentry.testutils import APITestCase
-from sentry.utils.compat import map
+from sentry.testutils.cases import APITestCase
 
 
 class OrganizationPluginsTest(APITestCase):
@@ -15,7 +14,7 @@ class OrganizationPluginsTest(APITestCase):
 
         self.url = reverse(
             "sentry-api-0-organization-plugins-configs",
-            kwargs={"organization_slug": self.organization.slug},
+            kwargs={"organization_id_or_slug": self.organization.slug},
         )
 
         self.login_as(user=self.user)
@@ -28,14 +27,12 @@ class OrganizationPluginsTest(APITestCase):
             "amazon-sqs",
             "asana",
             "bitbucket",
-            "clubhouse",
             "github",
             "gitlab",
             "heroku",
             "jira",
             "opsgenie",
             "pagerduty",
-            "phabricator",
             "pivotal",
             "pushover",
             "redmine",
@@ -43,11 +40,9 @@ class OrganizationPluginsTest(APITestCase):
             "sessionstack",
             "slack",
             "splunk",
-            "teamwork",
             "trello",
             "twilio",
             "victorops",
-            "vsts",
             "webhooks",
         ]
         for plugin in expected_plugins:
@@ -94,7 +89,7 @@ class OrganizationPluginsTest(APITestCase):
             }
         ]
 
-    def test_disabled_proejct(self):
+    def test_disabled_project(self):
         plugins.get("trello").enable(self.projectA)
         plugins.get("trello").set_option("key", "some_value", self.projectA)
         self.projectA.status = 1
@@ -143,7 +138,7 @@ class OrganizationPluginsTest(APITestCase):
         plugins.get("trello").set_option("key", "some_value", another)
         url = self.url + "?plugins=trello"
         response = self.client.get(url)
-        assert map(lambda x: x["projectSlug"], response.data[0]["projectList"]) == [
+        assert list(map(lambda x: x["projectSlug"], response.data[0]["projectList"])) == [
             "another",
             "proj_a",
             "proj_b",

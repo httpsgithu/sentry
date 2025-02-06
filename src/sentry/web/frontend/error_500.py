@@ -1,15 +1,16 @@
 import logging
 
 from django.conf import settings
+from django.http import HttpRequest, HttpResponse
 from django.views.generic import View
 
-from sentry.models import ProjectKey
+from sentry.models.projectkey import ProjectKey
 from sentry.utils import json
 from sentry.web.helpers import render_to_response
 
 
 class Error500View(View):
-    def get_embed_config(self, request):
+    def get_embed_config(self, request: HttpRequest):
         if not hasattr(request, "sentry"):
             return
 
@@ -27,7 +28,7 @@ class Error500View(View):
                 logging.exception("Unable to fetch user information for embed")
         return result
 
-    def dispatch(self, request):
+    def dispatch(self, request: HttpRequest) -> HttpResponse:
         context = {}
         embed_config = self.get_embed_config(request)
         if embed_config:

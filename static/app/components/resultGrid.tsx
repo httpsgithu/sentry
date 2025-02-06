@@ -1,26 +1,25 @@
-import * as React from 'react';
-import {browserHistory} from 'react-router';
-import {Location} from 'history';
+import {Component} from 'react';
+import type {Location} from 'history';
 
-import {Client, RequestOptions} from 'app/api';
-import DropdownLink from 'app/components/dropdownLink';
-import MenuItem from 'app/components/menuItem';
-import Pagination from 'app/components/pagination';
-import {IconSearch} from 'app/icons';
-import withApi from 'app/utils/withApi';
+import type {Client, RequestOptions} from 'sentry/api';
+import {CompactSelect} from 'sentry/components/compactSelect';
+import Pagination from 'sentry/components/pagination';
+import {IconSearch} from 'sentry/icons';
+import {browserHistory} from 'sentry/utils/browserHistory';
+import withApi from 'sentry/utils/withApi';
 
 type Option = [value: string, label: string];
 
 type FilterProps = {
+  location: Location;
   name: string;
-  queryKey: string;
   options: Option[];
   path: string;
+  queryKey: string;
   value: string;
-  location: Location;
 };
 
-class Filter extends React.Component<FilterProps> {
+class Filter extends Component<FilterProps> {
   getCurrentLabel() {
     const selected = this.props.options.find(
       item => item[0] === (this.props.value ?? '')
@@ -31,43 +30,45 @@ class Filter extends React.Component<FilterProps> {
     return this.props.name + ': ' + 'Any';
   }
 
-  getDefaultItem() {
-    const query = {...this.props.location.query, cursor: ''};
-    delete query[this.props.queryKey];
-
+  getSelector = () => {
     return (
-      <MenuItem
-        key=""
-        isActive={this.props.value === '' || !this.props.value}
-        to={{pathname: this.props.path, query}}
-      >
-        Any
-      </MenuItem>
+      <CompactSelect
+        triggerProps={{
+          size: 'sm',
+          borderless: true,
+        }}
+        triggerLabel={this.getCurrentLabel()}
+        options={[
+          {
+            value: 'any',
+            label: 'Any',
+          },
+          ...this.props.options.map(([value, label]) => ({
+            value,
+            label,
+          })),
+        ]}
+        value={this.props.value ?? 'any'}
+        onChange={({value}) => {
+          if (value === 'any') {
+            const query = {...this.props.location.query, cursor: undefined};
+            // @ts-expect-error TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+            delete query[this.props.queryKey];
+            browserHistory.push({pathname: this.props.path, query});
+          } else {
+            browserHistory.push({
+              pathname: this.props.path,
+              query: {
+                ...this.props.location.query,
+                [this.props.queryKey]: value,
+                cursor: undefined,
+              },
+            });
+          }
+        }}
+      />
     );
-  }
-
-  getSelector = () => (
-    <DropdownLink title={this.getCurrentLabel()}>
-      {this.getDefaultItem()}
-      {this.props.options.map(([value, label]) => {
-        const filterQuery = {
-          [this.props.queryKey]: value,
-          cursor: '',
-        };
-
-        const query = {...this.props.location.query, ...filterQuery};
-        return (
-          <MenuItem
-            key={value}
-            isActive={this.props.value === value}
-            to={{pathname: this.props.path, query}}
-          >
-            {label}
-          </MenuItem>
-        );
-      })}
-    </DropdownLink>
-  );
+  };
 
   render() {
     return (
@@ -83,33 +84,39 @@ class Filter extends React.Component<FilterProps> {
 }
 
 type SortByProps = {
+  location: Location;
   options: Option[];
   path: string;
-  location: Location;
   value: string;
 };
 
-class SortBy extends React.Component<SortByProps> {
+class SortBy extends Component<SortByProps> {
   getCurrentSortLabel() {
     return this.props.options.find(([value]) => value === this.props.value)?.[1];
   }
 
   getSortBySelector() {
     return (
-      <DropdownLink title={this.getCurrentSortLabel()} className="sorted-by">
-        {this.props.options.map(([value, label]) => {
-          const query = {...this.props.location.query, sortBy: value, cursor: ''};
-          return (
-            <MenuItem
-              isActive={this.props.value === value}
-              key={value}
-              to={{pathname: this.props.path, query}}
-            >
-              {label}
-            </MenuItem>
-          );
-        })}
-      </DropdownLink>
+      <div className="sort-options">
+        <CompactSelect
+          triggerLabel={this.getCurrentSortLabel()}
+          triggerProps={{
+            size: 'sm',
+            borderless: true,
+          }}
+          options={this.props.options.map(option => ({
+            value: option[0],
+            label: option[1],
+          }))}
+          onChange={({value}) => {
+            browserHistory.push({
+              pathname: this.props.path,
+              query: {...this.props.location.query, sortBy: value, cursor: undefined},
+            });
+          }}
+          value={this.props.value}
+        />
+      </div>
     );
   }
 
@@ -120,7 +127,7 @@ class SortBy extends React.Component<SortByProps> {
 
     return (
       <div className="sort-options">
-        Showing results sorted by
+        Showing results sorted by{' '}
         {this.props.options.length === 1 ? (
           <strong className="sorted-by">{this.getCurrentSortLabel()}</strong>
         ) : (
@@ -147,10 +154,10 @@ type Props = {
 type DefaultProps = {
   columns: React.ReactNode[];
   columnsForRow: (row: any) => React.ReactNode[];
-  defaultSort: string;
   defaultParams: Record<string, any>;
-  filters: Record<string, FilterConfig>;
+  defaultSort: string;
   endpoint: string;
+  filters: Record<string, FilterConfig>;
   hasPagination: boolean;
   hasSearch: boolean;
   keyForRow: (row: any) => string;
@@ -160,16 +167,16 @@ type DefaultProps = {
 };
 
 type State = {
-  rows: any[];
-  loading: boolean;
   error: string | boolean;
+  filters: Record<string, string>;
+  loading: boolean;
   pageLinks: null | string;
   query: string;
+  rows: any[];
   sortBy: string;
-  filters: Record<string, string>;
 };
 
-class ResultGrid extends React.Component<Props, State> {
+class ResultGrid extends Component<Props, State> {
   static defaultProps: DefaultProps = {
     path: '',
     endpoint: '',
@@ -189,16 +196,16 @@ class ResultGrid extends React.Component<Props, State> {
 
   state: State = this.defaultState;
 
-  componentWillMount() {
+  UNSAFE_componentWillMount() {
     this.fetchData();
   }
 
-  componentWillReceiveProps() {
-    const queryParams = this.query;
+  UNSAFE_componentWillReceiveProps(nextProps: Props) {
+    const queryParams = {...nextProps.location.query} as Record<string, string>;
     this.setState(
       {
         query: queryParams.query ?? '',
-        sortBy: queryParams.sortBy ?? this.props.defaultSort,
+        sortBy: queryParams.sortBy ?? this.props.defaultSort!,
         filters: {...queryParams},
         pageLinks: null,
         loading: true,
@@ -223,7 +230,7 @@ class ResultGrid extends React.Component<Props, State> {
   }
 
   get query() {
-    return ((this.props.location ?? {}).query ?? {}) as {[k: string]: string};
+    return (this.props.location?.query ?? {}) as {[k: string]: string};
   }
 
   remountComponent() {
@@ -352,7 +359,7 @@ class ResultGrid extends React.Component<Props, State> {
             <Filter
               key={filterKey}
               queryKey={filterKey}
-              value={this.state.filters[filterKey]}
+              value={this.state.filters[filterKey]!}
               path={path ?? ''}
               location={location}
               {...(filters?.[filterKey] as FilterConfig)}
@@ -368,10 +375,10 @@ class ResultGrid extends React.Component<Props, State> {
             {this.state.loading
               ? this.renderLoading()
               : this.state.error
-              ? this.renderError()
-              : this.state.rows.length === 0
-              ? this.renderNoResults()
-              : this.renderResults()}
+                ? this.renderError()
+                : this.state.rows.length === 0
+                  ? this.renderNoResults()
+                  : this.renderResults()}
           </tbody>
         </table>
         {this.props.hasPagination && this.state.pageLinks && (

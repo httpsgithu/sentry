@@ -1,24 +1,24 @@
-import * as React from 'react';
+import {forwardRef} from 'react';
 import styled from '@emotion/styled';
 
 type Props = {
-  forwardRef?: React.Ref<HTMLButtonElement>;
+  toggle: React.MouseEventHandler<HTMLButtonElement>;
   className?: string;
-  id?: string;
-  name?: string;
-  size?: 'sm' | 'lg';
-  isActive?: boolean;
   /**
    * Toggle color is always active.
    */
   forceActiveColor?: boolean;
-  isLoading?: boolean;
+  forwardedRef?: React.Ref<HTMLButtonElement>;
+  id?: string;
+  isActive?: boolean;
   isDisabled?: boolean;
-  toggle: React.HTMLProps<HTMLButtonElement>['onClick'];
+  isLoading?: boolean;
+  name?: string;
+  size?: 'sm' | 'lg';
 };
 
-const Switch = ({
-  forwardRef,
+function Switch({
+  forwardedRef,
   size = 'sm',
   isActive,
   forceActiveColor,
@@ -28,38 +28,42 @@ const Switch = ({
   id,
   name,
   className,
-}: Props) => (
-  <SwitchButton
-    ref={forwardRef}
-    id={id}
-    name={name}
-    type="button"
-    className={className}
-    onClick={isDisabled ? undefined : toggle}
-    role="checkbox"
-    aria-checked={isActive}
-    isLoading={isLoading}
-    isDisabled={isDisabled}
-    isActive={isActive}
-    size={size}
-    data-test-id="switch"
-  >
-    <Toggle
-      isDisabled={isDisabled}
+  ...props
+}: Props) {
+  return (
+    <SwitchButton
+      ref={forwardedRef}
+      id={id}
+      name={name}
+      type="button"
+      className={className}
+      onClick={isDisabled ? undefined : toggle}
+      role="checkbox"
+      aria-checked={isActive}
+      isLoading={isLoading}
+      disabled={isDisabled}
       isActive={isActive}
-      forceActiveColor={forceActiveColor}
       size={size}
-    />
-  </SwitchButton>
-);
+      data-test-id="switch"
+      {...props}
+    >
+      <Toggle
+        isDisabled={isDisabled}
+        isActive={isActive}
+        forceActiveColor={forceActiveColor}
+        size={size}
+      />
+    </SwitchButton>
+  );
+}
 
 type StyleProps = Partial<Props>;
 
 const getSize = (p: StyleProps) => (p.size === 'sm' ? 16 : 24);
-const getToggleSize = (p: StyleProps) => getSize(p) - (p.size === 'sm' ? 6 : 10);
-const getToggleTop = (p: StyleProps) => (p.size === 'sm' ? 2 : 4);
+const getToggleSize = (p: StyleProps) => getSize(p) - (p.size === 'sm' ? 4 : 8);
+const getToggleTop = (p: StyleProps) => (p.size === 'sm' ? 1 : 3);
 const getTranslateX = (p: StyleProps) =>
-  p.isActive ? getToggleTop(p) + getSize(p) : getToggleTop(p);
+  p.isActive ? getToggleTop(p) + getSize(p) * 0.875 : getToggleTop(p);
 
 const SwitchButton = styled('button')<StyleProps>`
   display: inline-block;
@@ -67,24 +71,23 @@ const SwitchButton = styled('button')<StyleProps>`
   padding: 0;
   border: 1px solid ${p => p.theme.border};
   position: relative;
-  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.04);
-  transition: 0.15s border ease;
-  cursor: ${p => (p.isLoading || p.isDisabled ? 'not-allowed' : 'pointer')};
-  pointer-events: ${p => (p.isLoading || p.isDisabled ? 'none' : null)};
+  box-shadow: inset ${p => p.theme.dropShadowMedium};
   height: ${getSize}px;
-  width: ${p => getSize(p) * 2}px;
+  width: ${p => getSize(p) * 1.875}px;
   border-radius: ${getSize}px;
+  transition:
+    border 0.1s,
+    box-shadow 0.1s;
 
-  &:hover,
-  &:focus {
-    outline: none;
-    border-color: ${p => p.theme.border};
+  &[disabled] {
+    cursor: not-allowed;
   }
 
   &:focus,
-  &.focus-visible {
+  &:focus-visible {
     outline: none;
-    box-shadow: rgba(209, 202, 216, 0.5) 0 0 0 3px;
+    border-color: ${p => p.theme.focusBorder};
+    box-shadow: ${p => p.theme.focusBorder} 0 0 0 1px;
   }
 `;
 
@@ -102,6 +105,6 @@ const Toggle = styled('span')<StyleProps>`
   opacity: ${p => (p.isDisabled ? 0.4 : null)};
 `;
 
-export default React.forwardRef<HTMLButtonElement, Props>((props, ref) => (
-  <Switch {...props} forwardRef={ref} />
+export default forwardRef<HTMLButtonElement, Props>((props, ref) => (
+  <Switch {...props} forwardedRef={ref} />
 ));

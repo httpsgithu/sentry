@@ -1,49 +1,46 @@
 import {Fragment, useState} from 'react';
 import styled from '@emotion/styled';
 
-import {ModalRenderProps} from 'app/actionCreators/modal';
-import ActionButton from 'app/components/actions/button';
-import Button from 'app/components/button';
+import type {ModalRenderProps} from 'sentry/actionCreators/modal';
+import {Button} from 'sentry/components/button';
+import FieldGroup from 'sentry/components/forms/fieldGroup';
+import SelectField from 'sentry/components/forms/fields/selectField';
+import Input from 'sentry/components/input';
 import {
   DEBUG_SOURCE_CASINGS,
   DEBUG_SOURCE_LAYOUTS,
   DEBUG_SOURCE_TYPES,
-} from 'app/data/debugFileSources';
-import {IconClose} from 'app/icons/iconClose';
-import {t, tct} from 'app/locale';
-import {INPUT_PADDING} from 'app/styles/input';
-import space from 'app/styles/space';
-import {uniqueId} from 'app/utils/guid';
-import Input from 'app/views/settings/components/forms/controls/input';
-import Field from 'app/views/settings/components/forms/field';
-import SelectField from 'app/views/settings/components/forms/selectField';
+} from 'sentry/data/debugFileSources';
+import {IconClose} from 'sentry/icons/iconClose';
+import {t, tct} from 'sentry/locale';
+import {space} from 'sentry/styles/space';
+import {uniqueId} from 'sentry/utils/guid';
 
 const CLEAR_PASSWORD_BUTTON_SIZE = 22;
-const PASSWORD_INPUT_PADDING_RIGHT = INPUT_PADDING + CLEAR_PASSWORD_BUTTON_SIZE;
 
 type InitialData = {
+  id: string;
+  layout: {
+    casing: keyof typeof DEBUG_SOURCE_CASINGS;
+    type: keyof typeof DEBUG_SOURCE_LAYOUTS;
+  };
   name: string;
   url: string;
-  layout: {
-    type: keyof typeof DEBUG_SOURCE_LAYOUTS;
-    casing: keyof typeof DEBUG_SOURCE_CASINGS;
-  };
-  username?: string;
   password?: {
     'hidden-secret': boolean;
   };
+  username?: string;
 };
 
 type Data = Partial<Pick<InitialData, 'name' | 'url'>> &
   Omit<InitialData, 'name' | 'url' | 'password' | 'layout'> & {
-    'layout.type': keyof typeof DEBUG_SOURCE_LAYOUTS;
     'layout.casing': keyof typeof DEBUG_SOURCE_CASINGS;
+    'layout.type': keyof typeof DEBUG_SOURCE_LAYOUTS;
     password?: string;
   };
 
 type SubmitData = Omit<Data, 'password' | 'name' | 'url'> &
   Pick<InitialData, 'name' | 'url'> & {
-    id: string;
     password?:
       | {
           'hidden-secret': boolean;
@@ -58,6 +55,7 @@ type Props = Pick<ModalRenderProps, 'Header' | 'Body' | 'Footer'> & {
 
 function Http({Header, Body, Footer, onSubmit, ...props}: Props) {
   const initialData: Data = {
+    id: props.initialData?.id ?? uniqueId(),
     name: props.initialData?.name,
     url: props.initialData?.url,
     username: props.initialData?.username,
@@ -77,9 +75,9 @@ function Http({Header, Body, Footer, onSubmit, ...props}: Props) {
   }
 
   function handleSubmit() {
-    const validData = data as Omit<SubmitData, 'id'>;
+    const validData = data as SubmitData;
     onSubmit({
-      id: uniqueId(),
+      id: validData.id,
       name: validData.name,
       url: validData.url,
       'layout.type': validData['layout.type'],
@@ -89,8 +87,8 @@ function Http({Header, Body, Footer, onSubmit, ...props}: Props) {
         validData.password === undefined
           ? {'hidden-secret': true}
           : !validData.password
-          ? undefined
-          : validData.password,
+            ? undefined
+            : validData.password,
     });
   }
 
@@ -106,7 +104,7 @@ function Http({Header, Body, Footer, onSubmit, ...props}: Props) {
           : tct('Add [name] Repository', {name: DEBUG_SOURCE_TYPES.http})}
       </Header>
       <Body>
-        <Field
+        <FieldGroup
           label={t('Name')}
           inline={false}
           help={t('A display name for this repository')}
@@ -126,9 +124,9 @@ function Http({Header, Body, Footer, onSubmit, ...props}: Props) {
               })
             }
           />
-        </Field>
+        </FieldGroup>
         <hr />
-        <Field
+        <FieldGroup
           label={t('Download Url')}
           inline={false}
           help={t('Full URL to the symbol server')}
@@ -148,8 +146,8 @@ function Http({Header, Body, Footer, onSubmit, ...props}: Props) {
               })
             }
           />
-        </Field>
-        <Field
+        </FieldGroup>
+        <FieldGroup
           label={t('User')}
           inline={false}
           help={t('User for HTTP basic auth')}
@@ -168,8 +166,8 @@ function Http({Header, Body, Footer, onSubmit, ...props}: Props) {
               })
             }
           />
-        </Field>
-        <Field
+        </FieldGroup>
+        <FieldGroup
           label={t('Password')}
           inline={false}
           help={t('Password for HTTP basic auth')}
@@ -194,14 +192,14 @@ function Http({Header, Body, Footer, onSubmit, ...props}: Props) {
             (typeof data.password === 'string' && !!data.password)) && (
             <ClearPasswordButton
               onClick={handleClearPassword}
-              icon={<IconClose size="14px" />}
-              size="xsmall"
+              icon={<IconClose size="sm" />}
+              size="xs"
               title={t('Clear password')}
-              label={t('Clear password')}
+              aria-label={t('Clear password')}
               borderless
             />
           )}
-        </Field>
+        </FieldGroup>
         <hr />
         <StyledSelectField
           name="layout.type"
@@ -209,10 +207,11 @@ function Http({Header, Body, Footer, onSubmit, ...props}: Props) {
           help={t('The layout of the folder structure.')}
           options={Object.keys(DEBUG_SOURCE_LAYOUTS).map(key => ({
             value: key,
+            // @ts-expect-error TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
             label: DEBUG_SOURCE_LAYOUTS[key],
           }))}
           value={data['layout.type']}
-          onChange={value =>
+          onChange={(value: any) =>
             setData({
               ...data,
               ['layout.type']: value,
@@ -228,10 +227,11 @@ function Http({Header, Body, Footer, onSubmit, ...props}: Props) {
           help={t('The case of files and folders.')}
           options={Object.keys(DEBUG_SOURCE_CASINGS).map(key => ({
             value: key,
+            // @ts-expect-error TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
             label: DEBUG_SOURCE_CASINGS[key],
           }))}
           value={data['layout.casing']}
-          onChange={value =>
+          onChange={(value: any) =>
             setData({
               ...data,
               ['layout.casing']: value,
@@ -262,10 +262,11 @@ const StyledSelectField = styled(SelectField)`
 `;
 
 const PasswordInput = styled(Input)`
-  padding-right: ${PASSWORD_INPUT_PADDING_RIGHT}px;
+  padding-right: ${p =>
+    p.theme.formPadding.md.paddingRight + CLEAR_PASSWORD_BUTTON_SIZE}px;
 `;
 
-const ClearPasswordButton = styled(ActionButton)`
+const ClearPasswordButton = styled(Button)`
   background: transparent;
   height: ${CLEAR_PASSWORD_BUTTON_SIZE}px;
   width: ${CLEAR_PASSWORD_BUTTON_SIZE}px;

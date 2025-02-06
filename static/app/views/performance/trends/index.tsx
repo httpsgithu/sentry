@@ -1,28 +1,30 @@
-import React from 'react';
-import {RouteComponentProps} from 'react-router';
-import styled from '@emotion/styled';
+import {Component} from 'react';
+import type {Location} from 'history';
 
-import {Client} from 'app/api';
-import NoProjectMessage from 'app/components/noProjectMessage';
-import SentryDocumentTitle from 'app/components/sentryDocumentTitle';
-import {t} from 'app/locale';
-import {PageContent} from 'app/styles/organization';
-import {GlobalSelection, Organization, Project} from 'app/types';
-import EventView from 'app/utils/discover/eventView';
-import withApi from 'app/utils/withApi';
-import withGlobalSelection from 'app/utils/withGlobalSelection';
-import withOrganization from 'app/utils/withOrganization';
-import withProjects from 'app/utils/withProjects';
+import type {Client} from 'sentry/api';
+import * as Layout from 'sentry/components/layouts/thirds';
+import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
+import {t} from 'sentry/locale';
+import type {PageFilters} from 'sentry/types/core';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import type EventView from 'sentry/utils/discover/eventView';
+import {MetricsCardinalityProvider} from 'sentry/utils/performance/contexts/metricsCardinality';
+import withApi from 'sentry/utils/withApi';
+import withOrganization from 'sentry/utils/withOrganization';
+import withPageFilters from 'sentry/utils/withPageFilters';
+import withProjects from 'sentry/utils/withProjects';
 
 import {generatePerformanceEventView} from '../data';
 
 import TrendsContent from './content';
 
-type Props = RouteComponentProps<{}, {}> & {
+type Props = {
   api: Client;
-  selection: GlobalSelection;
+  location: Location;
   organization: Organization;
   projects: Project[];
+  selection: PageFilters;
 };
 
 type State = {
@@ -30,31 +32,35 @@ type State = {
   error?: string;
 };
 
-class TrendsSummary extends React.Component<Props, State> {
+class TrendsSummary extends Component<Props, State> {
   static getDerivedStateFromProps(nextProps: Readonly<Props>, prevState: State): State {
     return {
       ...prevState,
       eventView: generatePerformanceEventView(
-        nextProps.organization,
         nextProps.location,
         nextProps.projects,
-        true
+        {
+          isTrends: true,
+        },
+        nextProps.organization
       ),
     };
   }
 
   state: State = {
     eventView: generatePerformanceEventView(
-      this.props.organization,
       this.props.location,
       this.props.projects,
-      true
+      {
+        isTrends: true,
+      },
+      this.props.organization
     ),
     error: undefined,
   };
 
   getDocumentTitle(): string {
-    return [t('Trends'), t('Performance')].join(' - ');
+    return [t('Trends'), t('Performance')].join(' — ');
   }
 
   setError = (error: string | undefined) => {
@@ -62,35 +68,35 @@ class TrendsSummary extends React.Component<Props, State> {
   };
 
   renderContent() {
-    const {organization, location} = this.props;
+    const {organization, location, projects} = this.props;
     const {eventView} = this.state;
     return (
       <TrendsContent
         organization={organization}
         location={location}
         eventView={eventView}
+        projects={projects}
       />
     );
   }
 
   render() {
-    const {organization} = this.props;
+    const {organization, location} = this.props;
 
     return (
       <SentryDocumentTitle title={this.getDocumentTitle()} orgSlug={organization.slug}>
-        <StyledPageContent>
-          <NoProjectMessage organization={organization}>
+        <Layout.Page>
+          <MetricsCardinalityProvider
+            sendOutcomeAnalytics
+            organization={organization}
+            location={location}
+          >
             {this.renderContent()}
-          </NoProjectMessage>
-        </StyledPageContent>
+          </MetricsCardinalityProvider>
+        </Layout.Page>
       </SentryDocumentTitle>
     );
   }
 }
 
-export default withOrganization(
-  withProjects(withGlobalSelection(withApi(TrendsSummary)))
-);
-const StyledPageContent = styled(PageContent)`
-  padding: 0;
-`;
+export default withOrganization(withProjects(withPageFilters(withApi(TrendsSummary))));

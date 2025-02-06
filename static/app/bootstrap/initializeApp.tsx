@@ -1,9 +1,8 @@
 import './legacyTwitterBootstrap';
 import './exportGlobals';
 
-import routes from 'app/routes';
-import {Config} from 'app/types';
-import {metric} from 'app/utils/analytics';
+import type {Config} from 'sentry/types/system';
+import {metric} from 'sentry/utils/analytics';
 
 import {commonInitialization} from './commonInitialization';
 import {initializeSdk} from './initializeSdk';
@@ -11,9 +10,9 @@ import {processInitQueue} from './processInitQueue';
 import {renderMain} from './renderMain';
 import {renderOnDomReady} from './renderOnDomReady';
 
-export async function initializeApp(config: Config) {
+export function initializeApp(config: Config) {
   commonInitialization(config);
-  initializeSdk(config, {routes});
+  initializeSdk(config);
 
   // Used for operational metrics to determine that the application js
   // bundle was loaded by browser.

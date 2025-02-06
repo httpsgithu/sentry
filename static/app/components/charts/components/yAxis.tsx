@@ -1,11 +1,10 @@
-import {EChartOption} from 'echarts';
+import type {Theme} from '@emotion/react';
+import type {YAXisComponentOption} from 'echarts';
 import merge from 'lodash/merge';
 
-import {Theme} from 'app/utils/theme';
+type Props = YAXisComponentOption & {theme: Theme};
 
-type Props = EChartOption.YAxis & {theme: Theme};
-
-export default function YAxis({theme, ...props}: Props): EChartOption.YAxis {
+export default function YAxis({theme, ...props}: Props): YAXisComponentOption {
   return merge(
     {
       axisLine: {

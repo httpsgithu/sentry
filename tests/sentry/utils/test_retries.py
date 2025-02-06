@@ -1,8 +1,7 @@
-from unittest import TestCase
+from unittest import TestCase, mock
 
 import pytest
 
-from sentry.utils.compat import mock
 from sentry.utils.retries import ConditionalRetryPolicy, RetryException, TimedRetryPolicy
 
 
@@ -70,12 +69,9 @@ class TimedRetryPolicyTestCase(TestCase):
         retry.clock.sleep = mock.MagicMock()
         retry.clock.time = mock.MagicMock(side_effect=[0, 0.15, 0.25])
 
-        try:
+        with pytest.raises(RetryException) as excinfo:
             retry(callable)
-        except RetryException as exception:
-            assert exception.exception is bomb
-        else:
-            self.fail(f"Expected {RetryException!r}!")
+        assert excinfo.value.exception is bomb
 
         assert callable.call_count == 2
 

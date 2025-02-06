@@ -1,26 +1,38 @@
 import sentry_sdk
 from django.core.exceptions import ValidationError
 from rest_framework import serializers
+from rest_framework.request import Request
 from rest_framework.response import Response
 
 from sentry import features
-from sentry.api.base import EnvironmentMixin
+from sentry.api.api_publish_status import ApiPublishStatus
+from sentry.api.base import EnvironmentMixin, region_silo_endpoint
 from sentry.api.bases.organization import OrganizationDataExportPermission, OrganizationEndpoint
 from sentry.api.serializers import serialize
-from sentry.api.utils import InvalidParams, get_date_range_from_params
-from sentry.discover.arithmetic import is_equation, resolve_equation_list, strip_equation
-from sentry.exceptions import InvalidSearchQuery
-from sentry.models import Environment
-from sentry.search.events.fields import resolve_field_list
-from sentry.search.events.filter import get_filter
+from sentry.api.utils import get_date_range_from_params
+from sentry.discover.arithmetic import categorize_columns
+from sentry.exceptions import InvalidParams, InvalidSearchQuery
+from sentry.models.environment import Environment
+from sentry.models.organization import Organization
+from sentry.search.events.builder.discover import DiscoverQueryBuilder
+from sentry.search.events.builder.errors import ErrorsQueryBuilder
+from sentry.search.events.types import QueryBuilderConfig
+from sentry.snuba.dataset import Dataset
 from sentry.utils import metrics
-from sentry.utils.compat import map
 from sentry.utils.snuba import MAX_FIELDS
 
 from ..base import ExportQueryType
 from ..models import ExportedData
 from ..processors.discover import DiscoverProcessor
 from ..tasks import assemble_download
+
+# To support more datasets we may need to change the QueryBuilder being used
+SUPPORTED_DATASETS = {
+    "discover": Dataset.Discover,
+    "issuePlatform": Dataset.IssuePlatform,
+    "transactions": Dataset.Transactions,
+    "errors": Dataset.Events,
+}
 
 
 class DataExportQuerySerializer(serializers.Serializer):
@@ -29,6 +41,7 @@ class DataExportQuerySerializer(serializers.Serializer):
 
     def validate(self, data):
         organization = self.context["organization"]
+        has_metrics = self.context["has_metrics"]
         query_info = data["query_info"]
 
         # Validate the project field, if provided
@@ -50,13 +63,7 @@ class DataExportQuerySerializer(serializers.Serializer):
             if not isinstance(base_fields, list):
                 base_fields = [base_fields]
 
-            equations = []
-            fields = []
-            for field in base_fields:
-                if is_equation(field):
-                    equations.append(strip_equation(field))
-                else:
-                    fields.append(field)
+            equations, fields = categorize_columns(base_fields)
 
             if len(base_fields) > MAX_FIELDS:
                 detail = f"You can export up to {MAX_FIELDS} fields at a time. Please delete some and try again."
@@ -90,35 +97,78 @@ class DataExportQuerySerializer(serializers.Serializer):
                 del query_info["statsPeriodEnd"]
             query_info["start"] = start.isoformat()
             query_info["end"] = end.isoformat()
+            dataset = query_info.get("dataset", "discover")
+            if dataset not in SUPPORTED_DATASETS:
+                raise serializers.ValidationError(f"{dataset} is not supported for csv exports")
 
             # validate the query string by trying to parse it
             processor = DiscoverProcessor(
                 discover_query=query_info,
-                organization_id=organization.id,
+                organization=organization,
             )
             try:
-                snuba_filter = get_filter(query_info["query"], processor.params)
-                if len(equations) > 0:
-                    resolved_equations, _ = resolve_equation_list(equations, fields)
-                else:
-                    resolved_equations = []
-                resolve_field_list(
-                    fields.copy(),
-                    snuba_filter,
-                    auto_fields=True,
-                    auto_aggregations=True,
-                    resolved_equations=resolved_equations,
+                query_builder_cls = DiscoverQueryBuilder
+                if dataset == "errors":
+                    query_builder_cls = ErrorsQueryBuilder
+
+                builder = query_builder_cls(
+                    SUPPORTED_DATASETS[dataset],
+                    params={},
+                    snuba_params=processor.snuba_params,
+                    query=query_info["query"],
+                    selected_columns=fields.copy(),
+                    equations=equations,
+                    config=QueryBuilderConfig(
+                        auto_fields=True,
+                        auto_aggregations=True,
+                        has_metrics=has_metrics,
+                    ),
                 )
+                builder.get_snql_query()
             except InvalidSearchQuery as err:
                 raise serializers.ValidationError(str(err))
 
         return data
 
 
+@region_silo_endpoint
 class DataExportEndpoint(OrganizationEndpoint, EnvironmentMixin):
+    publish_status = {
+        "POST": ApiPublishStatus.PRIVATE,
+    }
     permission_classes = (OrganizationDataExportPermission,)
 
-    def post(self, request, organization):
+    def get_features(self, organization: Organization, request: Request) -> dict[str, bool | None]:
+        feature_names = [
+            "organizations:dashboards-mep",
+            "organizations:mep-rollout-flag",
+            "organizations:performance-use-metrics",
+            "organizations:profiling",
+            "organizations:dynamic-sampling",
+            "organizations:use-metrics-layer",
+            "organizations:starfish-view",
+        ]
+        batch_features = features.batch_has(
+            feature_names,
+            organization=organization,
+            actor=request.user,
+        )
+
+        all_features = (
+            batch_features.get(f"organization:{organization.id}", {})
+            if batch_features is not None
+            else {}
+        )
+
+        for feature_name in feature_names:
+            if feature_name not in all_features:
+                all_features[feature_name] = features.has(
+                    feature_name, organization=organization, actor=request.user
+                )
+
+        return all_features
+
+    def post(self, request: Request, organization) -> Response:
         """
         Create a new asynchronous file export task, and
         email user upon completion,
@@ -135,15 +185,27 @@ class DataExportEndpoint(OrganizationEndpoint, EnvironmentMixin):
             return Response(error, status=400)
         limit = request.data.get("limit")
 
+        batch_features = self.get_features(organization, request)
+
+        use_metrics = (
+            (
+                batch_features.get("organizations:mep-rollout-flag", False)
+                and batch_features.get("organizations:dynamic-sampling", False)
+            )
+            or batch_features.get("organizations:performance-use-metrics", False)
+            or batch_features.get("organizations:dashboards-mep", False)
+        )
+
         # Validate the data export payload
         serializer = DataExportQuerySerializer(
             data=request.data,
             context={
                 "organization": organization,
-                "get_projects_by_id": lambda project_query: self._get_projects_by_id(
-                    project_query, request, organization
+                "get_projects_by_id": lambda project_query: self.get_projects(
+                    request=request, organization=organization, project_ids=project_query
                 ),
                 "get_projects": lambda: self.get_projects(request, organization),
+                "has_metrics": use_metrics,
             },
         )
         if not serializer.is_valid():
@@ -156,7 +218,7 @@ class DataExportEndpoint(OrganizationEndpoint, EnvironmentMixin):
             query_type = ExportQueryType.from_str(data["query_type"])
             data_export, created = ExportedData.objects.get_or_create(
                 organization=organization,
-                user=request.user,
+                user_id=request.user.id,
                 query_type=query_type,
                 query_info=data["query_info"],
                 date_finished=None,

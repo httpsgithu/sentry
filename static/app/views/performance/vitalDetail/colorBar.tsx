@@ -1,40 +1,52 @@
+import type {ReactNode} from 'react';
 import styled from '@emotion/styled';
 
-import space from 'app/styles/space';
-import {Color} from 'app/utils/theme';
+import {space} from 'sentry/styles/space';
+import type {Color} from 'sentry/utils/theme';
 
 type ColorStop = {
+  color: Color | string;
   percent: number;
-  color: Color;
+  renderBarStatus?: (barStatus: ReactNode, key: string) => ReactNode;
 };
 
-type Props = {
+interface Props extends React.HTMLAttributes<HTMLDivElement> {
   colorStops: ColorStop[];
-};
+  barHeight?: number;
+}
 
-const ColorBar = (props: Props) => {
+function ColorBar(props: Props) {
   return (
-    <VitalBar fractions={props.colorStops.map(({percent}) => percent)}>
+    <VitalBar
+      barHeight={props.barHeight}
+      fractions={props.colorStops.map(({percent}) => percent)}
+      {...props}
+    >
       {props.colorStops.map(colorStop => {
-        return <BarStatus color={colorStop.color} key={colorStop.color} />;
+        const barStatus = (
+          <BarStatus color={colorStop.color as Color} key={colorStop.color} />
+        );
+
+        return colorStop.renderBarStatus?.(barStatus, colorStop.color) ?? barStatus;
       })}
     </VitalBar>
   );
-};
+}
 
 type VitalBarProps = {
   fractions: number[];
+  barHeight?: number;
 };
 
 const VitalBar = styled('div')<VitalBarProps>`
-  height: 16px;
+  height: ${p => (p.barHeight ? `${p.barHeight}px` : '16px')};
   width: 100%;
   overflow: hidden;
   position: relative;
   background: ${p => p.theme.gray100};
   display: grid;
   grid-template-columns: ${p => p.fractions.map(f => `${f}fr`).join(' ')};
-  margin-bottom: ${space(1)};
+  margin-bottom: ${p => (p.barHeight ? '' : space(1))};
   border-radius: 2px;
 `;
 
@@ -43,7 +55,7 @@ type ColorProps = {
 };
 
 const BarStatus = styled('div')<ColorProps>`
-  background-color: ${p => p.theme[p.color]};
+  background-color: ${p => p.theme[p.color] ?? p.color};
 `;
 
 export default ColorBar;

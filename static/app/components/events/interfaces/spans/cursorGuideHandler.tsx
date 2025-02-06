@@ -1,20 +1,21 @@
-import * as React from 'react';
+import {Component, createContext} from 'react';
 
-import {clamp, rectOfContent} from 'app/components/performance/waterfall/utils';
+import {rectOfContent} from 'sentry/components/performance/waterfall/utils';
+import clamp from 'sentry/utils/number/clamp';
 
-import {DragManagerChildrenProps} from './dragManager';
-import {ParsedTraceType} from './types';
+import type {DragManagerChildrenProps} from './dragManager';
+import type {ParsedTraceType} from './types';
 
 export type CursorGuideManagerChildrenProps = {
-  showCursorGuide: boolean;
-  mouseLeft: number | undefined;
-  traceViewMouseLeft: number | undefined;
-
   displayCursorGuide: (mousePageX: number) => void;
   hideCursorGuide: () => void;
+  mouseLeft: number | undefined;
+
+  showCursorGuide: boolean;
+  traceViewMouseLeft: number | undefined;
 };
 
-const CursorGuideManagerContext = React.createContext<CursorGuideManagerChildrenProps>({
+const CursorGuideManagerContext = createContext<CursorGuideManagerChildrenProps>({
   showCursorGuide: false,
   mouseLeft: void 0,
   traceViewMouseLeft: void 0,
@@ -24,22 +25,22 @@ const CursorGuideManagerContext = React.createContext<CursorGuideManagerChildren
 });
 
 type PropType = {
-  trace: ParsedTraceType;
   children: React.ReactNode;
   dragProps: DragManagerChildrenProps;
-
   // this is the DOM element where the drag events occur. it's also the reference point
   // for calculating the relative mouse x coordinate.
   interactiveLayerRef: React.RefObject<HTMLDivElement>;
+
+  trace: ParsedTraceType;
 };
 
 type StateType = {
-  showCursorGuide: boolean;
   mouseLeft: number | undefined;
+  showCursorGuide: boolean;
   traceViewMouseLeft: number | undefined;
 };
 
-export class Provider extends React.Component<PropType, StateType> {
+export class Provider extends Component<PropType, StateType> {
   state: StateType = {
     showCursorGuide: false,
     mouseLeft: void 0,

@@ -2,47 +2,48 @@ import {Component, Fragment} from 'react';
 import styled from '@emotion/styled';
 import round from 'lodash/round';
 
-import {loadStatsForProject} from 'app/actionCreators/projects';
-import {Client} from 'app/api';
-import IdBadge from 'app/components/idBadge';
-import Link from 'app/components/links/link';
-import Placeholder from 'app/components/placeholder';
-import BookmarkStar from 'app/components/projects/bookmarkStar';
-import QuestionTooltip from 'app/components/questionTooltip';
+import {loadStatsForProject} from 'sentry/actionCreators/projects';
+import type {Client} from 'sentry/api';
+import {LinkButton} from 'sentry/components/button';
+import IdBadge from 'sentry/components/idBadge';
+import Link from 'sentry/components/links/link';
+import Panel from 'sentry/components/panels/panel';
+import Placeholder from 'sentry/components/placeholder';
+import BookmarkStar from 'sentry/components/projects/bookmarkStar';
+import QuestionTooltip from 'sentry/components/questionTooltip';
 import ScoreCard, {
-  HeaderTitle,
   Score,
   ScorePanel,
   ScoreWrapper,
+  Title,
   Trend,
-} from 'app/components/scoreCard';
-import {releaseHealth} from 'app/data/platformCategories';
-import {IconArrow} from 'app/icons';
-import {t} from 'app/locale';
-import ProjectsStatsStore from 'app/stores/projectsStatsStore';
-import space from 'app/styles/space';
-import {Organization, Project} from 'app/types';
-import {defined} from 'app/utils';
-import {callIfFunction} from 'app/utils/callIfFunction';
-import {formatAbbreviatedNumber} from 'app/utils/formatters';
-import withApi from 'app/utils/withApi';
-import withOrganization from 'app/utils/withOrganization';
-import MissingReleasesButtons, {
-  MissingReleaseButtonBar,
-} from 'app/views/projectDetail/missingFeatureButtons/missingReleasesButtons';
+} from 'sentry/components/scoreCard';
+import {IconArrow, IconSettings} from 'sentry/icons';
+import {t} from 'sentry/locale';
+import ProjectsStatsStore from 'sentry/stores/projectsStatsStore';
+import {space} from 'sentry/styles/space';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import {defined} from 'sentry/utils';
+import {DiscoverDatasets} from 'sentry/utils/discover/types';
+import {formatAbbreviatedNumber} from 'sentry/utils/formatters';
+import withApi from 'sentry/utils/withApi';
+import withOrganization from 'sentry/utils/withOrganization';
+import {getPerformanceBaseUrl} from 'sentry/views/performance/utils';
+import MissingReleasesButtons from 'sentry/views/projectDetail/missingFeatureButtons/missingReleasesButtons';
 import {
   CRASH_FREE_DECIMAL_THRESHOLD,
   displayCrashFreePercent,
-} from 'app/views/releases/utils';
+} from 'sentry/views/releases/utils';
 
 import Chart from './chart';
 import Deploys, {DeployRows, GetStarted, TextOverflow} from './deploys';
 
 type Props = {
   api: Client;
+  hasProjectAccess: boolean;
   organization: Organization;
   project: Project;
-  hasProjectAccess: boolean;
 };
 
 class ProjectCard extends Component<Props> {
@@ -55,6 +56,7 @@ class ProjectCard extends Component<Props> {
       projectId: project.id,
       query: {
         transactionStats: this.hasPerformance ? '1' : undefined,
+        dataset: DiscoverDatasets.METRICS_ENHANCED,
         sessionStats: '1',
       },
     });
@@ -79,26 +81,15 @@ class ProjectCard extends Component<Props> {
 
   renderMissingFeatureCard() {
     const {organization, project} = this.props;
-    if (project.platform && releaseHealth.includes(project.platform)) {
-      return (
-        <ScoreCard
-          title={t('Crash Free Sessions')}
-          score={<MissingReleasesButtons organization={organization} health />}
-        />
-      );
-    }
-
     return (
       <ScoreCard
         title={t('Crash Free Sessions')}
         score={
-          <NotAvailable>
-            {t('Not Available')}
-            <QuestionTooltip
-              title={t('Release Health is not yet supported on this platform.')}
-              size="xs"
-            />
-          </NotAvailable>
+          <MissingReleasesButtons
+            organization={organization}
+            health
+            platform={project.platform}
+          />
         }
       />
     );
@@ -140,30 +131,38 @@ class ProjectCard extends Component<Props> {
             <HeaderRow>
               <StyledIdBadge
                 project={project}
-                avatarSize={18}
+                avatarSize={32}
                 hideOverflow
                 disableLink={!hasProjectAccess}
               />
-              <BookmarkStar organization={organization} project={project} />
+              <SettingsButton
+                borderless
+                size="zero"
+                icon={<IconSettings color="subText" />}
+                title={t('Settings')}
+                aria-label={t('Settings')}
+                to={`/settings/${organization.slug}/projects/${slug}/`}
+              />
+              <StyledBookmarkStar organization={organization} project={project} />
             </HeaderRow>
-            <SummaryLinks>
+            <SummaryLinks data-test-id="summary-links">
               {stats ? (
                 <Fragment>
                   <Link
                     data-test-id="project-errors"
                     to={`/organizations/${organization.slug}/issues/?project=${project.id}`}
                   >
-                    {t('errors: %s', formatAbbreviatedNumber(totalErrors))}
+                    {t('Errors: %s', formatAbbreviatedNumber(totalErrors))}
                   </Link>
                   {this.hasPerformance && (
                     <Fragment>
                       <em>|</em>
                       <TransactionsLink
                         data-test-id="project-transactions"
-                        to={`/organizations/${organization.slug}/performance/?project=${project.id}`}
+                        to={`${getPerformanceBaseUrl(organization.slug)}/?project=${project.id}`}
                       >
                         {t(
-                          'transactions: %s',
+                          'Transactions: %s',
                           formatAbbreviatedNumber(totalTransactions)
                         )}
                         {zeroTransactions && (
@@ -184,7 +183,7 @@ class ProjectCard extends Component<Props> {
               )}
             </SummaryLinks>
           </CardHeader>
-          <ChartContainer>
+          <ChartContainer data-test-id="chart-container">
             {stats ? (
               <Chart
                 firstEvent={hasFirstEvent}
@@ -236,9 +235,9 @@ class ProjectCard extends Component<Props> {
 
 type ContainerProps = {
   api: Client;
-  project: Project;
-  organization: Organization;
   hasProjectAccess: boolean;
+  organization: Organization;
+  project: Project;
 };
 
 type ContainerState = {
@@ -257,16 +256,20 @@ class ProjectCardContainer extends Component<ContainerProps, ContainerState> {
   }
 
   componentWillUnmount() {
-    this.listeners.forEach(callIfFunction);
+    this.listeners.forEach(listener => {
+      if (typeof listener === 'function') {
+        listener();
+      }
+    });
   }
 
   listeners = [
-    ProjectsStatsStore.listen(itemsBySlug => {
-      this.onProjectStoreUpdate(itemsBySlug);
+    ProjectsStatsStore.listen((itemsBySlug: any) => {
+      this.onProjectStatsStoreUpdate(itemsBySlug);
     }, undefined),
   ];
 
-  onProjectStoreUpdate(itemsBySlug: typeof ProjectsStatsStore['itemsBySlug']) {
+  onProjectStatsStoreUpdate(itemsBySlug: (typeof ProjectsStatsStore)['itemsBySlug']) {
     const {project} = this.props;
 
     // Don't update state if we already have stats
@@ -278,7 +281,7 @@ class ProjectCardContainer extends Component<ContainerProps, ContainerState> {
     }
 
     this.setState({
-      projectDetails: itemsBySlug[project.slug],
+      projectDetails: itemsBySlug[project.slug]!,
     });
   }
 
@@ -303,22 +306,36 @@ const ChartContainer = styled('div')`
 `;
 
 const CardHeader = styled('div')`
-  margin: ${space(1.5)} ${space(2)};
+  margin: ${space(2)} 13px;
+  height: 32px;
+`;
+
+const SettingsButton = styled(LinkButton)`
+  margin-left: auto;
+  margin-top: -${space(0.5)};
+  padding: 3px;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+`;
+
+const StyledBookmarkStar = styled(BookmarkStar)`
+  padding: 0;
 `;
 
 const HeaderRow = styled('div')`
-  display: grid;
-  grid-template-columns: 1fr auto;
+  display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 0 ${space(0.5)};
+
+  ${p => p.theme.text.cardTitle};
+  color: ${p => p.theme.headingColor};
 `;
 
-const StyledProjectCard = styled('div')`
-  background-color: ${p => p.theme.background};
-  border: 1px solid ${p => p.theme.border};
-  border-radius: ${p => p.theme.borderRadius};
-  box-shadow: ${p => p.theme.dropShadowLight};
+const StyledProjectCard = styled(Panel)`
   min-height: 330px;
+  margin: 0;
 `;
 
 const FooterWrapper = styled('div')`
@@ -330,14 +347,6 @@ const FooterWrapper = styled('div')`
     font-size: ${p => p.theme.fontSizeMedium};
     padding: 0;
   }
-  ${MissingReleaseButtonBar} {
-    a {
-      background-color: ${p => p.theme.background};
-      border: 1px solid ${p => p.theme.border};
-      border-radius: ${p => p.theme.borderRadius};
-      color: ${p => p.theme.gray500};
-    }
-  }
 `;
 
 const ScoreCardWrapper = styled('div')`
@@ -345,9 +354,8 @@ const ScoreCardWrapper = styled('div')`
   ${ScorePanel} {
     min-height: auto;
   }
-  ${HeaderTitle} {
+  ${Title} {
     color: ${p => p.theme.gray300};
-    font-weight: 600;
   }
   ${ScoreWrapper} {
     flex-direction: column;
@@ -393,29 +401,41 @@ const DeploysWrapper = styled('div')`
 
 const ReleaseTitle = styled('span')`
   color: ${p => p.theme.gray300};
-  font-weight: 600;
+  font-weight: ${p => p.theme.fontWeightBold};
 `;
 
 const StyledIdBadge = styled(IdBadge)`
   overflow: hidden;
   white-space: nowrap;
   flex-shrink: 1;
+  & div {
+    align-items: flex-start;
+  }
+
+  & span {
+    padding: 0;
+    position: relative;
+    top: -1px;
+  }
 `;
 
 const SummaryLinks = styled('div')`
   display: flex;
+  position: relative;
+  top: -${space(2)};
   align-items: center;
+  font-weight: ${p => p.theme.fontWeightNormal};
 
   color: ${p => p.theme.subText};
-  font-size: ${p => p.theme.fontSizeMedium};
+  font-size: ${p => p.theme.fontSizeSmall};
 
   /* Need to offset for the project icon and margin */
-  margin-left: 26px;
+  margin-left: 40px;
 
   a {
-    color: ${p => p.theme.formText};
+    color: ${p => p.theme.subText};
     :hover {
-      color: ${p => p.theme.subText};
+      color: ${p => p.theme.linkHoverColor};
     }
   }
   em {
@@ -432,15 +452,6 @@ const TransactionsLink = styled(Link)`
   > span {
     margin-left: ${space(0.5)};
   }
-`;
-
-const NotAvailable = styled('div')`
-  font-size: ${p => p.theme.fontSizeMedium};
-  font-weight: normal;
-  display: grid;
-  grid-template-columns: auto auto;
-  grid-gap: ${space(0.5)};
-  align-items: center;
 `;
 
 const SummaryLinkPlaceholder = styled(Placeholder)`

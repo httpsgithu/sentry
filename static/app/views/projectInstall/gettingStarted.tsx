@@ -1,18 +1,11 @@
-import * as React from 'react';
 import styled from '@emotion/styled';
 
-import {PageContent} from 'app/styles/organization';
-import space from 'app/styles/space';
+import * as Layout from 'sentry/components/layouts/thirds';
+import {space} from 'sentry/styles/space';
 
-type Props = {
-  className?: string;
-  children: React.ReactNode;
-};
-
-function GettingStarted({className, children}: Props) {
-  return <PageContent className={className}>{children}</PageContent>;
-}
-export default styled(GettingStarted)`
+const GettingStarted = styled(Layout.Page)`
   background: ${p => p.theme.background};
   padding-top: ${space(3)};
 `;
+
+export default GettingStarted;

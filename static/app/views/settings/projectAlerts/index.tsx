@@ -1,32 +1,30 @@
-import * as React from 'react';
-import {RouteComponentProps} from 'react-router';
+import {cloneElement, Fragment, isValidElement} from 'react';
 
-import Access from 'app/components/acl/access';
-import Feature from 'app/components/acl/feature';
-import {Organization} from 'app/types';
+import Access from 'sentry/components/acl/access';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 
-type Props = {
-  organization: Organization;
+interface Props
+  extends RouteComponentProps<{organizationId: string; projectId: string}, {}> {
   children: React.ReactNode;
-} & RouteComponentProps<{organizationId: string; projectId: string}, {}>;
+  organization: Organization;
+  project: Project;
+}
 
-const ProjectAlerts = ({children, organization}: Props) => (
-  <Access organization={organization} access={['project:write']}>
-    {({hasAccess}) => (
-      <Feature organization={organization} features={['incidents']}>
-        {({hasFeature: hasMetricAlerts}) => (
-          <React.Fragment>
-            {React.isValidElement(children) &&
-              React.cloneElement(children, {
-                organization,
-                canEditRule: hasAccess,
-                hasMetricAlerts,
-              })}
-          </React.Fragment>
-        )}
-      </Feature>
-    )}
-  </Access>
-);
+function ProjectAlerts({children, project}: Props) {
+  return (
+    <Access access={['project:write']} project={project}>
+      {({hasAccess}) => (
+        <Fragment>
+          {isValidElement(children) &&
+            cloneElement<any>(children, {
+              canEditRule: hasAccess,
+            })}
+        </Fragment>
+      )}
+    </Access>
+  );
+}
 
 export default ProjectAlerts;

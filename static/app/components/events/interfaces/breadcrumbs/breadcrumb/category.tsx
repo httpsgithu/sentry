@@ -1,9 +1,9 @@
 import {memo} from 'react';
 import styled from '@emotion/styled';
 
-import Highlight from 'app/components/highlight';
-import {t} from 'app/locale';
-import {defined} from 'app/utils';
+import Highlight from 'sentry/components/highlight';
+import {t} from 'sentry/locale';
+import {defined} from 'sentry/utils';
 
 type Props = {
   searchTerm: string;
@@ -24,5 +24,5 @@ export default Category;
 const Wrapper = styled('div')`
   color: ${p => p.theme.textColor};
   font-size: ${p => p.theme.fontSizeSmall};
-  font-weight: 700;
+  font-weight: ${p => p.theme.fontWeightBold};
 `;

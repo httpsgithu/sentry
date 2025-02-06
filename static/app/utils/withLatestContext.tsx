@@ -1,21 +1,21 @@
-import * as React from 'react';
+import {Component} from 'react';
 
-import ConfigStore from 'app/stores/configStore';
-import LatestContextStore from 'app/stores/latestContextStore';
-import {Organization, OrganizationSummary, Project} from 'app/types';
-import getDisplayName from 'app/utils/getDisplayName';
-import withOrganizations from 'app/utils/withOrganizations';
+import ConfigStore from 'sentry/stores/configStore';
+import LatestContextStore from 'sentry/stores/latestContextStore';
+import type {Organization, OrganizationSummary} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import getDisplayName from 'sentry/utils/getDisplayName';
+import withOrganizations from 'sentry/utils/withOrganizations';
 
 type InjectedLatestContextProps = {
-  organizations?: OrganizationSummary[];
   organization?: Organization | null;
+  organizations?: OrganizationSummary[];
   project?: Project | null;
-  lastRoute?: string | null;
 };
 
 type HocProps = {
-  organization?: Organization | null;
   organizations: OrganizationSummary[];
+  organization?: Organization | null;
 };
 
 type State = {
@@ -25,13 +25,12 @@ type State = {
 const fallbackContext: State['latestContext'] = {
   organization: null,
   project: null,
-  lastRoute: null,
 };
 
 function withLatestContext<P extends InjectedLatestContextProps>(
   WrappedComponent: React.ComponentType<P>
 ) {
-  class WithLatestContext extends React.Component<
+  class WithLatestContext extends Component<
     Omit<P, keyof InjectedLatestContextProps> & HocProps,
     State
   > {
@@ -41,7 +40,7 @@ function withLatestContext<P extends InjectedLatestContextProps>(
       latestContext: LatestContextStore.get(),
     };
 
-    componentWillUmount() {
+    componentWillUnmount() {
       this.unsubscribe();
     }
     unsubscribe = LatestContextStore.listen(
@@ -52,7 +51,7 @@ function withLatestContext<P extends InjectedLatestContextProps>(
     render() {
       const {organizations} = this.props;
       const {latestContext} = this.state;
-      const {organization, project, lastRoute} = latestContext || fallbackContext;
+      const {organization, project} = latestContext || fallbackContext;
 
       // Even though org details exists in LatestContextStore,
       // fetch organization from OrganizationsStore so that we can
@@ -60,7 +59,7 @@ function withLatestContext<P extends InjectedLatestContextProps>(
       // of orgs but not full org details
       const latestOrganization =
         organization ||
-        (organizations && organizations.length
+        (organizations?.length
           ? organizations.find(
               ({slug}) => slug === ConfigStore.get('lastOrganization')
             ) || organizations[0]
@@ -71,8 +70,8 @@ function withLatestContext<P extends InjectedLatestContextProps>(
       return (
         <WrappedComponent
           project={project as Project}
-          lastRoute={lastRoute}
-          {...(this.props as P)}
+          // TODO(any): HoC prop types not working w/ emotion https://github.com/emotion-js/emotion/issues/3261
+          {...(this.props as P as any)}
           organization={(this.props.organization || latestOrganization) as Organization}
         />
       );

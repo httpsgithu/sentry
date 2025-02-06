@@ -1,45 +1,39 @@
-import Reflux from 'reflux';
+import {createStore} from 'reflux';
 
-import NavigationActions from 'app/actions/navigationActions';
-import OrganizationActions from 'app/actions/organizationActions';
-import OrganizationsActions from 'app/actions/organizationsActions';
-import ProjectActions from 'app/actions/projectActions';
-import {Organization, Project} from 'app/types';
-
-type OrgTypes = Organization | null;
+import type {StrictStoreDefinition} from 'sentry/stores/types';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 
 type State = {
-  project: Project | null;
-  lastProject: Project | null;
-  organization: OrgTypes;
   environment: string | string[] | null;
-  lastRoute: string | null;
+  lastProject: Project | null;
+  organization: Organization | null;
+  project: Project | null;
 };
 
-type LatestContextStoreInterface = {
-  state: State;
-  reset: () => void;
-  get: () => State;
-  onSetLastRoute: (route: string) => void;
-  onUpdateOrganization: (organization: OrgTypes) => void;
-  onSetActiveOrganization: (organization: OrgTypes) => void;
-  onSetActiveProject: (project: Project | null) => void;
-  onUpdateProject: (project: Project | null) => void;
-};
+interface LatestContextStoreDefinition extends StrictStoreDefinition<State> {
+  get(): State;
+  onSetActiveOrganization(organization: Organization): void;
+  onSetActiveProject(project: Project | null): void;
+  onUpdateOrganization(organization: Partial<Organization>): void;
+  onUpdateProject(project: Project | null): void;
+  reset(): void;
+}
 
-// Keeps track of last usable project/org
-// this currently won't track when users navigate out of a org/project completely,
-// it tracks only if a user switches into a new org/project
-//
-// Only keep slug so that people don't get the idea to access org/project data here
-// Org/project data is currently in organizationsStore/projectsStore
-const storeConfig: Reflux.StoreDefinition & LatestContextStoreInterface = {
+/**
+ * Keeps track of last usable project/org this currently won't track when users
+ * navigate out of a org/project completely, it tracks only if a user switches
+ * into a new org/project.
+ *
+ * Only keep slug so that people don't get the idea to access org/project data
+ * here Org/project data is currently in organizationsStore/projectsStore
+ */
+const storeConfig: LatestContextStoreDefinition = {
   state: {
     project: null,
     lastProject: null,
     organization: null,
     environment: null,
-    lastRoute: null,
   },
 
   get() {
@@ -47,13 +41,10 @@ const storeConfig: Reflux.StoreDefinition & LatestContextStoreInterface = {
   },
 
   init() {
+    // XXX: Do not use `this.listenTo` in this store. We avoid usage of reflux
+    // listeners due to their leaky nature in tests.
+
     this.reset();
-    this.listenTo(ProjectActions.setActive, this.onSetActiveProject);
-    this.listenTo(ProjectActions.updateSuccess, this.onUpdateProject);
-    this.listenTo(OrganizationsActions.setActive, this.onSetActiveOrganization);
-    this.listenTo(OrganizationsActions.update, this.onUpdateOrganization);
-    this.listenTo(OrganizationActions.update, this.onUpdateOrganization);
-    this.listenTo(NavigationActions.setLastRoute, this.onSetLastRoute);
   },
 
   reset() {
@@ -62,18 +53,8 @@ const storeConfig: Reflux.StoreDefinition & LatestContextStoreInterface = {
       lastProject: null,
       organization: null,
       environment: null,
-      lastRoute: null,
     };
     return this.state;
-  },
-
-  onSetLastRoute(route) {
-    this.state = {
-      ...this.state,
-      lastRoute: route,
-    };
-
-    this.trigger(this.state);
   },
 
   onUpdateOrganization(org) {
@@ -91,7 +72,7 @@ const storeConfig: Reflux.StoreDefinition & LatestContextStoreInterface = {
 
     this.state = {
       ...this.state,
-      organization: org,
+      organization: {...this.state.organization, ...org},
     };
     this.trigger(this.state);
   },
@@ -141,9 +122,11 @@ const storeConfig: Reflux.StoreDefinition & LatestContextStoreInterface = {
     };
     this.trigger(this.state);
   },
+
+  getState() {
+    return this.state;
+  },
 };
 
-const LatestContextStore = Reflux.createStore(storeConfig) as Reflux.Store &
-  LatestContextStoreInterface;
-
+const LatestContextStore = createStore(storeConfig);
 export default LatestContextStore;
